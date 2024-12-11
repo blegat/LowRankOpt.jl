@@ -1,0 +1,4 @@
+name = "LowRankOpt"
+uuid = "607ca3ad-272e-43c8-bcbe-fc71b56c935c"
+authors = ["Benoît Legat <benoit.legat@gmail.com>"]
+version = "0.1.0"
