@@ -1,6 +1,8 @@
 module Test
 
+using Test
 import MathOptInterface as MOI
+const MOIU = MOI.Utilities
 
 """
 The goal is to find the maximum lower bound `γ` for the polynomial `x^2 - 2x`.
@@ -24,23 +26,23 @@ s.t. [-γ, 2 - γ] in LinearCombinationInSet(
 """
 function test_conic_PositiveSemidefinite_RankOne_polynomial(
     model::MOI.ModelLike,
-    config::Config{T},
+    config::MOI.Test.Config{T},
 ) where {T}
-    set = MOI.SetDotProducts(
+    set = LRO.SetDotProducts(
         MOI.PositiveSemidefiniteConeTriangle(2),
         MOI.TriangleVectorization.([
             MOI.PositiveSemidefiniteFactorization(T[1, -1]),
             MOI.PositiveSemidefiniteFactorization(T[1, 1]),
         ]),
     )
-    @requires MOI.supports_constraint(
+    MOI.Test.@requires MOI.supports_constraint(
         model,
         MOI.VectorAffineFunction{T},
         typeof(set),
     )
-    @requires MOI.supports_incremental_interface(model)
-    @requires MOI.supports(model, MOI.ObjectiveSense())
-    @requires MOI.supports(model, MOI.ObjectiveFunction{MOI.VariableIndex}())
+    MOI.Test.@requires MOI.supports_incremental_interface(model)
+    MOI.Test.@requires MOI.supports(model, MOI.ObjectiveSense())
+    MOI.Test.@requires MOI.supports(model, MOI.ObjectiveFunction{MOI.VariableIndex}())
     γ = MOI.add_variable(model)
     c = MOI.add_constraint(
         model,
@@ -73,7 +75,7 @@ end
 function MOI.Test.setup_test(
     ::typeof(test_conic_PositiveSemidefinite_RankOne_polynomial),
     model::MOIU.MockOptimizer,
-    ::Config{T},
+    ::MOI.Test.Config{T},
 ) where {T<:Real}
     A = MOI.TriangleVectorization{
         T,
@@ -86,7 +88,7 @@ function MOI.Test.setup_test(
             T[-1],
             (
                 MOI.VectorAffineFunction{T},
-                MOI.SetDotProducts{
+                LRO.SetDotProducts{
                     MOI.PositiveSemidefiniteConeTriangle,
                     A,
                     Vector{A},
@@ -107,19 +109,19 @@ We want `μ` to be a probability measure so `1 = ⟨μ, 1⟩ = y1 + y2`.
 """
 function test_conic_PositiveSemidefinite_RankOne_moment(
     model::MOI.ModelLike,
-    config::Config{T},
+    config::MOI.Test.Config{T},
 ) where {T}
-    set = MOI.LinearCombinationInSet(
+    set = LRO.LinearCombinationInSet(
         MOI.PositiveSemidefiniteConeTriangle(2),
         MOI.TriangleVectorization.([
             MOI.PositiveSemidefiniteFactorization(T[1, -1]),
             MOI.PositiveSemidefiniteFactorization(T[1, 1]),
         ]),
     )
-    @requires MOI.supports_add_constrained_variables(model, typeof(set))
-    @requires MOI.supports_incremental_interface(model)
-    @requires MOI.supports(model, MOI.ObjectiveSense())
-    @requires MOI.supports(
+    MOI.Test.@requires MOI.supports_add_constrained_variables(model, typeof(set))
+    MOI.Test.@requires MOI.supports_incremental_interface(model)
+    MOI.Test.@requires MOI.supports(model, MOI.ObjectiveSense())
+    MOI.Test.@requires MOI.supports(
         model,
         MOI.ObjectiveFunction{MOI.ScalarAffineFunction{T}}(),
     )
@@ -156,7 +158,7 @@ end
 function MOI.Test.setup_test(
     ::typeof(test_conic_PositiveSemidefinite_RankOne_moment),
     model::MOIU.MockOptimizer,
-    ::Config{T},
+    ::MOI.Test.Config{T},
 ) where {T<:Real}
     A = MOI.TriangleVectorization{
         T,
@@ -170,7 +172,7 @@ function MOI.Test.setup_test(
             (MOI.ScalarAffineFunction{T}, MOI.EqualTo{T}) => [T(-1)],
             (
                 MOI.VectorOfVariables,
-                MOI.LinearCombinationInSet{
+                LRO.LinearCombinationInSet{
                     MOI.PositiveSemidefiniteConeTriangle,
                     A,
                     Vector{A},

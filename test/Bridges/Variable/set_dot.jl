@@ -29,7 +29,7 @@ function test_psd()
         model -> begin
             x, _ = MOI.add_constrained_variables(
                 model,
-                MOI.SetDotProducts(
+                LRO.SetDotProducts(
                     MOI.PositiveSemidefiniteConeTriangle(2),
                     MOI.TriangleVectorization.([
                         [

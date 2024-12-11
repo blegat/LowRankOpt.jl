@@ -26,8 +26,8 @@ function MOI.Bridges.Constraint.conversion_cost(
     return MOI.Bridges.Constraint.conversion_cost(A1, A2)
 end
 
-function convert(::Type{SetDotProducts{S,A,Vector{A}}}, set::SetDotProducts)
-    return SetDotProducts(set.set, convert(A, set.vectors))
+function convert(::Type{SetDotProducts{S,A,V}}, set::SetDotProducts) where {S,A,V}
+    return SetDotProducts{S,A,V}(set.set, convert(V, set.vectors))
 end
 
 """
@@ -59,10 +59,10 @@ function MOI.Bridges.Constraint.conversion_cost(
 end
 
 function convert(
-    ::Type{LinearCombinationInSet{S,A,Vector{A}}},
+    ::Type{LinearCombinationInSet{S,A,V}},
     set::LinearCombinationInSet,
-)
-    return LinearCombinationInSet(set.set, convert(A, set.vectors))
+) where {S,A,V}
+    return LinearCombinationInSet{S,A,V}(set.set, convert(V, set.vectors))
 end
 
 function MOI.dual_set(s::SetDotProducts)
@@ -174,17 +174,17 @@ function MOI.Bridges.Constraint.conversion_cost(
 end
 
 function Base.convert(
-    ::Type{Factorization{T,F,D}},
+    ::Type{Factorization{T,F,T}},
     f::PositiveSemidefiniteFactorization{T,F},
-) where {F<:AbstractVector}
-    return Factorization{T,F,D}(f.factor, one(T))
+) where {T,F<:AbstractVector}
+    return Factorization{T,F}(f.factor, one(T))
 end
 
 function Base.convert(
-    ::Type{Factorization{T,F,D}},
+    ::Type{Factorization{T,F,Vector{T}}},
     f::PositiveSemidefiniteFactorization{T,F},
-) where {F<:AbstractVector}
-    return Factorization{T,F,D}(f.factor, one(T))
+) where {T,F<:AbstractVector}
+    return Factorization{T,F,Vector{T}}(f.factor, ones(T, size(f.factor, 2)))
 end
 
 struct TriangleVectorization{T,M<:AbstractMatrix{T}} <: AbstractVector{T}

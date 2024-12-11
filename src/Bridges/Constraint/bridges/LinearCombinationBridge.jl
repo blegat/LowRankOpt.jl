@@ -5,15 +5,15 @@
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
 struct LinearCombinationBridge{T,S,A,V,F,G} <:
-       SetMapBridge{T,S,MOI.LinearCombinationInSet{S,A,V},F,G}
+       MOI.Bridges.Constraint.SetMapBridge{T,S,LRO.LinearCombinationInSet{S,A,V},F,G}
     constraint::MOI.ConstraintIndex{F,S}
-    set::MOI.LinearCombinationInSet{S,A,V}
+    set::LRO.LinearCombinationInSet{S,A,V}
 end
 
 function MOI.supports_constraint(
     ::Type{<:LinearCombinationBridge},
     ::Type{<:MOI.AbstractVectorFunction},
-    ::Type{<:MOI.LinearCombinationInSet},
+    ::Type{<:LRO.LinearCombinationInSet},
 )
     return true
 end
@@ -21,14 +21,14 @@ end
 function concrete_bridge_type(
     ::Type{<:LinearCombinationBridge{T}},
     G::Type{<:MOI.AbstractVectorFunction},
-    ::Type{MOI.LinearCombinationInSet{S,A,V}},
+    ::Type{LRO.LinearCombinationInSet{S,A,V}},
 ) where {T,S,A,V}
     U = MOI.Utilities.promote_operation(*, T, MOI.Utilities.scalar_type(G), T)
     F = MOI.Utilities.promote_operation(vcat, T, U)
     return LinearCombinationBridge{T,S,A,V,F,G}
 end
 
-function _map_function(set::MOI.LinearCombinationInSet, func)
+function _map_function(set::LRO.LinearCombinationInSet, func)
     scalars = MOI.Utilities.eachscalar(func)
     return MOI.Utilities.vectorize([
         sum(scalars[j] * set.vectors[j][i] for j in eachindex(scalars)) for
@@ -40,7 +40,7 @@ function bridge_constraint(
     ::Type{LinearCombinationBridge{T,S,A,V,F,G}},
     model::MOI.ModelLike,
     func::G,
-    set::MOI.LinearCombinationInSet{S,A,V},
+    set::LRO.LinearCombinationInSet{S,A,V},
 ) where {T,S,A,F,G,V}
     mapped_func = _map_function(set, func)
     constraint = MOI.add_constraint(model, mapped_func, set.set)
@@ -49,7 +49,7 @@ end
 
 function MOI.Bridges.map_set(
     ::Type{<:LinearCombinationBridge},
-    set::MOI.LinearCombinationInSet,
+    set::LRO.LinearCombinationInSet,
 )
     return set.set
 end

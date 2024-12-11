@@ -1,6 +1,7 @@
 module Variable
 
 import MathOptInterface as MOI
+import LowRankOpt as LRO
 
 for filename in readdir(joinpath(@__DIR__, "bridges"); join = true)
     include(filename)
