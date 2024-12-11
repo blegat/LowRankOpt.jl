@@ -4,7 +4,7 @@
 Given a set `set` of dimension `d` and `m` vectors `a_1`, ..., `a_m` given in `vectors`, this is the set:
 ``\\{ ((\\langle a_1, x \\rangle, ..., \\langle a_m, x \\rangle) \\in \\mathbb{R}^{m} : x \\in \\text{set} \\}.``
 """
-struct SetDotProducts{S,A,V<:AbstractVector{A}} <: AbstractVectorSet
+struct SetDotProducts{S,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
     set::S
     vectors::V
 end
@@ -17,7 +17,7 @@ function Base.copy(s::SetDotProducts)
     return SetDotProducts(copy(s.set), copy(s.vectors))
 end
 
-dimension(s::SetDotProducts) = length(s.vectors)
+MOI.dimension(s::SetDotProducts) = length(s.vectors)
 
 function MOI.Bridges.Constraint.conversion_cost(
     ::Type{SetDotProducts{S,A1,Vector{A1}}},
@@ -26,10 +26,7 @@ function MOI.Bridges.Constraint.conversion_cost(
     return MOI.Bridges.Constraint.conversion_cost(A1, A2)
 end
 
-function convert(
-    ::Type{SetDotProducts{S,A,Vector{A}}},
-    set::SetDotProducts,
-)
+function convert(::Type{SetDotProducts{S,A,Vector{A}}}, set::SetDotProducts)
     return SetDotProducts(set.set, convert(A, set.vectors))
 end
 
@@ -39,7 +36,7 @@ end
 Given a set `set` of dimension `d` and `m` vectors `a_1`, ..., `a_m` given in `vectors`, this is the set:
 ``\\{ (y \\in \\mathbb{R}^{m} : \\sum_{i=1}^m y_i a_i \\in \\text{set} \\}.``
 """
-struct LinearCombinationInSet{S,A,V<:AbstractVector{A}} <: AbstractVectorSet
+struct LinearCombinationInSet{S,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
     set::S
     vectors::V
 end
@@ -52,7 +49,7 @@ function Base.copy(s::LinearCombinationInSet)
     return LinearCombinationInSet(copy(s.set), copy(s.vectors))
 end
 
-dimension(s::LinearCombinationInSet) = length(s.vectors)
+MOI.dimension(s::LinearCombinationInSet) = length(s.vectors)
 
 function MOI.Bridges.Constraint.conversion_cost(
     ::Type{LinearCombinationInSet{S,A1,Vector{A1}}},
@@ -68,19 +65,19 @@ function convert(
     return LinearCombinationInSet(set.set, convert(A, set.vectors))
 end
 
-function dual_set(s::SetDotProducts)
+function MOI.dual_set(s::SetDotProducts)
     return LinearCombinationInSet(s.set, s.vectors)
 end
 
-function dual_set_type(::Type{SetDotProducts{S,A,V}}) where {S,A,V}
+function MOI.dual_set_type(::Type{SetDotProducts{S,A,V}}) where {S,A,V}
     return LinearCombinationInSet{S,A,V}
 end
 
-function dual_set(s::LinearCombinationInSet)
+function MOI.dual_set(s::LinearCombinationInSet)
     return SetDotProducts(s.side_dimension, s.vectors)
 end
 
-function dual_set_type(::Type{LinearCombinationInSet{S,A,V}}) where {S,A,V}
+function MOI.dual_set_type(::Type{LinearCombinationInSet{S,A,V}}) where {S,A,V}
     return SetDotProducts{S,A,V}
 end
 
@@ -203,9 +200,9 @@ end
 
 function Base.size(v::TriangleVectorization)
     n = size(v.matrix, 1)
-    return (Utilities.trimap(n, n),)
+    return (MOI.Utilities.trimap(n, n),)
 end
 
 function Base.getindex(v::TriangleVectorization, k::Int)
-    return getindex(v.matrix, Utilities.inverse_trimap(k)...)
+    return getindex(v.matrix, MOI.Utilities.inverse_trimap(k)...)
 end
