@@ -30,7 +30,7 @@ function MOI.Bridges.Variable.bridge_constrained_variable(
     set::LRO.SetDotProducts{S,A,V},
 ) where {T,S,A,V}
     variables, constraint =
-        _add_constrained_var(model, MOI.Bridges.inverse_map_set(BT, set))
+        MOI.add_constrained_variables(model, MOI.Bridges.inverse_map_set(BT, set))
     return BT(variables, constraint, set)
 end
 
