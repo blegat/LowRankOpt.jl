@@ -4,7 +4,8 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
-struct DotProductsBridge{T,S,A,V} <: MOI.Bridges.Variable.SetMapBridge{T,S,LRO.SetDotProducts{S,A,V}}
+struct DotProductsBridge{T,S,A,V} <:
+       MOI.Bridges.Variable.SetMapBridge{T,S,LRO.SetDotProducts{S,A,V}}
     variables::Vector{MOI.VariableIndex}
     constraint::MOI.ConstraintIndex{MOI.VectorOfVariables,S}
     set::LRO.SetDotProducts{S,A,V}
@@ -29,8 +30,10 @@ function MOI.Bridges.Variable.bridge_constrained_variable(
     model::MOI.ModelLike,
     set::LRO.SetDotProducts{S,A,V},
 ) where {T,S,A,V}
-    variables, constraint =
-        MOI.add_constrained_variables(model, MOI.Bridges.inverse_map_set(BT, set))
+    variables, constraint = MOI.add_constrained_variables(
+        model,
+        MOI.Bridges.inverse_map_set(BT, set),
+    )
     return BT(variables, constraint, set)
 end
 
@@ -77,6 +80,9 @@ function MOI.supports(
     return false
 end
 
-function MOI.Bridges.Variable.unbridged_map(::DotProductsBridge, ::Vector{MOI.VariableIndex})
+function MOI.Bridges.Variable.unbridged_map(
+    ::DotProductsBridge,
+    ::Vector{MOI.VariableIndex},
+)
     return nothing
 end

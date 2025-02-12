@@ -43,7 +43,10 @@ function test_conic_PositiveSemidefinite_RankOne_polynomial(
     )
     MOI.Test.@requires MOI.supports_incremental_interface(model)
     MOI.Test.@requires MOI.supports(model, MOI.ObjectiveSense())
-    MOI.Test.@requires MOI.supports(model, MOI.ObjectiveFunction{MOI.VariableIndex}())
+    MOI.Test.@requires MOI.supports(
+        model,
+        MOI.ObjectiveFunction{MOI.VariableIndex}(),
+    )
     γ = MOI.add_variable(model)
     c = MOI.add_constraint(
         model,
@@ -119,7 +122,10 @@ function test_conic_PositiveSemidefinite_RankOne_moment(
             LRO.PositiveSemidefiniteFactorization(T[1, 1]),
         ]),
     )
-    MOI.Test.@requires MOI.supports_add_constrained_variables(model, typeof(set))
+    MOI.Test.@requires MOI.supports_add_constrained_variables(
+        model,
+        typeof(set),
+    )
     MOI.Test.@requires MOI.supports_incremental_interface(model)
     MOI.Test.@requires MOI.supports(model, MOI.ObjectiveSense())
     MOI.Test.@requires MOI.supports(

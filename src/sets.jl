@@ -26,7 +26,10 @@ function MOI.Bridges.Constraint.conversion_cost(
     return MOI.Bridges.Constraint.conversion_cost(A1, A2)
 end
 
-function Base.convert(::Type{SetDotProducts{S,A,V}}, set::SetDotProducts) where {S,A,V}
+function Base.convert(
+    ::Type{SetDotProducts{S,A,V}},
+    set::SetDotProducts,
+) where {S,A,V}
     return SetDotProducts{S,A,V}(set.set, convert(V, set.vectors))
 end
 

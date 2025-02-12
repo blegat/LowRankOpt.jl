@@ -5,7 +5,13 @@
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
 struct LinearCombinationBridge{T,S,A,V,F,G} <:
-       MOI.Bridges.Constraint.SetMapBridge{T,S,LRO.LinearCombinationInSet{S,A,V},F,G}
+       MOI.Bridges.Constraint.SetMapBridge{
+    T,
+    S,
+    LRO.LinearCombinationInSet{S,A,V},
+    F,
+    G,
+}
     constraint::MOI.ConstraintIndex{F,S}
     set::LRO.LinearCombinationInSet{S,A,V}
 end
