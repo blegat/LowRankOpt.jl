@@ -26,7 +26,7 @@ function MOI.Bridges.Constraint.conversion_cost(
     return MOI.Bridges.Constraint.conversion_cost(A1, A2)
 end
 
-function convert(::Type{SetDotProducts{S,A,V}}, set::SetDotProducts) where {S,A,V}
+function Base.convert(::Type{SetDotProducts{S,A,V}}, set::SetDotProducts) where {S,A,V}
     return SetDotProducts{S,A,V}(set.set, convert(V, set.vectors))
 end
 
@@ -58,7 +58,7 @@ function MOI.Bridges.Constraint.conversion_cost(
     return MOI.Bridges.Constraint.conversion_cost(A1, A2)
 end
 
-function convert(
+function Base.convert(
     ::Type{LinearCombinationInSet{S,A,V}},
     set::LinearCombinationInSet,
 ) where {S,A,V}

@@ -18,7 +18,7 @@ function MOI.supports_constraint(
     return true
 end
 
-function concrete_bridge_type(
+function MOI.Bridges.Constraint.concrete_bridge_type(
     ::Type{<:LinearCombinationBridge{T}},
     G::Type{<:MOI.AbstractVectorFunction},
     ::Type{LRO.LinearCombinationInSet{S,A,V}},
@@ -36,7 +36,7 @@ function _map_function(set::LRO.LinearCombinationInSet, func)
     ])
 end
 
-function bridge_constraint(
+function MOI.Bridges.Constraint.bridge_constraint(
     ::Type{LinearCombinationBridge{T,S,A,V,F,G}},
     model::MOI.ModelLike,
     func::G,

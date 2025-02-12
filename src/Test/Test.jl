@@ -3,6 +3,7 @@ module Test
 using Test
 import MathOptInterface as MOI
 const MOIU = MOI.Utilities
+import LowRankOpt as LRO
 
 """
 The goal is to find the maximum lower bound `γ` for the polynomial `x^2 - 2x`.
@@ -30,9 +31,9 @@ function test_conic_PositiveSemidefinite_RankOne_polynomial(
 ) where {T}
     set = LRO.SetDotProducts(
         MOI.PositiveSemidefiniteConeTriangle(2),
-        MOI.TriangleVectorization.([
-            MOI.PositiveSemidefiniteFactorization(T[1, -1]),
-            MOI.PositiveSemidefiniteFactorization(T[1, 1]),
+        LRO.TriangleVectorization.([
+            LRO.PositiveSemidefiniteFactorization(T[1, -1]),
+            LRO.PositiveSemidefiniteFactorization(T[1, 1]),
         ]),
     )
     MOI.Test.@requires MOI.supports_constraint(
@@ -77,9 +78,9 @@ function MOI.Test.setup_test(
     model::MOIU.MockOptimizer,
     ::MOI.Test.Config{T},
 ) where {T<:Real}
-    A = MOI.TriangleVectorization{
+    A = LRO.TriangleVectorization{
         T,
-        MOI.PositiveSemidefiniteFactorization{T,Vector{T}},
+        LRO.PositiveSemidefiniteFactorization{T,Vector{T}},
     }
     MOIU.set_mock_optimize!(
         model,
@@ -113,9 +114,9 @@ function test_conic_PositiveSemidefinite_RankOne_moment(
 ) where {T}
     set = LRO.LinearCombinationInSet(
         MOI.PositiveSemidefiniteConeTriangle(2),
-        MOI.TriangleVectorization.([
-            MOI.PositiveSemidefiniteFactorization(T[1, -1]),
-            MOI.PositiveSemidefiniteFactorization(T[1, 1]),
+        LRO.TriangleVectorization.([
+            LRO.PositiveSemidefiniteFactorization(T[1, -1]),
+            LRO.PositiveSemidefiniteFactorization(T[1, 1]),
         ]),
     )
     MOI.Test.@requires MOI.supports_add_constrained_variables(model, typeof(set))
@@ -160,9 +161,9 @@ function MOI.Test.setup_test(
     model::MOIU.MockOptimizer,
     ::MOI.Test.Config{T},
 ) where {T<:Real}
-    A = MOI.TriangleVectorization{
+    A = LRO.TriangleVectorization{
         T,
-        MOI.PositiveSemidefiniteFactorization{T,Vector{T}},
+        LRO.PositiveSemidefiniteFactorization{T,Vector{T}},
     }
     MOIU.set_mock_optimize!(
         model,

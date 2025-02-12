@@ -10,21 +10,21 @@ struct DotProductsBridge{T,S,A,V} <: MOI.Bridges.Variable.SetMapBridge{T,S,LRO.S
     set::LRO.SetDotProducts{S,A,V}
 end
 
-function supports_constrained_variable(
+function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{<:DotProductsBridge},
     ::Type{<:LRO.SetDotProducts},
 )
     return true
 end
 
-function concrete_bridge_type(
+function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:DotProductsBridge{T}},
     ::Type{LRO.SetDotProducts{S,A,V}},
 ) where {T,S,A,V}
     return DotProductsBridge{T,S,A,V}
 end
 
-function bridge_constrained_variable(
+function MOI.Bridges.Variable.bridge_constrained_variable(
     BT::Type{DotProductsBridge{T,S,A,V}},
     model::MOI.ModelLike,
     set::LRO.SetDotProducts{S,A,V},
@@ -77,6 +77,6 @@ function MOI.supports(
     return false
 end
 
-function unbridged_map(::DotProductsBridge, ::Vector{MOI.VariableIndex})
+function MOI.Bridges.Variable.unbridged_map(::DotProductsBridge, ::Vector{MOI.VariableIndex})
     return nothing
 end
