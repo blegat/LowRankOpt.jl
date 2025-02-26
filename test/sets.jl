@@ -33,10 +33,17 @@ function test_factorizations()
     F = [1 2; 3 4; 5 6]
     d = [7, 8]
     _test_factorization(F * F', LRO.PositiveSemidefiniteFactorization(F))
-    return _test_factorization(
+    _test_factorization(
         F * LinearAlgebra.Diagonal(d) * F',
         LRO.Factorization(F, d),
     )
+    return
+end
+
+function test_symmetrize()
+    f = LRO.symmetrize_factorization([0, 0, 1], [2, 0, 0])
+    @test f.scaling ≈ [1, -1]
+    @test f.factor ≈ [1 -1; 0 0; 1 1] / √2
 end
 
 function runtests()
