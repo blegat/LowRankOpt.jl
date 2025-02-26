@@ -190,6 +190,28 @@ function Base.convert(
     return Factorization{T,F,Vector{T}}(f.factor, ones(T, size(f.factor, 2)))
 end
 
+"""
+    symmetrize_factorization(L, R)
+
+Factorization corresponding to the symmetrization `(L * R' + R * L') / 2` of `L * R'`.
+
+## Example
+
+```jldoctest
+julia> LowRankOpt.symmetrize_factorization([1, 0], [0, 1])
+2×2 LowRankOpt.Factorization{Float64, Matrix{Float64}, Vector{Float64}}:
+ 0.0  0.5
+ 0.5  0.0
+```
+"""
+function symmetrize_factorization(L, R)
+    sym = LinearAlgebra.Symmetric((L * R' + R * L') / 2)
+    eigvals, factor = LinearAlgebra.eigen(sym)
+    σ = sortperm(abs.(eigvals), rev = true)
+    keep = σ[1:2size(L, 2)]
+    return Factorization(factor[:, keep], eigvals[keep])
+end
+
 struct TriangleVectorization{T,M<:AbstractMatrix{T}} <: AbstractVector{T}
     matrix::M
 end

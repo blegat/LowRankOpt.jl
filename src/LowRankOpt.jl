@@ -1,5 +1,6 @@
 module LowRankOpt
 
+import LinearAlgebra
 import MathOptInterface as MOI
 
 include("sets.jl")
