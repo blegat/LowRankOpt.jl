@@ -43,8 +43,9 @@ end
 function test_symmetrize()
     for use_krylov in [false, true]
         f = LRO.symmetrize_factorization([0, 0, 1], [2, 0, 0]; use_krylov)
-        @test f.scaling ≈ [1, -1]
-        @test f.factor ≈ [1 -1; 0 0; 1 1] / √2
+        σ = sortperm(f.scaling)
+        @test f.scaling[σ] ≈ [-1, 1]
+        @test f.factor[:, σ] ≈ [-1 1; 0 0; 1 1] / √2
     end
 end
 
