@@ -204,11 +204,17 @@ julia> LowRankOpt.symmetrize_factorization([1, 0], [0, 1])
  0.5  0.0
 ```
 """
-function symmetrize_factorization(L, R)
+function symmetrize_factorization(L, R; use_krylov = true)
     sym = LinearAlgebra.Symmetric((L * R' + R * L') / 2)
-    eigvals, factor = LinearAlgebra.eigen(sym)
+    r = 2size(L, 2)
+    if use_krylov
+        eigvals, factors = KrylovKit.eigsolve(sym, r)
+        factor = reduce(hcat, factors)
+    else
+        eigvals, factor = LinearAlgebra.eigen(sym)
+    end
     σ = sortperm(abs.(eigvals), rev = true)
-    keep = σ[1:2size(L, 2)]
+    keep = σ[1:r]
     return Factorization(factor[:, keep], eigvals[keep])
 end
 
