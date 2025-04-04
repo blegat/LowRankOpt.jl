@@ -4,8 +4,11 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
-struct DotProductsBridge{T,S,A,V} <:
-       MOI.Bridges.Variable.SetMapBridge{T,S,LRO.SetDotProducts{LRO.WITH_SET,S,A,V}}
+struct DotProductsBridge{T,S,A,V} <: MOI.Bridges.Variable.SetMapBridge{
+    T,
+    S,
+    LRO.SetDotProducts{LRO.WITH_SET,S,A,V},
+}
     variables::Vector{MOI.VariableIndex}
     constraint::MOI.ConstraintIndex{MOI.VectorOfVariables,S}
     set::LRO.SetDotProducts{LRO.WITH_SET,S,A,V}
@@ -13,7 +16,7 @@ end
 
 function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{<:DotProductsBridge},
-    ::Type{<:LRO.SetDotProducts{LRO.WITH_SET,}},
+    ::Type{<:LRO.SetDotProducts{LRO.WITH_SET}},
 )
     return true
 end
@@ -61,16 +64,21 @@ function MOI.Bridges.map_function(
             bridge.set.set,
         )
     else
-        return scalars[i - length(bridge.set.vectors)]
+        return scalars[i-length(bridge.set.vectors)]
     end
 end
 
 function MOI.Bridges.map_function(bridge::DotProductsBridge{T}, func) where {T}
     scalars = MOI.Utilities.eachscalar(func)
-    return MOI.Utilities.vectorize(vcat([
-        MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
-        vector in bridge.set.vectors
-    ], scalars))
+    return MOI.Utilities.vectorize(
+        vcat(
+            [
+                MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
+                vector in bridge.set.vectors
+            ],
+            scalars,
+        ),
+    )
 end
 
 # This returns `true` by default for `SetMapBridge`

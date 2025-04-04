@@ -9,11 +9,15 @@ if `W` is `WITHOUT_SET`, this is the set:
 if `W` is `WITH_SET`, this is the set:
 ``\\{ ((\\langle a_1, x \\rangle, ..., \\langle a_m, x \\rangle, x) \\in \\mathbb{R}^{m + d} : x \\in \\text{set} \\}.``
 """
-struct SetDotProducts{W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
+struct SetDotProducts{W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}} <:
+       MOI.AbstractVectorSet
     set::S
     vectors::V
 end
-function SetDotProducts{W}(set::S, vector::V) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
+function SetDotProducts{W}(
+    set::S,
+    vector::V,
+) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
     return SetDotProducts{W,S,A,V}(set, vector)
 end
 
@@ -26,7 +30,9 @@ function Base.copy(s::SetDotProducts{W}) where {W}
 end
 
 MOI.dimension(s::SetDotProducts{WITHOUT_SET}) = length(s.vectors)
-MOI.dimension(s::SetDotProducts{WITH_SET}) = length(s.vectors) + MOI.dimension(s.set)
+function MOI.dimension(s::SetDotProducts{WITH_SET})
+    return length(s.vectors) + MOI.dimension(s.set)
+end
 
 function MOI.Bridges.Constraint.conversion_cost(
     ::Type{SetDotProducts{W,S,A1,Vector{A1}}},
@@ -51,11 +57,19 @@ if `W` is `WITHOUT_SET`, this is the set:
 if `W` is `WITH_SET`, this is the set:
 ``\\{ (y, c) \\in \\mathbb{R}^{m} : \\sum_{i=1}^m y_i a_i - c \\in \\text{set} \\}.``
 """
-struct LinearCombinationInSet{W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
+struct LinearCombinationInSet{
+    W,
+    S<:MOI.AbstractVectorSet,
+    A,
+    V<:AbstractVector{A},
+} <: MOI.AbstractVectorSet
     set::S
     vectors::V
 end
-function LinearCombinationInSet{W}(set::S, vector::V) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
+function LinearCombinationInSet{W}(
+    set::S,
+    vector::V,
+) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
     return LinearCombinationInSet{W,S,A,V}(set, vector)
 end
 
@@ -68,7 +82,9 @@ function Base.copy(s::LinearCombinationInSet{W}) where {W}
 end
 
 MOI.dimension(s::LinearCombinationInSet{WITHOUT_SET}) = length(s.vectors)
-MOI.dimension(s::LinearCombinationInSet{WITH_SET}) = length(s.vectors) + MOI.dimension(s.set)
+function MOI.dimension(s::LinearCombinationInSet{WITH_SET})
+    return length(s.vectors) + MOI.dimension(s.set)
+end
 
 function MOI.Bridges.Constraint.conversion_cost(
     ::Type{LinearCombinationInSet{W,S,A1,Vector{A1}}},
@@ -96,7 +112,9 @@ function MOI.dual_set(s::LinearCombinationInSet)
     return SetDotProducts(s.side_dimension, s.vectors)
 end
 
-function MOI.dual_set_type(::Type{LinearCombinationInSet{W,S,A,V}}) where {W,S,A,V}
+function MOI.dual_set_type(
+    ::Type{LinearCombinationInSet{W,S,A,V}},
+) where {W,S,A,V}
     return SetDotProducts{W,S,A,V}
 end
 

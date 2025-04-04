@@ -22,7 +22,9 @@ function runtests()
     return
 end
 
-include(joinpath(dirname(dirname(pathof(MOI))), "test", "Bridges", "utilities.jl"))
+include(
+    joinpath(dirname(dirname(pathof(MOI))), "test", "Bridges", "utilities.jl"),
+)
 
 function test_psd()
     MOI.Bridges.runtests(

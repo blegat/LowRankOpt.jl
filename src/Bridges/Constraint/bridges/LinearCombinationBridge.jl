@@ -19,7 +19,7 @@ end
 function MOI.supports_constraint(
     ::Type{<:LinearCombinationBridge},
     ::Type{<:MOI.AbstractVectorFunction},
-    ::Type{<:LRO.LinearCombinationInSet{LRO.WITH_SET,}},
+    ::Type{<:LRO.LinearCombinationInSet{LRO.WITH_SET}},
 )
     return true
 end
@@ -40,9 +40,8 @@ function _map_function(set::LRO.LinearCombinationInSet, func)
         sum(
             j -> scalars[j] * set.vectors[j][i],
             j in eachindex(set.vectors);
-            init = scalars[length(set.vectors) + i],
-        ) for
-        i in 1:MOI.dimension(set.set)
+            init = scalars[length(set.vectors)+i],
+        ) for i in 1:MOI.dimension(set.set)
     ])
 end
 
@@ -73,8 +72,13 @@ end
 
 function MOI.Bridges.adjoint_map_function(bridge::LinearCombinationBridge, func)
     scalars = MOI.Utilities.eachscalar(func)
-    return MOI.Utilities.vectorize(vcat([
-        MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
-        vector in bridge.set.vectors
-    ], scalars))
+    return MOI.Utilities.vectorize(
+        vcat(
+            [
+                MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
+                vector in bridge.set.vectors
+            ],
+            scalars,
+        ),
+    )
 end
