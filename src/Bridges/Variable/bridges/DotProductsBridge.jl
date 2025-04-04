@@ -5,22 +5,22 @@
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
 struct DotProductsBridge{T,S,A,V} <:
-       MOI.Bridges.Variable.SetMapBridge{T,S,LRO.SetDotProducts{S,A,V}}
+       MOI.Bridges.Variable.SetMapBridge{T,S,LRO.SetDotProducts{LRO.WITH_SET,S,A,V}}
     variables::Vector{MOI.VariableIndex}
     constraint::MOI.ConstraintIndex{MOI.VectorOfVariables,S}
-    set::LRO.SetDotProducts{S,A,V}
+    set::LRO.SetDotProducts{LRO.WITH_SET,S,A,V}
 end
 
 function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{<:DotProductsBridge},
-    ::Type{<:LRO.SetDotProducts},
+    ::Type{<:LRO.SetDotProducts{LRO.WITH_SET,}},
 )
     return true
 end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:DotProductsBridge{T}},
-    ::Type{LRO.SetDotProducts{S,A,V}},
+    ::Type{LRO.SetDotProducts{LRO.WITH_SET,S,A,V}},
 ) where {T,S,A,V}
     return DotProductsBridge{T,S,A,V}
 end
@@ -28,7 +28,7 @@ end
 function MOI.Bridges.Variable.bridge_constrained_variable(
     BT::Type{DotProductsBridge{T,S,A,V}},
     model::MOI.ModelLike,
-    set::LRO.SetDotProducts{S,A,V},
+    set::LRO.SetDotProducts{LRO.WITH_SET,S,A,V},
 ) where {T,S,A,V}
     variables, constraint = MOI.add_constrained_variables(
         model,
@@ -54,19 +54,23 @@ function MOI.Bridges.map_function(
     i::MOI.Bridges.IndexInVector,
 ) where {T}
     scalars = MOI.Utilities.eachscalar(func)
-    return MOI.Utilities.set_dot(
-        bridge.set.vectors[i.value],
-        scalars,
-        bridge.set.set,
-    )
+    if i.value in eachindex(bridge.set.vectors)
+        return MOI.Utilities.set_dot(
+            bridge.set.vectors[i.value],
+            scalars,
+            bridge.set.set,
+        )
+    else
+        return scalars[i - length(bridge.set.vectors)]
+    end
 end
 
 function MOI.Bridges.map_function(bridge::DotProductsBridge{T}, func) where {T}
     scalars = MOI.Utilities.eachscalar(func)
-    return MOI.Utilities.vectorize([
+    return MOI.Utilities.vectorize(vcat([
         MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
         vector in bridge.set.vectors
-    ])
+    ], scalars))
 end
 
 # This returns `true` by default for `SetMapBridge`

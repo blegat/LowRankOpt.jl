@@ -9,6 +9,7 @@ module TestVariableDotProducts
 using Test
 
 import MathOptInterface as MOI
+import LowRankOpt as LRO
 
 function runtests()
     for name in names(@__MODULE__; all = true)
@@ -21,17 +22,17 @@ function runtests()
     return
 end
 
-include("../utilities.jl")
+include(joinpath(dirname(dirname(pathof(MOI))), "test", "Bridges", "utilities.jl"))
 
 function test_psd()
     MOI.Bridges.runtests(
-        MOI.Bridges.Variable.DotProductsBridge,
+        LRO.Bridges.Variable.DotProductsBridge,
         model -> begin
             x, _ = MOI.add_constrained_variables(
                 model,
-                LRO.SetDotProducts(
+                LRO.SetDotProducts{LRO.WITH_SET}(
                     MOI.PositiveSemidefiniteConeTriangle(2),
-                    MOI.TriangleVectorization.([
+                    LRO.TriangleVectorization.([
                         [
                             1 2.0
                             2 3

@@ -8,18 +8,18 @@ struct LinearCombinationBridge{T,S,A,V,F,G} <:
        MOI.Bridges.Constraint.SetMapBridge{
     T,
     S,
-    LRO.LinearCombinationInSet{S,A,V},
+    LRO.LinearCombinationInSet{LRO.WITH_SET,S,A,V},
     F,
     G,
 }
     constraint::MOI.ConstraintIndex{F,S}
-    set::LRO.LinearCombinationInSet{S,A,V}
+    set::LRO.LinearCombinationInSet{LRO.WITH_SET,S,A,V}
 end
 
 function MOI.supports_constraint(
     ::Type{<:LinearCombinationBridge},
     ::Type{<:MOI.AbstractVectorFunction},
-    ::Type{<:LRO.LinearCombinationInSet},
+    ::Type{<:LRO.LinearCombinationInSet{LRO.WITH_SET,}},
 )
     return true
 end
@@ -27,7 +27,7 @@ end
 function MOI.Bridges.Constraint.concrete_bridge_type(
     ::Type{<:LinearCombinationBridge{T}},
     G::Type{<:MOI.AbstractVectorFunction},
-    ::Type{LRO.LinearCombinationInSet{S,A,V}},
+    ::Type{LRO.LinearCombinationInSet{LRO.WITH_SET,S,A,V}},
 ) where {T,S,A,V}
     U = MOI.Utilities.promote_operation(*, T, MOI.Utilities.scalar_type(G), T)
     F = MOI.Utilities.promote_operation(vcat, T, U)
@@ -37,7 +37,11 @@ end
 function _map_function(set::LRO.LinearCombinationInSet, func)
     scalars = MOI.Utilities.eachscalar(func)
     return MOI.Utilities.vectorize([
-        sum(scalars[j] * set.vectors[j][i] for j in eachindex(scalars)) for
+        sum(
+            j -> scalars[j] * set.vectors[j][i],
+            j in eachindex(set.vectors);
+            init = scalars[length(set.vectors) + i],
+        ) for
         i in 1:MOI.dimension(set.set)
     ])
 end
@@ -69,8 +73,8 @@ end
 
 function MOI.Bridges.adjoint_map_function(bridge::LinearCombinationBridge, func)
     scalars = MOI.Utilities.eachscalar(func)
-    return MOI.Utilities.vectorize([
+    return MOI.Utilities.vectorize(vcat([
         MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
         vector in bridge.set.vectors
-    ])
+    ], scalars))
 end

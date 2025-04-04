@@ -1,87 +1,103 @@
-"""
-    SetDotProducts(set::MOI.AbstractSet, vectors::AbstractVector)
+@enum(SetInclusion, WITHOUT_SET, WITH_SET)
 
-Given a set `set` of dimension `d` and `m` vectors `a_1`, ..., `a_m` given in `vectors`, this is the set:
-``\\{ ((\\langle a_1, x \\rangle, ..., \\langle a_m, x \\rangle) \\in \\mathbb{R}^{m} : x \\in \\text{set} \\}.``
 """
-struct SetDotProducts{S,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
+    SetDotProducts{W}(set::MOI.AbstractVectorSet, vectors::AbstractVector)
+
+Given a set `set` of dimension `d` and `m` vectors `a_1`, ..., `a_m` given in `vectors`,
+if `W` is `WITHOUT_SET`, this is the set:
+``\\{ ((\\langle a_1, x \\rangle, ..., \\langle a_m, x \\rangle) \\in \\mathbb{R}^{m} : x \\in \\text{set} \\}.``
+if `W` is `WITH_SET`, this is the set:
+``\\{ ((\\langle a_1, x \\rangle, ..., \\langle a_m, x \\rangle, x) \\in \\mathbb{R}^{m + d} : x \\in \\text{set} \\}.``
+"""
+struct SetDotProducts{W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
     set::S
     vectors::V
+end
+function SetDotProducts{W}(set::S, vector::V) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
+    return SetDotProducts{W,S,A,V}(set, vector)
 end
 
 function Base.:(==)(s1::SetDotProducts, s2::SetDotProducts)
     return s1.set == s2.set && s1.vectors == s2.vectors
 end
 
-function Base.copy(s::SetDotProducts)
-    return SetDotProducts(copy(s.set), copy(s.vectors))
+function Base.copy(s::SetDotProducts{W}) where {W}
+    return SetDotProducts{W}(copy(s.set), copy(s.vectors))
 end
 
-MOI.dimension(s::SetDotProducts) = length(s.vectors)
+MOI.dimension(s::SetDotProducts{WITHOUT_SET}) = length(s.vectors)
+MOI.dimension(s::SetDotProducts{WITH_SET}) = length(s.vectors) + MOI.dimension(s.set)
 
 function MOI.Bridges.Constraint.conversion_cost(
-    ::Type{SetDotProducts{S,A1,Vector{A1}}},
-    ::Type{SetDotProducts{S,A2,Vector{A2}}},
-) where {S,A1,A2}
+    ::Type{SetDotProducts{W,S,A1,Vector{A1}}},
+    ::Type{SetDotProducts{W,S,A2,Vector{A2}}},
+) where {W,S,A1,A2}
     return MOI.Bridges.Constraint.conversion_cost(A1, A2)
 end
 
 function Base.convert(
-    ::Type{SetDotProducts{S,A,V}},
+    ::Type{SetDotProducts{W,S,A,V}},
     set::SetDotProducts,
-) where {S,A,V}
-    return SetDotProducts{S,A,V}(set.set, convert(V, set.vectors))
+) where {W,S,A,V}
+    return SetDotProducts{W,S,A,V}(set.set, convert(V, set.vectors))
 end
 
 """
-    LinearCombinationInSet(set::MOI.AbstractSet, matrices::AbstractVector)
+    LinearCombinationInSet{W}(set::MOI.AbstractVectorSet, matrices::AbstractVector)
 
 Given a set `set` of dimension `d` and `m` vectors `a_1`, ..., `a_m` given in `vectors`, this is the set:
-``\\{ (y \\in \\mathbb{R}^{m} : \\sum_{i=1}^m y_i a_i \\in \\text{set} \\}.``
+if `W` is `WITHOUT_SET`, this is the set:
+``\\{ y \\in \\mathbb{R}^{m} : \\sum_{i=1}^m y_i a_i \\in \\text{set} \\}.``
+if `W` is `WITH_SET`, this is the set:
+``\\{ (y, c) \\in \\mathbb{R}^{m} : \\sum_{i=1}^m y_i a_i - c \\in \\text{set} \\}.``
 """
-struct LinearCombinationInSet{S,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
+struct LinearCombinationInSet{W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}} <: MOI.AbstractVectorSet
     set::S
     vectors::V
+end
+function LinearCombinationInSet{W}(set::S, vector::V) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
+    return LinearCombinationInSet{W,S,A,V}(set, vector)
 end
 
 function Base.:(==)(s1::LinearCombinationInSet, s2::LinearCombinationInSet)
     return s1.set == s2.set && s1.vectors == s2.vectors
 end
 
-function Base.copy(s::LinearCombinationInSet)
-    return LinearCombinationInSet(copy(s.set), copy(s.vectors))
+function Base.copy(s::LinearCombinationInSet{W}) where {W}
+    return LinearCombinationInSet{W}(copy(s.set), copy(s.vectors))
 end
 
-MOI.dimension(s::LinearCombinationInSet) = length(s.vectors)
+MOI.dimension(s::LinearCombinationInSet{WITHOUT_SET}) = length(s.vectors)
+MOI.dimension(s::LinearCombinationInSet{WITH_SET}) = length(s.vectors) + MOI.dimension(s.set)
 
 function MOI.Bridges.Constraint.conversion_cost(
-    ::Type{LinearCombinationInSet{S,A1,Vector{A1}}},
-    ::Type{LinearCombinationInSet{S,A2,Vector{A2}}},
-) where {S,A1,A2}
+    ::Type{LinearCombinationInSet{W,S,A1,Vector{A1}}},
+    ::Type{LinearCombinationInSet{W,S,A2,Vector{A2}}},
+) where {W,S,A1,A2}
     return MOI.Bridges.Constraint.conversion_cost(A1, A2)
 end
 
 function Base.convert(
-    ::Type{LinearCombinationInSet{S,A,V}},
+    ::Type{LinearCombinationInSet{W,S,A,V}},
     set::LinearCombinationInSet,
-) where {S,A,V}
-    return LinearCombinationInSet{S,A,V}(set.set, convert(V, set.vectors))
+) where {W,S,A,V}
+    return LinearCombinationInSet{W,S,A,V}(set.set, convert(V, set.vectors))
 end
 
 function MOI.dual_set(s::SetDotProducts)
     return LinearCombinationInSet(s.set, s.vectors)
 end
 
-function MOI.dual_set_type(::Type{SetDotProducts{S,A,V}}) where {S,A,V}
-    return LinearCombinationInSet{S,A,V}
+function MOI.dual_set_type(::Type{SetDotProducts{W,S,A,V}}) where {W,S,A,V}
+    return LinearCombinationInSet{W,S,A,V}
 end
 
 function MOI.dual_set(s::LinearCombinationInSet)
     return SetDotProducts(s.side_dimension, s.vectors)
 end
 
-function MOI.dual_set_type(::Type{LinearCombinationInSet{S,A,V}}) where {S,A,V}
-    return SetDotProducts{S,A,V}
+function MOI.dual_set_type(::Type{LinearCombinationInSet{W,S,A,V}}) where {W,S,A,V}
+    return SetDotProducts{W,S,A,V}
 end
 
 abstract type AbstractFactorization{T,F} <: AbstractMatrix{T} end
