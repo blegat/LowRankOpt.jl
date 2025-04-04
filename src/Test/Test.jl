@@ -29,7 +29,7 @@ function test_conic_PositiveSemidefinite_RankOne_polynomial(
     model::MOI.ModelLike,
     config::MOI.Test.Config{T},
 ) where {T}
-    set = LRO.SetDotProducts(
+    set = LRO.SetDotProducts{LRO.WITHOUT_SET}(
         MOI.PositiveSemidefiniteConeTriangle(2),
         LRO.TriangleVectorization.([
             LRO.PositiveSemidefiniteFactorization(T[1, -1]),
@@ -115,7 +115,7 @@ function test_conic_PositiveSemidefinite_RankOne_moment(
     model::MOI.ModelLike,
     config::MOI.Test.Config{T},
 ) where {T}
-    set = LRO.LinearCombinationInSet(
+    set = LRO.LinearCombinationInSet{LRO.WITHOUT_SET}(
         MOI.PositiveSemidefiniteConeTriangle(2),
         LRO.TriangleVectorization.([
             LRO.PositiveSemidefiniteFactorization(T[1, -1]),
@@ -187,6 +187,69 @@ function MOI.Test.setup_test(
             ) => [T[4, 0]],
         ),
     )
+    return
+end
+
+function runtests(
+    model::MOI.ModelLike,
+    config::MOI.Test.Config;
+    include::Vector = String[],
+    exclude::Vector = String[],
+    warn_unsupported::Bool = false,
+    verbose::Bool = false,
+    exclude_tests_after::VersionNumber = v"999.0.0",
+)
+    tests = filter(names(@__MODULE__; all = true)) do name
+        return startswith("$name", "test_")
+    end
+    tests = string.(tests)
+    for ex in exclude
+        if ex in tests && any(t -> ex != t && occursin(ex, t), tests)
+            @warn(
+                "The exclude string \"$ex\" is ambiguous because it exactly " *
+                "matches a test, but it also partially matches another. Use " *
+                "`r\"^$ex\$\"` to exclude the exactly matching test, or " *
+                "`r\"$ex.*\"` to exclude all partially matching tests.",
+            )
+        end
+    end
+    for name_sym in names(@__MODULE__; all = true)
+        name = string(name_sym)
+        if !startswith(name, "test_")
+            continue  # All test functions start with test_
+        elseif !isempty(include) && !any(s -> occursin(s, name), include)
+            continue
+        elseif !isempty(exclude) && any(s -> occursin(s, name), exclude)
+            continue
+        end
+        if verbose
+            @info "Running $name"
+        end
+        test_function = getfield(@__MODULE__, name_sym)
+        if MOI.Test.version_added(test_function) > exclude_tests_after
+            if verbose
+                println("  Skipping test because of `exclude_tests_after`")
+            end
+            continue
+        end
+        @testset "$(name)" begin
+            c = copy(config)
+            tear_down = MOI.Test.setup_test(test_function, model, c)
+            # Make sure to empty the model before every test.
+            MOI.empty!(model)
+            try
+                test_function(model, c)
+            catch err
+                if verbose
+                    println("  Test errored with $(typeof(err))")
+                end
+                MOI.Test._error_handler(err, name, warn_unsupported)
+            end
+            if tear_down !== nothing
+                tear_down()
+            end
+        end
+    end
     return
 end
 
