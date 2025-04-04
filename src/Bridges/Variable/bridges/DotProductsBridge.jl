@@ -4,23 +4,26 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
-struct DotProductsBridge{T,S,A,V} <:
-       MOI.Bridges.Variable.SetMapBridge{T,S,LRO.SetDotProducts{S,A,V}}
+struct DotProductsBridge{T,S,A,V} <: MOI.Bridges.Variable.SetMapBridge{
+    T,
+    S,
+    LRO.SetDotProducts{LRO.WITH_SET,S,A,V},
+}
     variables::Vector{MOI.VariableIndex}
     constraint::MOI.ConstraintIndex{MOI.VectorOfVariables,S}
-    set::LRO.SetDotProducts{S,A,V}
+    set::LRO.SetDotProducts{LRO.WITH_SET,S,A,V}
 end
 
 function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{<:DotProductsBridge},
-    ::Type{<:LRO.SetDotProducts},
+    ::Type{<:LRO.SetDotProducts{LRO.WITH_SET}},
 )
     return true
 end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:DotProductsBridge{T}},
-    ::Type{LRO.SetDotProducts{S,A,V}},
+    ::Type{LRO.SetDotProducts{LRO.WITH_SET,S,A,V}},
 ) where {T,S,A,V}
     return DotProductsBridge{T,S,A,V}
 end
@@ -28,7 +31,7 @@ end
 function MOI.Bridges.Variable.bridge_constrained_variable(
     BT::Type{DotProductsBridge{T,S,A,V}},
     model::MOI.ModelLike,
-    set::LRO.SetDotProducts{S,A,V},
+    set::LRO.SetDotProducts{LRO.WITH_SET,S,A,V},
 ) where {T,S,A,V}
     variables, constraint = MOI.add_constrained_variables(
         model,
@@ -54,27 +57,54 @@ function MOI.Bridges.map_function(
     i::MOI.Bridges.IndexInVector,
 ) where {T}
     scalars = MOI.Utilities.eachscalar(func)
-    return MOI.Utilities.set_dot(
-        bridge.set.vectors[i.value],
-        scalars,
-        bridge.set.set,
-    )
+    if i.value in eachindex(bridge.set.vectors)
+        return MOI.Utilities.set_dot(
+            bridge.set.vectors[i.value],
+            scalars,
+            bridge.set.set,
+        )
+    else
+        return scalars[i-length(bridge.set.vectors)]
+    end
 end
 
 function MOI.Bridges.map_function(bridge::DotProductsBridge{T}, func) where {T}
     scalars = MOI.Utilities.eachscalar(func)
-    return MOI.Utilities.vectorize([
-        MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
-        vector in bridge.set.vectors
-    ])
+    return MOI.Utilities.vectorize(
+        vcat(
+            [
+                MOI.Utilities.set_dot(vector, scalars, bridge.set.set) for
+                vector in bridge.set.vectors
+            ],
+            scalars,
+        ),
+    )
 end
 
-# This returns `true` by default for `SetMapBridge`
-# but is is not supported for this bridge because `inverse_map_function`
-# is not implemented
+# This returns `true` by default for `SetMapBridge` but setting
+# `VariablePrimalStart` or `ConstraintPrimalStart` is not supported
+# for this bridge because `inverse_map_function` is not implemented
 function MOI.supports(
     ::MOI.ModelLike,
     ::MOI.VariablePrimalStart,
+    ::Type{<:DotProductsBridge},
+)
+    return false
+end
+
+function MOI.supports(
+    ::MOI.ModelLike,
+    ::MOI.ConstraintPrimalStart,
+    ::Type{<:DotProductsBridge},
+)
+    return false
+end
+
+# For setting `MOI.ConstraintDualStart`, we need to implement `adjoint_map_function`
+# we leave it as future work
+function MOI.supports(
+    ::MOI.ModelLike,
+    ::MOI.ConstraintDualStart,
     ::Type{<:DotProductsBridge},
 )
     return false
