@@ -22,10 +22,6 @@ function runtests()
     return
 end
 
-include(
-    joinpath(dirname(dirname(pathof(MOI))), "test", "Bridges", "utilities.jl"),
-)
-
 function test_psd()
     MOI.Bridges.runtests(
         LRO.Bridges.Variable.DotProductsBridge,
