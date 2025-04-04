@@ -81,12 +81,30 @@ function MOI.Bridges.map_function(bridge::DotProductsBridge{T}, func) where {T}
     )
 end
 
-# This returns `true` by default for `SetMapBridge`
-# but is is not supported for this bridge because `inverse_map_function`
-# is not implemented
+# This returns `true` by default for `SetMapBridge` but setting
+# `VariablePrimalStart` or `ConstraintPrimalStart` is not supported
+# for this bridge because `inverse_map_function` is not implemented
 function MOI.supports(
     ::MOI.ModelLike,
     ::MOI.VariablePrimalStart,
+    ::Type{<:DotProductsBridge},
+)
+    return false
+end
+
+function MOI.supports(
+    ::MOI.ModelLike,
+    ::MOI.ConstraintPrimalStart,
+    ::Type{<:DotProductsBridge},
+)
+    return false
+end
+
+# For setting `MOI.ConstraintDualStart`, we need to implement `adjoint_map_function`
+# we leave it as future work
+function MOI.supports(
+    ::MOI.ModelLike,
+    ::MOI.ConstraintDualStart,
     ::Type{<:DotProductsBridge},
 )
     return false
