@@ -29,6 +29,7 @@ MOI.supports_add_constrained_variables(::FactDotProdWithSetModel{T}, ::Type{<:Fa
 
 function test_FactDotProdWithSet(T)
     model = MOI.instantiate(FactDotProdWithSetModel{T}, with_bridge_type = T)
+    LRO.Bridges.add_all_bridges(model, T)
     F = Matrix{T}
     D = Vector{T}
     V = Vector{LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}}}
