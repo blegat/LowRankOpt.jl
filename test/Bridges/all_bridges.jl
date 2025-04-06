@@ -14,18 +14,20 @@ const FactDotProdWithSet{
     T,
     F<:AbstractMatrix{T},
     D<:AbstractVector{T},
-    V<:AbstractVector{
-        LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
-    },
-} =
-    LRO.SetDotProducts{
-        LRO.WITH_SET,
-        MOI.PositiveSemidefiniteConeTriangle,
-        LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
-        V,
-    }
+    V<:AbstractVector{LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}}},
+} = LRO.SetDotProducts{
+    LRO.WITH_SET,
+    MOI.PositiveSemidefiniteConeTriangle,
+    LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
+    V,
+}
 
-MOI.supports_add_constrained_variables(::FactDotProdWithSetModel{T}, ::Type{<:FactDotProdWithSet{T}}) where {T} = true
+function MOI.supports_add_constrained_variables(
+    ::FactDotProdWithSetModel{T},
+    ::Type{<:FactDotProdWithSet{T}},
+) where {T}
+    return true
+end
 
 function test_FactDotProdWithSet(T)
     model = MOI.instantiate(FactDotProdWithSetModel{T}, with_bridge_type = T)
@@ -51,7 +53,6 @@ function runtests()
     end
     return
 end
-
 
 end
 
