@@ -144,7 +144,7 @@ the matrix `factor * Diagonal(scaling) * factor'`.
 struct Factorization{
     T,
     F<:Union{AbstractVector{T},AbstractMatrix{T}},
-    D<:Union{T,AbstractVector{T}},
+    D<:Union{AbstractArray{T,0},AbstractVector{T}},
 } <: AbstractFactorization{T,F}
     factor::F
     scaling::D
@@ -159,9 +159,16 @@ struct Factorization{
         end
         return new{T,typeof(factor),typeof(scaling)}(factor, scaling)
     end
-    function Factorization(factor::AbstractVector{T}, scaling::T) where {T}
+    function Factorization(
+        factor::AbstractVector{T},
+        scaling::AbstractArray{T,0},
+    ) where {T}
         return new{T,typeof(factor),typeof(scaling)}(factor, scaling)
     end
+end
+
+function Factorization(factor::AbstractVector{T}, scaling::T) where {T}
+    return Factorization(factor, fill(scaling, tuple()))
 end
 
 function Base.getindex(m::Factorization, i::Int, j::Int)
@@ -171,31 +178,6 @@ function Base.getindex(m::Factorization, i::Int, j::Int)
     )
 end
 
-"""
-    struct PositiveSemidefiniteFactorization{
-        T,
-        F<:Union{AbstractVector{T},AbstractMatrix{T}},
-    } <: AbstractFactorization{T,F}
-        factor::F
-    end
-
-Matrix corresponding to `factor * Diagonal(diagonal) * factor'`.
-If `factor` is a vector and `diagonal` is a scalar, this corresponds to
-the matrix `diagonal * factor * factor'`.
-If `factor` is a matrix and `diagonal` is a vector, this corresponds to
-the matrix `factor * Diagonal(scaling) * factor'`.
-"""
-struct PositiveSemidefiniteFactorization{
-    T,
-    F<:Union{AbstractVector{T},AbstractMatrix{T}},
-} <: AbstractFactorization{T,F}
-    factor::F
-end
-
-function Base.getindex(m::PositiveSemidefiniteFactorization, i::Int, j::Int)
-    return sum(m.factor[i, k] * m.factor[j, k]' for k in axes(m.factor, 2))
-end
-
 function MOI.Bridges.Constraint.conversion_cost(
     ::Type{<:AbstractMatrix},
     ::Type{<:AbstractMatrix},
@@ -203,25 +185,16 @@ function MOI.Bridges.Constraint.conversion_cost(
     return Inf
 end
 
-function MOI.Bridges.Constraint.conversion_cost(
-    ::Type{<:Factorization{T,F}},
-    ::Type{PositiveSemidefiniteFactorization{T,F}},
-) where {T,F}
-    return 1.0
+function positive_semidefinite_factorization(
+    factor::AbstractVector{T},
+) where {T}
+    return Factorization(factor, FillArrays.Ones{T}(tuple()))
 end
 
-function Base.convert(
-    ::Type{Factorization{T,F,T}},
-    f::PositiveSemidefiniteFactorization{T,F},
-) where {T,F<:AbstractVector}
-    return Factorization{T,F}(f.factor, one(T))
-end
-
-function Base.convert(
-    ::Type{Factorization{T,F,Vector{T}}},
-    f::PositiveSemidefiniteFactorization{T,F},
-) where {T,F<:AbstractVector}
-    return Factorization{T,F,Vector{T}}(f.factor, ones(T, size(f.factor, 2)))
+function positive_semidefinite_factorization(
+    factor::AbstractMatrix{T},
+) where {T}
+    return Factorization(factor, FillArrays.Ones{T}(size(factor, 2)))
 end
 
 """

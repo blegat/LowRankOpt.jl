@@ -3,6 +3,7 @@ module TestAllBridges
 using Test
 import MathOptInterface as MOI
 import LowRankOpt as LRO
+import FillArrays
 
 abstract type TestModel{T} <: MOI.ModelLike end
 MOI.is_empty(::TestModel) = true
@@ -22,6 +23,21 @@ const FactDotProdWithSet{
     V,
 }
 
+const OneVec{T} = FillArrays.Ones{T,1,Tuple{Base.OneTo{Int}}}
+
+const PosDefFactDotProdWithSet{
+    T,
+    F<:AbstractMatrix{T},
+    V<:AbstractVector{
+        LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}},
+    },
+} = LRO.SetDotProducts{
+    LRO.WITH_SET,
+    MOI.PositiveSemidefiniteConeTriangle,
+    LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}},
+    V,
+}
+
 function MOI.supports_add_constrained_variables(
     ::FactDotProdWithSetModel{T},
     ::Type{<:FactDotProdWithSet{T}},
@@ -38,6 +54,11 @@ function test_FactDotProdWithSet(T)
     @test MOI.supports_add_constrained_variables(
         model,
         FactDotProdWithSet{T,F,D,V},
+    )
+    P = Vector{LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}}}
+    @test MOI.supports_add_constrained_variables(
+        model,
+        PosDefFactDotProdWithSet{T,F,P},
     )
 end
 

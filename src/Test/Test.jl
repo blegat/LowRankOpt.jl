@@ -32,8 +32,8 @@ function test_conic_PositiveSemidefinite_RankOne_polynomial(
     set = LRO.SetDotProducts{LRO.WITHOUT_SET}(
         MOI.PositiveSemidefiniteConeTriangle(2),
         LRO.TriangleVectorization.([
-            LRO.PositiveSemidefiniteFactorization(T[1, -1]),
-            LRO.PositiveSemidefiniteFactorization(T[1, 1]),
+            LRO.positive_semidefinite_factorization(T[1, -1]),
+            LRO.positive_semidefinite_factorization(T[1, 1]),
         ]),
     )
     MOI.Test.@requires MOI.supports_constraint(

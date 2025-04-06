@@ -28,11 +28,11 @@ end
 
 function test_factorizations()
     f = [1, 2]
-    _test_factorization(f * f', LRO.PositiveSemidefiniteFactorization(f))
+    _test_factorization(f * f', LRO.positive_semidefinite_factorization(f))
     _test_factorization(2 * f * f', LRO.Factorization(f, 2))
     F = [1 2; 3 4; 5 6]
     d = [7, 8]
-    _test_factorization(F * F', LRO.PositiveSemidefiniteFactorization(F))
+    _test_factorization(F * F', LRO.positive_semidefinite_factorization(F))
     _test_factorization(
         F * LinearAlgebra.Diagonal(d) * F',
         LRO.Factorization(F, d),
