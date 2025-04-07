@@ -59,7 +59,7 @@ function test_FactDotProdWithSet(T)
             @testset "N = $N" for N in 1:2
                 @test MOI.supports_add_constrained_variables(
                     model,
-                    set_type(W, T, N; primal = true, psd)
+                    set_type(W, T, N; primal = true, psd),
                 )
             end
         end

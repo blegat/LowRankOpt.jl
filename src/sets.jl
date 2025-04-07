@@ -168,16 +168,15 @@ function Factorization(
     factor::AbstractMatrix{T},
     scaling::AbstractVector{T},
 ) where {T}
-    return Factorization{T,typeof(factor), typeof(scaling)}(factor, scaling)
+    return Factorization{T,typeof(factor),typeof(scaling)}(factor, scaling)
 end
 
 function Factorization(
     factor::AbstractVector{T},
     scaling::AbstractArray{T,0},
 ) where {T}
-    return Factorization{T,typeof(factor), typeof(scaling)}(factor, scaling)
+    return Factorization{T,typeof(factor),typeof(scaling)}(factor, scaling)
 end
-
 
 function Factorization(factor::AbstractVector{T}, scaling::T) where {T}
     return Factorization(factor, fill(scaling, tuple()))
@@ -190,16 +189,22 @@ function Base.getindex(m::Factorization, i::Int, j::Int)
     )
 end
 
-function Base.convert(::Type{<:Factorization{T,F,V}}, f::Factorization{S,<:AbstractVector{S},<:AbstractArray{S,0}}) where {T,S,F<:AbstractMatrix{T},V<:AbstractVector{T}}
+function Base.convert(
+    ::Type{<:Factorization{T,F,V}},
+    f::Factorization{S,<:AbstractVector{S},<:AbstractArray{S,0}},
+) where {T,S,F<:AbstractMatrix{T},V<:AbstractVector{T}}
     return Factorization{T,F,V}(
         reshape(f.factor, length(f.factor), 1),
         reshape(f.scaling, 1),
     )
 end
 
-function Base.convert(::Type{<:Factorization{T,F,V}}, f::Factorization{S,<:AbstractMatrix{S},<:AbstractVector{S}}) where {T,S,F<:AbstractVector{T},V<:AbstractArray{T,0}}
+function Base.convert(
+    ::Type{<:Factorization{T,F,V}},
+    f::Factorization{S,<:AbstractMatrix{S},<:AbstractVector{S}},
+) where {T,S,F<:AbstractVector{T},V<:AbstractArray{T,0}}
     return Factorization{T,F,V}(
-        reshape(f.factor, size(f.factor, 1), 1),
+        reshape(f.factor, size(f.factor, 1)),
         reshape(f.scaling, tuple()),
     )
 end
@@ -262,7 +267,10 @@ struct TriangleVectorization{T,M<:AbstractMatrix{T}} <: AbstractVector{T}
     matrix::M
 end
 
-function Base.convert(::Type{TriangleVectorization{T,M}}, t::TriangleVectorization) where {T,M}
+function Base.convert(
+    ::Type{TriangleVectorization{T,M}},
+    t::TriangleVectorization,
+) where {T,M}
     return TriangleVectorization{T,M}(t.matrix)
 end
 
