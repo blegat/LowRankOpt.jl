@@ -108,7 +108,7 @@ function MOI.dual_set_type(::Type{SetDotProducts{W,S,V}}) where {W,S,V}
 end
 
 function MOI.dual_set(s::LinearCombinationInSet{W}) where {W}
-    return SetDotProducts{W}(s.side_dimension, s.vectors)
+    return SetDotProducts{W}(s.set, s.vectors)
 end
 
 function MOI.dual_set_type(::Type{LinearCombinationInSet{W,S,V}}) where {W,S,V}

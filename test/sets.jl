@@ -27,8 +27,11 @@ function _test_factorization(A, B)
     for W in [LRO.WITH_SET, LRO.WITHOUT_SET]
         set = MOI.PositiveSemidefiniteConeTriangle(d)
         primal = LRO.SetDotProducts{W}(set, [vA])
-        dual = LRO.LinearCombinationInSet{W}(set, [vB])
+        dual = LRO.LinearCombinationInSet{W}(set, [vA])
         @test MOI.dual_set(primal) == dual
+        @test MOI.dual_set_type(typeof(primal)) == typeof(dual)
+        @test MOI.dual_set(dual) == primal
+        @test MOI.dual_set_type(typeof(dual)) == typeof(primal)
     end
     return
 end
