@@ -62,7 +62,6 @@ function test_psd(T::Type)
                 ),
             )
         end;
-        cannot_unbridge = true,
         eltype = T,
         constraint_start = T[1, 2, 3],
     )
