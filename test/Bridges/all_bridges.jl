@@ -15,12 +15,12 @@ function set_type(W, T, N; primal::Bool, psd::Bool)
     F = Array{T,N}
     if psd
         if N == 2
-            V = FillArrays.Ones{T,N-1,Tuple{Base.OneTo{Int}}}
+            V = FillArrays.Ones{T,N - 1,Tuple{Base.OneTo{Int}}}
         else
             V = FillArrays.Ones{T,0,Tuple{}}
         end
     else
-        V = Array{T,N-1}
+        V = Array{T,N - 1}
     end
     if primal
         return LRO.SetDotProducts{
