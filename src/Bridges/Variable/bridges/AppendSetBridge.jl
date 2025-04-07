@@ -59,8 +59,8 @@ function MOI.Bridges.map_function(
     return MOI.Utilities.eachscalar(func)[i.value]
 end
 
-function MOI.Bridges.map_function(::AppendSetBridge, func)
-    return MOI.Utilities.eachscalar(func)[1:num_vectors]
+function MOI.Bridges.map_function(bridge::AppendSetBridge, func)
+    return MOI.Utilities.eachscalar(func)[1:bridge.num_vectors]
 end
 
 # This returns `true` by default for `SetMapBridge` but setting

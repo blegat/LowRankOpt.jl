@@ -57,6 +57,33 @@ function test_factorizations()
     return
 end
 
+function _test_convert(a, b)
+    @test MOI.Bridges.Constraint.conversion_cost(typeof(a), typeof(b)) == 1.0
+    c = convert(typeof(a), b)
+    @test typeof(c) == typeof(a)
+    @test c == a
+end
+
+_test_convert(f, a, b) = _test_convert(f(a), f(b))
+
+function test_conversion()
+    lowrank = LRO.Factorization(
+        reshape([1, 2], 2, 1),
+        [-1]
+    )
+    rankone = LRO.Factorization(
+        [1, 2],
+        fill(-1, tuple()),
+    )
+    _test_convert(lowrank, rankone)
+    _test_convert(lowrank, rankone) do f
+        LRO.TriangleVectorization(f)
+    end
+    _test_convert(lowrank, rankone) do f
+        LRO.SetDotProducts{LRO.WITH_SET}(MOI.PositiveSemidefiniteConeTriangle(2), [LRO.TriangleVectorization(f)])
+    end
+end
+
 function test_symmetrize()
     for use_krylov in [false, true]
         f = LRO.symmetrize_factorization([0, 0, 1], [2, 0, 0]; use_krylov)

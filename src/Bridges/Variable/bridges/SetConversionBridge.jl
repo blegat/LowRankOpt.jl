@@ -36,22 +36,23 @@ const MyBridge{T,S2} = MOI.Bridges.Constraint.SetConversionBridge{T,S1,S2}
   * `F` in `S1`
 """
 struct SetConversionBridge{T,S1,S2,F} <:
-       MOI.Bridges.Constraint.SetMapBridge{T,S1,S2}
-    constraint::MOI.ConstraintIndex{F,S2}
+       MOI.Bridges.Variable.SetMapBridge{T,S1,S2}
+    variables::Vector{MOI.VariableIndex}
+    constraint::MOI.ConstraintIndex{F,S1}
 end
 
-function MOI.supports_constrained_variable(
+function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{SetConversionBridge{T,S1}},
     ::Type{S2},
 ) where {T,S1,S2<:MOI.AbstractSet}
     return isfinite(MOI.Bridges.Constraint.conversion_cost(S1, S2))
 end
 
-function MOI.Bridges.Constraint.concrete_bridge_type(
-    ::Type{SetConversionBridge{T,S1}},
+function MOI.Bridges.Variable.concrete_bridge_type(
+    ::Type{<:SetConversionBridge{T,S1}},
     ::Type{S2},
 ) where {T,S1,S2<:MOI.AbstractVectorSet}
-    return SetConversionBridge{T,S2,S1,MOI.Utilities.variable_function_type(S1)}
+    return SetConversionBridge{T,S1,S2,MOI.Utilities.variable_function_type(S1)}
 end
 
 function MOI.Bridges.bridging_cost(
@@ -61,16 +62,16 @@ function MOI.Bridges.bridging_cost(
 end
 
 function MOI.Bridges.map_set(
-    ::Type{<:SetConversionBridge{T,S2,S1}},
+    ::Type{<:SetConversionBridge{T,S1,S2}},
     set::S1,
-) where {T,S2,S1}
+) where {T,S1,S2}
     return convert(S2, set)
 end
 
 function MOI.Bridges.inverse_map_set(
-    ::Type{<:SetConversionBridge{T,S2,S1}},
+    ::Type{<:SetConversionBridge{T,S1,S2}},
     set::S2,
-) where {T,S2,S1}
+) where {T,S1,S2}
     return convert(S1, set)
 end
 

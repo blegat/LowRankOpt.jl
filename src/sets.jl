@@ -145,10 +145,10 @@ struct Factorization{
 } <: AbstractFactorization{T,F}
     factor::F
     scaling::D
-    function Factorization(
-        factor::AbstractMatrix{T},
-        scaling::AbstractVector{T},
-    ) where {T}
+    function Factorization{T,F,S}(
+        factor::F,
+        scaling::S,
+    ) where {T,F<:AbstractMatrix{T},S<:AbstractVector{T}}
         if length(scaling) != size(factor, 2)
             error(
                 "Length `$(length(scaling))` of diagonal does not match number of columns `$(size(factor, 2))` of factor",
@@ -156,13 +156,28 @@ struct Factorization{
         end
         return new{T,typeof(factor),typeof(scaling)}(factor, scaling)
     end
-    function Factorization(
-        factor::AbstractVector{T},
-        scaling::AbstractArray{T,0},
-    ) where {T}
+    function Factorization{T,F,S}(
+        factor::F,
+        scaling::S,
+    ) where {T,F<:AbstractVector{T},S<:AbstractArray{T,0}}
         return new{T,typeof(factor),typeof(scaling)}(factor, scaling)
     end
 end
+
+function Factorization(
+    factor::AbstractMatrix{T},
+    scaling::AbstractVector{T},
+) where {T}
+    return Factorization{T,typeof(factor), typeof(scaling)}(factor, scaling)
+end
+
+function Factorization(
+    factor::AbstractVector{T},
+    scaling::AbstractArray{T,0},
+) where {T}
+    return Factorization{T,typeof(factor), typeof(scaling)}(factor, scaling)
+end
+
 
 function Factorization(factor::AbstractVector{T}, scaling::T) where {T}
     return Factorization(factor, fill(scaling, tuple()))
@@ -173,6 +188,27 @@ function Base.getindex(m::Factorization, i::Int, j::Int)
         m.factor[i, k] * m.scaling[k] * m.factor[j, k]' for
         k in eachindex(m.scaling)
     )
+end
+
+function Base.convert(::Type{<:Factorization{T,F,V}}, f::Factorization{S,<:AbstractVector{S},<:AbstractArray{S,0}}) where {T,S,F<:AbstractMatrix{T},V<:AbstractVector{T}}
+    return Factorization{T,F,V}(
+        reshape(f.factor, length(f.factor), 1),
+        reshape(f.scaling, 1),
+    )
+end
+
+function Base.convert(::Type{<:Factorization{T,F,V}}, f::Factorization{S,<:AbstractMatrix{S},<:AbstractVector{S}}) where {T,S,F<:AbstractVector{T},V<:AbstractArray{T,0}}
+    return Factorization{T,F,V}(
+        reshape(f.factor, size(f.factor, 1), 1),
+        reshape(f.scaling, tuple()),
+    )
+end
+
+function MOI.Bridges.Constraint.conversion_cost(
+    ::Type{<:Factorization{T,<:AbstractMatrix{T},<:AbstractVector{T}}},
+    ::Type{<:Factorization{T,<:AbstractVector{T},<:AbstractArray{T,0}}},
+) where {T}
+    return 1.0
 end
 
 function MOI.Bridges.Constraint.conversion_cost(
@@ -224,6 +260,10 @@ end
 
 struct TriangleVectorization{T,M<:AbstractMatrix{T}} <: AbstractVector{T}
     matrix::M
+end
+
+function Base.convert(::Type{TriangleVectorization{T,M}}, t::TriangleVectorization) where {T,M}
+    return TriangleVectorization{T,M}(t.matrix)
 end
 
 function MOI.Bridges.Constraint.conversion_cost(
