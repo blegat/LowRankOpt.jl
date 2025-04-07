@@ -5,6 +5,10 @@ import MathOptInterface as MOI
 const MOIU = MOI.Utilities
 import LowRankOpt as LRO
 
+import FillArrays
+
+const One{T} = FillArrays.Ones{T,0,Tuple{}}
+
 """
 The goal is to find the maximum lower bound `γ` for the polynomial `x^2 - 2x`.
 Using samples `-1` and `1`, the polynomial `x^2 - 2x - γ` evaluates at `-γ`
@@ -15,12 +19,14 @@ The dot product with the gram matrix is the evaluation of `[1; x] * [1 x]` hence
 The polynomial version is:
 max γ
 s.t. [-γ, 2 - γ] in SetDotProducts(
+    LRO.WITHOUT_SET,
     PSD(2),
     [[1; -1] * [1 -1], [1; 1] * [1 1]],
 )
 Its dual (moment version) is:
 min -y[1] - y[2]
 s.t. [-γ, 2 - γ] in LinearCombinationInSet(
+    LRO.WITHOUT_SET,
     PSD(2),
     [[1; -1] * [1 -1], [1; 1] * [1 1]],
 )
@@ -55,21 +61,21 @@ function test_conic_PositiveSemidefinite_RankOne_polynomial(
     )
     MOI.set(model, MOI.ObjectiveSense(), MOI.MAX_SENSE)
     MOI.set(model, MOI.ObjectiveFunction{MOI.VariableIndex}(), γ)
-    if _supports(config, MOI.optimize!)
+    if MOI.Test._supports(config, MOI.optimize!)
         @test MOI.get(model, MOI.TerminationStatus()) == MOI.OPTIMIZE_NOT_CALLED
         MOI.optimize!(model)
         @test MOI.get(model, MOI.TerminationStatus()) == config.optimal_status
         @test MOI.get(model, MOI.PrimalStatus()) == MOI.FEASIBLE_POINT
-        if _supports(config, MOI.ConstraintDual)
+        if MOI.Test._supports(config, MOI.ConstraintDual)
             @test MOI.get(model, MOI.DualStatus()) == MOI.FEASIBLE_POINT
         end
         @test ≈(MOI.get(model, MOI.ObjectiveValue()), T(-1), config)
-        if _supports(config, MOI.DualObjectiveValue)
+        if MOI.Test._supports(config, MOI.DualObjectiveValue)
             @test ≈(MOI.get(model, MOI.DualObjectiveValue()), T(-1), config)
         end
         @test ≈(MOI.get(model, MOI.VariablePrimal(), γ), T(-1), config)
         @test ≈(MOI.get(model, MOI.ConstraintPrimal(), c), T[4, 0], config)
-        if _supports(config, MOI.ConstraintDual)
+        if MOI.Test._supports(config, MOI.ConstraintDual)
             @test ≈(MOI.get(model, MOI.ConstraintDual(), c), T[0, 1], config)
         end
     end
@@ -81,10 +87,6 @@ function MOI.Test.setup_test(
     model::MOIU.MockOptimizer,
     ::MOI.Test.Config{T},
 ) where {T<:Real}
-    A = LRO.TriangleVectorization{
-        T,
-        LRO.PositiveSemidefiniteFactorization{T,Vector{T}},
-    }
     MOIU.set_mock_optimize!(
         model,
         (mock::MOIU.MockOptimizer) -> MOIU.mock_optimize!(
@@ -93,9 +95,12 @@ function MOI.Test.setup_test(
             (
                 MOI.VectorAffineFunction{T},
                 LRO.SetDotProducts{
+                    LRO.WITHOUT_SET,
                     MOI.PositiveSemidefiniteConeTriangle,
-                    A,
-                    Vector{A},
+                    LRO.TriangleVectorization{
+                        T,
+                        LRO.Factorization{T,Vector{T},One{T}},
+                    },
                 },
             ) => [T[0, 1]],
         ),
@@ -118,8 +123,8 @@ function test_conic_PositiveSemidefinite_RankOne_moment(
     set = LRO.LinearCombinationInSet{LRO.WITHOUT_SET}(
         MOI.PositiveSemidefiniteConeTriangle(2),
         LRO.TriangleVectorization.([
-            LRO.PositiveSemidefiniteFactorization(T[1, -1]),
-            LRO.PositiveSemidefiniteFactorization(T[1, 1]),
+            LRO.positive_semidefinite_factorization(T[1, -1]),
+            LRO.positive_semidefinite_factorization(T[1, 1]),
         ]),
     )
     MOI.Test.@requires MOI.supports_add_constrained_variables(
@@ -140,21 +145,21 @@ function test_conic_PositiveSemidefinite_RankOne_moment(
         MOI.ObjectiveFunction{MOI.ScalarAffineFunction{T}}(),
         T(3) * y[1] - T(1) * y[2],
     )
-    if _supports(config, MOI.optimize!)
+    if MOI.Test._supports(config, MOI.optimize!)
         @test MOI.get(model, MOI.TerminationStatus()) == MOI.OPTIMIZE_NOT_CALLED
         MOI.optimize!(model)
         @test MOI.get(model, MOI.TerminationStatus()) == config.optimal_status
         @test MOI.get(model, MOI.PrimalStatus()) == MOI.FEASIBLE_POINT
-        if _supports(config, MOI.ConstraintDual)
+        if MOI.Test._supports(config, MOI.ConstraintDual)
             @test MOI.get(model, MOI.DualStatus()) == MOI.FEASIBLE_POINT
         end
         @test ≈(MOI.get(model, MOI.ObjectiveValue()), T(-1), config)
-        if _supports(config, MOI.DualObjectiveValue)
+        if MOI.Test._supports(config, MOI.DualObjectiveValue)
             @test ≈(MOI.get(model, MOI.DualObjectiveValue()), T(-1), config)
         end
         @test ≈(MOI.get(model, MOI.VariablePrimal(), y), T[0, 1], config)
         @test ≈(MOI.get(model, MOI.ConstraintPrimal(), c), T(1), config)
-        if _supports(config, MOI.ConstraintDual)
+        if MOI.Test._supports(config, MOI.ConstraintDual)
             @test ≈(MOI.get(model, MOI.ConstraintDual(), cy), T[4, 0], config)
             @test ≈(MOI.get(model, MOI.ConstraintDual(), c), T(-1), config)
         end
@@ -167,10 +172,6 @@ function MOI.Test.setup_test(
     model::MOIU.MockOptimizer,
     ::MOI.Test.Config{T},
 ) where {T<:Real}
-    A = LRO.TriangleVectorization{
-        T,
-        LRO.PositiveSemidefiniteFactorization{T,Vector{T}},
-    }
     MOIU.set_mock_optimize!(
         model,
         (mock::MOIU.MockOptimizer) -> MOIU.mock_optimize!(
@@ -180,9 +181,9 @@ function MOI.Test.setup_test(
             (
                 MOI.VectorOfVariables,
                 LRO.LinearCombinationInSet{
+                    LRO.WITHOUT_SET,
                     MOI.PositiveSemidefiniteConeTriangle,
-                    A,
-                    Vector{A},
+                    LRO.Factorization{T,Vector{T},One{T}},
                 },
             ) => [T[4, 0]],
         ),
