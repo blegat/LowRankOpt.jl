@@ -95,7 +95,10 @@ function MOI.Bridges.inverse_map_function(::LinearCombinationBridge, _)
     )
 end
 
-function MOI.Bridges.inverse_adjoint_map_function(bridge::LinearCombinationBridge, func)
+function MOI.Bridges.inverse_adjoint_map_function(
+    bridge::LinearCombinationBridge,
+    func,
+)
     scalars = MOI.Utilities.eachscalar(func)
-    return scalars[(length(bridge.set.vectors) + 1):end]
+    return scalars[(length(bridge.set.vectors)+1):end]
 end
