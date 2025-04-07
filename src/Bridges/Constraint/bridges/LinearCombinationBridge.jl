@@ -46,13 +46,13 @@ function _map_function(set::LRO.LinearCombinationInSet, func)
 end
 
 function MOI.Bridges.Constraint.bridge_constraint(
-    ::Type{LinearCombinationBridge{T,S,V,F,G}},
+    BT::Type{LinearCombinationBridge{T,S,V,F,G}},
     model::MOI.ModelLike,
     func::G,
     set::LRO.LinearCombinationInSet{LRO.WITH_SET,S,V},
 ) where {T,S,F,G,V}
     mapped_func = _map_function(set, func)
-    constraint = MOI.add_constraint(model, mapped_func, set.set)
+    constraint = MOI.add_constraint(model, mapped_func, MOI.Bridges.map_set(BT, set))
     return LinearCombinationBridge{T,S,V,F,G}(constraint, set)
 end
 
