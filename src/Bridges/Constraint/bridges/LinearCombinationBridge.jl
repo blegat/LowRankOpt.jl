@@ -4,16 +4,16 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
-struct LinearCombinationBridge{T,S,A,V,F,G} <:
+struct LinearCombinationBridge{T,S,V,F,G} <:
        MOI.Bridges.Constraint.SetMapBridge{
     T,
     S,
-    LRO.LinearCombinationInSet{LRO.WITH_SET,S,A,V},
+    LRO.LinearCombinationInSet{LRO.WITH_SET,S,V},
     F,
     G,
 }
     constraint::MOI.ConstraintIndex{F,S}
-    set::LRO.LinearCombinationInSet{LRO.WITH_SET,S,A,V}
+    set::LRO.LinearCombinationInSet{LRO.WITH_SET,S,V}
 end
 
 function MOI.supports_constraint(
@@ -27,11 +27,11 @@ end
 function MOI.Bridges.Constraint.concrete_bridge_type(
     ::Type{<:LinearCombinationBridge{T}},
     G::Type{<:MOI.AbstractVectorFunction},
-    ::Type{LRO.LinearCombinationInSet{LRO.WITH_SET,S,A,V}},
-) where {T,S,A,V}
+    ::Type{LRO.LinearCombinationInSet{LRO.WITH_SET,S,V}},
+) where {T,S,V}
     U = MOI.Utilities.promote_operation(*, T, MOI.Utilities.scalar_type(G), T)
     F = MOI.Utilities.promote_operation(vcat, T, U)
-    return LinearCombinationBridge{T,S,A,V,F,G}
+    return LinearCombinationBridge{T,S,V,F,G}
 end
 
 function _map_function(set::LRO.LinearCombinationInSet, func)
@@ -46,14 +46,14 @@ function _map_function(set::LRO.LinearCombinationInSet, func)
 end
 
 function MOI.Bridges.Constraint.bridge_constraint(
-    ::Type{LinearCombinationBridge{T,S,A,V,F,G}},
+    ::Type{LinearCombinationBridge{T,S,V,F,G}},
     model::MOI.ModelLike,
     func::G,
-    set::LRO.LinearCombinationInSet{S,A,V},
-) where {T,S,A,F,G,V}
+    set::LRO.LinearCombinationInSet{S,V},
+) where {T,S,F,G,V}
     mapped_func = _map_function(set, func)
     constraint = MOI.add_constraint(model, mapped_func, set.set)
-    return LinearCombinationBridge{T,S,A,V,F,G}(constraint, set)
+    return LinearCombinationBridge{T,S,V,F,G}(constraint, set)
 end
 
 function MOI.Bridges.map_set(

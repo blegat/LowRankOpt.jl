@@ -15,12 +15,10 @@ const FactDotProdWithSet{
     T,
     F<:AbstractMatrix{T},
     D<:AbstractVector{T},
-    V<:AbstractVector{LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}}},
 } = LRO.SetDotProducts{
     LRO.WITH_SET,
     MOI.PositiveSemidefiniteConeTriangle,
     LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
-    V,
 }
 
 const OneVec{T} = FillArrays.Ones{T,1,Tuple{Base.OneTo{Int}}}
@@ -28,14 +26,10 @@ const OneVec{T} = FillArrays.Ones{T,1,Tuple{Base.OneTo{Int}}}
 const PosDefFactDotProdWithSet{
     T,
     F<:AbstractMatrix{T},
-    V<:AbstractVector{
-        LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}},
-    },
 } = LRO.SetDotProducts{
     LRO.WITH_SET,
     MOI.PositiveSemidefiniteConeTriangle,
     LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}},
-    V,
 }
 
 function MOI.supports_add_constrained_variables(
@@ -50,15 +44,13 @@ function test_FactDotProdWithSet(T)
     LRO.Bridges.add_all_bridges(model, T)
     F = Matrix{T}
     D = Vector{T}
-    V = Vector{LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}}}
     @test MOI.supports_add_constrained_variables(
         model,
-        FactDotProdWithSet{T,F,D,V},
+        FactDotProdWithSet{T,F,D},
     )
-    P = Vector{LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}}}
     @test MOI.supports_add_constrained_variables(
         model,
-        PosDefFactDotProdWithSet{T,F,P},
+        PosDefFactDotProdWithSet{T,F},
     )
 end
 
