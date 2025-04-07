@@ -37,7 +37,9 @@ function _test_factorization(A, B)
 end
 
 function test_inconsistent_length()
-    err = ErrorException("Length `1` of diagonal does not match number of columns `2` of factor")
+    err = ErrorException(
+        "Length `1` of diagonal does not match number of columns `2` of factor",
+    )
     @test_throws err LRO.Factorization(ones(1, 2), [1.0])
 end
 
