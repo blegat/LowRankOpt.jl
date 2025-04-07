@@ -11,22 +11,16 @@ MOI.is_empty(::TestModel) = true
 # Like SDPLR
 struct FactDotProdWithSetModel{T} <: TestModel{T} end
 
-const FactDotProdWithSet{
-    T,
-    F<:AbstractMatrix{T},
-    D<:AbstractVector{T},
-} = LRO.SetDotProducts{
-    LRO.WITH_SET,
-    MOI.PositiveSemidefiniteConeTriangle,
-    LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
-}
+const FactDotProdWithSet{T,F<:AbstractMatrix{T},D<:AbstractVector{T}} =
+    LRO.SetDotProducts{
+        LRO.WITH_SET,
+        MOI.PositiveSemidefiniteConeTriangle,
+        LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
+    }
 
 const OneVec{T} = FillArrays.Ones{T,1,Tuple{Base.OneTo{Int}}}
 
-const PosDefFactDotProdWithSet{
-    T,
-    F<:AbstractMatrix{T},
-} = LRO.SetDotProducts{
+const PosDefFactDotProdWithSet{T,F<:AbstractMatrix{T}} = LRO.SetDotProducts{
     LRO.WITH_SET,
     MOI.PositiveSemidefiniteConeTriangle,
     LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}},

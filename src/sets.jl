@@ -57,11 +57,8 @@ if `W` is `WITHOUT_SET`, this is the set:
 if `W` is `WITH_SET`, this is the set:
 ``\\{ (y, c) \\in \\mathbb{R}^{m} : \\sum_{i=1}^m y_i a_i - c \\in \\text{set} \\}.``
 """
-struct LinearCombinationInSet{
-    W,
-    S<:MOI.AbstractVectorSet,
-    V,
-} <: MOI.AbstractVectorSet
+struct LinearCombinationInSet{W,S<:MOI.AbstractVectorSet,V} <:
+       MOI.AbstractVectorSet
     set::S
     vectors::Vector{V}
 end
@@ -96,7 +93,10 @@ function Base.convert(
     ::Type{LinearCombinationInSet{W,S,V}},
     set::LinearCombinationInSet,
 ) where {W,S,V}
-    return LinearCombinationInSet{W,S,V}(set.set, convert(Vector{V}, set.vectors))
+    return LinearCombinationInSet{W,S,V}(
+        set.set,
+        convert(Vector{V}, set.vectors),
+    )
 end
 
 function MOI.dual_set(s::SetDotProducts)
@@ -111,9 +111,7 @@ function MOI.dual_set(s::LinearCombinationInSet)
     return SetDotProducts(s.side_dimension, s.vectors)
 end
 
-function MOI.dual_set_type(
-    ::Type{LinearCombinationInSet{W,S,V}},
-) where {W,S,V}
+function MOI.dual_set_type(::Type{LinearCombinationInSet{W,S,V}}) where {W,S,V}
     return SetDotProducts{W,S,V}
 end
 
