@@ -4,14 +4,14 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
-struct DotProductsBridge{T,S,A,V} <: MOI.Bridges.Variable.SetMapBridge{
+struct DotProductsBridge{T,S,V} <: MOI.Bridges.Variable.SetMapBridge{
     T,
     S,
-    LRO.SetDotProducts{LRO.WITH_SET,S,A,V},
+    LRO.SetDotProducts{LRO.WITH_SET,S,V},
 }
     variables::Vector{MOI.VariableIndex}
     constraint::MOI.ConstraintIndex{MOI.VectorOfVariables,S}
-    set::LRO.SetDotProducts{LRO.WITH_SET,S,A,V}
+    set::LRO.SetDotProducts{LRO.WITH_SET,S,V}
 end
 
 function MOI.Bridges.Variable.supports_constrained_variable(
@@ -23,16 +23,16 @@ end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:DotProductsBridge{T}},
-    ::Type{LRO.SetDotProducts{LRO.WITH_SET,S,A,V}},
-) where {T,S,A,V}
-    return DotProductsBridge{T,S,A,V}
+    ::Type{LRO.SetDotProducts{LRO.WITH_SET,S,V}},
+) where {T,S,V}
+    return DotProductsBridge{T,S,V}
 end
 
 function MOI.Bridges.Variable.bridge_constrained_variable(
-    BT::Type{DotProductsBridge{T,S,A,V}},
+    BT::Type{DotProductsBridge{T,S,V}},
     model::MOI.ModelLike,
-    set::LRO.SetDotProducts{LRO.WITH_SET,S,A,V},
-) where {T,S,A,V}
+    set::LRO.SetDotProducts{LRO.WITH_SET,S,V},
+) where {T,S,V}
     variables, constraint = MOI.add_constrained_variables(
         model,
         MOI.Bridges.inverse_map_set(BT, set),

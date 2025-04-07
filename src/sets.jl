@@ -9,16 +9,16 @@ if `W` is `WITHOUT_SET`, this is the set:
 if `W` is `WITH_SET`, this is the set:
 ``\\{ ((\\langle a_1, x \\rangle, ..., \\langle a_m, x \\rangle, x) \\in \\mathbb{R}^{m + d} : x \\in \\text{set} \\}.``
 """
-struct SetDotProducts{W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}} <:
+struct SetDotProducts{W,S<:MOI.AbstractVectorSet,V<:AbstractVector} <:
        MOI.AbstractVectorSet
     set::S
-    vectors::V
+    vectors::Vector{V}
 end
 function SetDotProducts{W}(
     set::S,
-    vector::V,
-) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
-    return SetDotProducts{W,S,A,V}(set, vector)
+    vector::Vector{V},
+) where {W,S<:MOI.AbstractVectorSet,V<:AbstractVector}
+    return SetDotProducts{W,S,V}(set, vector)
 end
 
 function Base.:(==)(s1::SetDotProducts, s2::SetDotProducts)
@@ -35,17 +35,17 @@ function MOI.dimension(s::SetDotProducts{WITH_SET})
 end
 
 function MOI.Bridges.Constraint.conversion_cost(
-    ::Type{SetDotProducts{W,S,A1,Vector{A1}}},
-    ::Type{SetDotProducts{W,S,A2,Vector{A2}}},
-) where {W,S,A1,A2}
-    return MOI.Bridges.Constraint.conversion_cost(A1, A2)
+    ::Type{SetDotProducts{W,S,V1}},
+    ::Type{SetDotProducts{W,S,V2}},
+) where {W,S,V1,V2}
+    return MOI.Bridges.Constraint.conversion_cost(V1, V2)
 end
 
 function Base.convert(
-    ::Type{SetDotProducts{W,S,A,V}},
+    ::Type{SetDotProducts{W,S,V}},
     set::SetDotProducts,
-) where {W,S,A,V}
-    return SetDotProducts{W,S,A,V}(set.set, convert(V, set.vectors))
+) where {W,S,V}
+    return SetDotProducts{W,S,V}(set.set, convert(Vector{V}, set.vectors))
 end
 
 """
@@ -57,20 +57,16 @@ if `W` is `WITHOUT_SET`, this is the set:
 if `W` is `WITH_SET`, this is the set:
 ``\\{ (y, c) \\in \\mathbb{R}^{m} : \\sum_{i=1}^m y_i a_i - c \\in \\text{set} \\}.``
 """
-struct LinearCombinationInSet{
-    W,
-    S<:MOI.AbstractVectorSet,
-    A,
-    V<:AbstractVector{A},
-} <: MOI.AbstractVectorSet
+struct LinearCombinationInSet{W,S<:MOI.AbstractVectorSet,V} <:
+       MOI.AbstractVectorSet
     set::S
-    vectors::V
+    vectors::Vector{V}
 end
 function LinearCombinationInSet{W}(
     set::S,
-    vector::V,
-) where {W,S<:MOI.AbstractVectorSet,A,V<:AbstractVector{A}}
-    return LinearCombinationInSet{W,S,A,V}(set, vector)
+    vector::Vector{V},
+) where {W,S<:MOI.AbstractVectorSet,V<:AbstractVector}
+    return LinearCombinationInSet{W,S,V}(set, vector)
 end
 
 function Base.:(==)(s1::LinearCombinationInSet, s2::LinearCombinationInSet)
@@ -87,35 +83,36 @@ function MOI.dimension(s::LinearCombinationInSet{WITH_SET})
 end
 
 function MOI.Bridges.Constraint.conversion_cost(
-    ::Type{LinearCombinationInSet{W,S,A1,Vector{A1}}},
-    ::Type{LinearCombinationInSet{W,S,A2,Vector{A2}}},
-) where {W,S,A1,A2}
-    return MOI.Bridges.Constraint.conversion_cost(A1, A2)
+    ::Type{LinearCombinationInSet{W,S,V1}},
+    ::Type{LinearCombinationInSet{W,S,V2}},
+) where {W,S,V1,V2}
+    return MOI.Bridges.Constraint.conversion_cost(V1, V2)
 end
 
 function Base.convert(
-    ::Type{LinearCombinationInSet{W,S,A,V}},
+    ::Type{LinearCombinationInSet{W,S,V}},
     set::LinearCombinationInSet,
-) where {W,S,A,V}
-    return LinearCombinationInSet{W,S,A,V}(set.set, convert(V, set.vectors))
+) where {W,S,V}
+    return LinearCombinationInSet{W,S,V}(
+        set.set,
+        convert(Vector{V}, set.vectors),
+    )
 end
 
 function MOI.dual_set(s::SetDotProducts)
     return LinearCombinationInSet(s.set, s.vectors)
 end
 
-function MOI.dual_set_type(::Type{SetDotProducts{W,S,A,V}}) where {W,S,A,V}
-    return LinearCombinationInSet{W,S,A,V}
+function MOI.dual_set_type(::Type{SetDotProducts{W,S,V}}) where {W,S,V}
+    return LinearCombinationInSet{W,S,V}
 end
 
 function MOI.dual_set(s::LinearCombinationInSet)
     return SetDotProducts(s.side_dimension, s.vectors)
 end
 
-function MOI.dual_set_type(
-    ::Type{LinearCombinationInSet{W,S,A,V}},
-) where {W,S,A,V}
-    return SetDotProducts{W,S,A,V}
+function MOI.dual_set_type(::Type{LinearCombinationInSet{W,S,V}}) where {W,S,V}
+    return SetDotProducts{W,S,V}
 end
 
 abstract type AbstractFactorization{T,F} <: AbstractMatrix{T} end
