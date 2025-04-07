@@ -2,6 +2,7 @@ module TestSets
 
 using Test
 import LinearAlgebra
+import MathOptInterface as MOI
 import LowRankOpt as LRO
 
 function _test_factorization(A, B)
@@ -22,6 +23,15 @@ function _test_factorization(A, B)
             @test vA[k] == vB[k]
             @test vA[k] == A[i, j]
         end
+    end
+    for W in [LRO.WITH_SET, LRO.WITHOUT_SET]
+        set = MOI.PositiveSemidefiniteConeTriangle(d)
+        primal = LRO.SetDotProducts{W}(set, [vA])
+        dual = LRO.LinearCombinationInSet{W}(set, [vA])
+        @test MOI.dual_set(primal) == dual
+        @test MOI.dual_set_type(typeof(primal)) == typeof(dual)
+        @test MOI.dual_set(dual) == primal
+        @test MOI.dual_set_type(typeof(dual)) == typeof(primal)
     end
     return
 end

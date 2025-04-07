@@ -99,16 +99,16 @@ function Base.convert(
     )
 end
 
-function MOI.dual_set(s::SetDotProducts)
-    return LinearCombinationInSet(s.set, s.vectors)
+function MOI.dual_set(s::SetDotProducts{W}) where {W}
+    return LinearCombinationInSet{W}(s.set, s.vectors)
 end
 
 function MOI.dual_set_type(::Type{SetDotProducts{W,S,V}}) where {W,S,V}
     return LinearCombinationInSet{W,S,V}
 end
 
-function MOI.dual_set(s::LinearCombinationInSet)
-    return SetDotProducts(s.side_dimension, s.vectors)
+function MOI.dual_set(s::LinearCombinationInSet{W}) where {W}
+    return SetDotProducts{W}(s.set, s.vectors)
 end
 
 function MOI.dual_set_type(::Type{LinearCombinationInSet{W,S,V}}) where {W,S,V}
