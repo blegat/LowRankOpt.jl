@@ -1,12 +1,14 @@
-struct AppendZeroBridge{T,S,V,F,G} <:
-       MOI.Bridges.Constraint.SetMapBridge{
+struct AppendZeroBridge{T,S,V,F,G} <: MOI.Bridges.Constraint.SetMapBridge{
     T,
     LRO.LinearCombinationInSet{LRO.WITH_SET,S,V},
     LRO.LinearCombinationInSet{LRO.WITHOUT_SET,S,V},
     F,
     G,
 }
-    constraint::MOI.ConstraintIndex{F,LRO.LinearCombinationInSet{LRO.WITH_SET,S,V}}
+    constraint::MOI.ConstraintIndex{
+        F,
+        LRO.LinearCombinationInSet{LRO.WITH_SET,S,V},
+    }
     set_dimension::Int
 end
 
@@ -28,12 +30,7 @@ function MOI.Bridges.Constraint.concrete_bridge_type(
 end
 
 function _map_function(::Type{T}, func, set_dimension) where {T}
-    return MOI.Utilities.operate(
-        vcat,
-        T,
-        func,
-        zeros(T, set_dimension),
-    )
+    return MOI.Utilities.operate(vcat, T, func, zeros(T, set_dimension))
 end
 
 function MOI.Bridges.Constraint.bridge_constraint(
@@ -43,7 +40,8 @@ function MOI.Bridges.Constraint.bridge_constraint(
     set::LRO.LinearCombinationInSet{LRO.WITHOUT_SET,S,V},
 ) where {T,S,F,G,V}
     mapped_func = _map_function(T, func, MOI.dimension(set.set))
-    constraint = MOI.add_constraint(model, mapped_func, MOI.Bridges.map_set(BT, set))
+    constraint =
+        MOI.add_constraint(model, mapped_func, MOI.Bridges.map_set(BT, set))
     return AppendZeroBridge{T,S,V,F,G}(constraint, MOI.dimension(set.set))
 end
 
@@ -67,7 +65,7 @@ end
 
 function MOI.Bridges.adjoint_map_function(bridge::AppendZeroBridge, func)
     scalars = MOI.Utilities.eachscalar(func)
-    return scalars[1:(length(scalars) - bridge.set_dimension)]
+    return scalars[1:(length(scalars)-bridge.set_dimension)]
 end
 
 function MOI.Bridges.inverse_map_function(bridge::AppendZeroBridge, func)
