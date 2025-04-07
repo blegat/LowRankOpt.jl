@@ -4,7 +4,10 @@ struct AppendSetBridge{T,S,V} <: MOI.Bridges.Variable.SetMapBridge{
     LRO.SetDotProducts{LRO.WITHOUT_SET,S,V},
 }
     variables::Vector{MOI.VariableIndex}
-    constraint::MOI.ConstraintIndex{MOI.VectorOfVariables,LRO.SetDotProducts{LRO.WITH_SET,S,V}}
+    constraint::MOI.ConstraintIndex{
+        MOI.VectorOfVariables,
+        LRO.SetDotProducts{LRO.WITH_SET,S,V},
+    }
     num_vectors::Int
 end
 
@@ -34,7 +37,10 @@ function MOI.Bridges.Variable.bridge_constrained_variable(
     return BT(variables, constraint, length(set.vectors))
 end
 
-function MOI.Bridges.map_set(::AppendSetBridge, set::LRO.SetDotProducts{LRO.WITH_SET})
+function MOI.Bridges.map_set(
+    ::AppendSetBridge,
+    set::LRO.SetDotProducts{LRO.WITH_SET},
+)
     return LRO.SetDotProducts{LRO.WITHOUT_SET}(set.set, set.vectors)
 end
 
