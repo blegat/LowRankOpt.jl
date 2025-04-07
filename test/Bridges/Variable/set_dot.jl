@@ -22,7 +22,7 @@ function runtests()
     return
 end
 
-function test_psd()
+function test_psd(T::Type)
     MOI.Bridges.runtests(
         LRO.Bridges.Variable.DotProductsBridge,
         model -> begin
