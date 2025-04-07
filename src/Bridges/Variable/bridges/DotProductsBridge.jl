@@ -52,10 +52,10 @@ function MOI.Bridges.inverse_map_set(
 end
 
 function MOI.Bridges.map_function(
-    bridge::DotProductsBridge{T},
+    bridge::DotProductsBridge,
     func,
     i::MOI.Bridges.IndexInVector,
-) where {T}
+)
     scalars = MOI.Utilities.eachscalar(func)
     if i.value in eachindex(bridge.set.vectors)
         return MOI.Utilities.set_dot(
@@ -68,7 +68,7 @@ function MOI.Bridges.map_function(
     end
 end
 
-function MOI.Bridges.map_function(bridge::DotProductsBridge{T}, func) where {T}
+function MOI.Bridges.map_function(bridge::DotProductsBridge, func)
     scalars = MOI.Utilities.eachscalar(func)
     return MOI.Utilities.vectorize(
         vcat(

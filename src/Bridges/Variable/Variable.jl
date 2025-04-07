@@ -9,6 +9,7 @@ end
 
 function add_all_bridges(model, ::Type{T}) where {T}
     MOI.Bridges.add_bridge(model, DotProductsBridge{T})
+    MOI.Bridges.add_bridge(model, AppendSetBridge{T})
     return
 end
 
