@@ -64,11 +64,27 @@ function test_LinearCombiInSetModel(T)
         end
     end
     for psd in [false, true]
-        @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITHOUT_SET, T, 2; primal = false, psd)) <: LRO.Bridges.Constraint.AppendZeroBridge{T}
-        @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITH_SET, T, 1; primal = false, psd)) <: LRO.Bridges.Constraint.ConversionBridge
+        @test MOI.Bridges.bridge_type(
+            model,
+            F,
+            set_type(LRO.WITHOUT_SET, T, 2; primal = false, psd),
+        ) <: LRO.Bridges.Constraint.AppendZeroBridge{T}
+        @test MOI.Bridges.bridge_type(
+            model,
+            F,
+            set_type(LRO.WITH_SET, T, 1; primal = false, psd),
+        ) <: LRO.Bridges.Constraint.ConversionBridge
     end
-    @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITHOUT_SET, T, 1; primal = false, psd = true)) <: LRO.Bridges.Constraint.ConversionBridge
-    @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITHOUT_SET, T, 1; primal = false, psd = false)) <: LRO.Bridges.Constraint.AppendZeroBridge{T}
+    @test MOI.Bridges.bridge_type(
+        model,
+        F,
+        set_type(LRO.WITHOUT_SET, T, 1; primal = false, psd = true),
+    ) <: LRO.Bridges.Constraint.ConversionBridge
+    @test MOI.Bridges.bridge_type(
+        model,
+        F,
+        set_type(LRO.WITHOUT_SET, T, 1; primal = false, psd = false),
+    ) <: LRO.Bridges.Constraint.AppendZeroBridge{T}
 end
 
 # Like SDPLR
@@ -100,11 +116,23 @@ function test_FactDotProdWithSet(T)
         end
     end
     for psd in [false, true]
-        @test MOI.Bridges.bridge_type(model, set_type(LRO.WITHOUT_SET, T, 2; primal = true, psd)) <: LRO.Bridges.Variable.AppendSetBridge{T}
-        @test MOI.Bridges.bridge_type(model, set_type(LRO.WITH_SET, T, 1; primal = true, psd)) <: LRO.Bridges.Variable.ConversionBridge
+        @test MOI.Bridges.bridge_type(
+            model,
+            set_type(LRO.WITHOUT_SET, T, 2; primal = true, psd),
+        ) <: LRO.Bridges.Variable.AppendSetBridge{T}
+        @test MOI.Bridges.bridge_type(
+            model,
+            set_type(LRO.WITH_SET, T, 1; primal = true, psd),
+        ) <: LRO.Bridges.Variable.ConversionBridge
     end
-    @test MOI.Bridges.bridge_type(model, set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = true)) <: LRO.Bridges.Variable.ConversionBridge
-    @test MOI.Bridges.bridge_type(model, set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = false)) <: LRO.Bridges.Variable.AppendSetBridge{T}
+    @test MOI.Bridges.bridge_type(
+        model,
+        set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = true),
+    ) <: LRO.Bridges.Variable.ConversionBridge
+    @test MOI.Bridges.bridge_type(
+        model,
+        set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = false),
+    ) <: LRO.Bridges.Variable.AppendSetBridge{T}
 end
 
 function runtests()
