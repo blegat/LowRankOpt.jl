@@ -71,10 +71,7 @@ function test_conversion()
     lowrank = LRO.Factorization(F, [1])
     rankone = LRO.Factorization([1, 2], fill(1, tuple()))
     psd_rankone = LRO.positive_semidefinite_factorization([1, 2])
-    for (a, b) in [
-        (lowrank, rankone),
-        (lowrank, psd_rankone),
-    ]
+    for (a, b) in [(lowrank, rankone), (lowrank, psd_rankone)]
         _test_convert(a, b)
         _test_convert(a, b) do f
             return LRO.TriangleVectorization(f)
