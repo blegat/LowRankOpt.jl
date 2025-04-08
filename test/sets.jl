@@ -67,17 +67,21 @@ end
 _test_convert(f, a, b) = _test_convert(f(a), f(b))
 
 function test_conversion()
-    lowrank = LRO.Factorization(reshape([1, 2], 2, 1), [-1])
-    rankone = LRO.Factorization([1, 2], fill(-1, tuple()))
-    _test_convert(lowrank, rankone)
-    _test_convert(lowrank, rankone) do f
-        return LRO.TriangleVectorization(f)
-    end
-    _test_convert(lowrank, rankone) do f
-        return LRO.SetDotProducts{LRO.WITH_SET}(
-            MOI.PositiveSemidefiniteConeTriangle(2),
-            [LRO.TriangleVectorization(f)],
-        )
+    F = reshape([1, 2], 2, 1)
+    lowrank = LRO.Factorization(F, [1])
+    rankone = LRO.Factorization([1, 2], fill(1, tuple()))
+    psd_rankone = LRO.positive_semidefinite_factorization([1, 2])
+    for (a, b) in [(lowrank, rankone), (lowrank, psd_rankone)]
+        _test_convert(a, b)
+        _test_convert(a, b) do f
+            return LRO.TriangleVectorization(f)
+        end
+        _test_convert(a, b) do f
+            return LRO.SetDotProducts{LRO.WITH_SET}(
+                MOI.PositiveSemidefiniteConeTriangle(2),
+                [LRO.TriangleVectorization(f)],
+            )
+        end
     end
 end
 

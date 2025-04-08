@@ -146,21 +146,21 @@ struct Factorization{
     factor::F
     scaling::D
     function Factorization{T,F,S}(
-        factor::F,
-        scaling::S,
+        factor::AbstractMatrix{T},
+        scaling::AbstractVector{T},
     ) where {T,F<:AbstractMatrix{T},S<:AbstractVector{T}}
         if length(scaling) != size(factor, 2)
             error(
                 "Length `$(length(scaling))` of diagonal does not match number of columns `$(size(factor, 2))` of factor",
             )
         end
-        return new{T,typeof(factor),typeof(scaling)}(factor, scaling)
+        return new{T,F,S}(factor, scaling)
     end
     function Factorization{T,F,S}(
-        factor::F,
-        scaling::S,
+        factor::AbstractVector{T},
+        scaling::AbstractArray{T,0},
     ) where {T,F<:AbstractVector{T},S<:AbstractArray{T,0}}
-        return new{T,typeof(factor),typeof(scaling)}(factor, scaling)
+        return new{T,F,S}(factor, scaling)
     end
 end
 
