@@ -11,24 +11,42 @@ MOI.is_empty(::TestModel) = true
 # Like SDPLR
 struct FactDotProdWithSetModel{T} <: TestModel{T} end
 
-const FactDotProd{W,T,F<:AbstractMatrix{T},D<:AbstractVector{T}} =
+function set_type(W, T, N; primal::Bool, psd::Bool)
+    F = Array{T,N}
+    if psd
+        if N == 2
+            V = FillArrays.Ones{T,N - 1,Tuple{Base.OneTo{Int}}}
+        else
+            V = FillArrays.Ones{T,0,Tuple{}}
+        end
+    else
+        V = Array{T,N - 1}
+    end
+    if primal
+        return LRO.SetDotProducts{
+            W,
+            MOI.PositiveSemidefiniteConeTriangle,
+            LRO.TriangleVectorization{T,LRO.Factorization{T,F,V}},
+        }
+    else
+        return LRO.LinearCombinationInSet{
+            W,
+            MOI.PositiveSemidefiniteConeTriangle,
+            LRO.TriangleVectorization{T,LRO.Factorization{T,F,V}},
+        }
+    end
+end
+
+const _SetDotProd{T,F<:AbstractMatrix{T},D<:AbstractVector{T}} =
     LRO.SetDotProducts{
-        W,
+        LRO.WITH_SET,
         MOI.PositiveSemidefiniteConeTriangle,
         LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
     }
 
-const OneVec{T} = FillArrays.Ones{T,1,Tuple{Base.OneTo{Int}}}
-
-const PosDefFactDotProd{W,T,F<:AbstractMatrix{T}} = LRO.SetDotProducts{
-    W,
-    MOI.PositiveSemidefiniteConeTriangle,
-    LRO.TriangleVectorization{T,LRO.Factorization{T,F,OneVec{T}}},
-}
-
 function MOI.supports_add_constrained_variables(
     ::FactDotProdWithSetModel{T},
-    ::Type{<:FactDotProd{LRO.WITH_SET,T}},
+    ::Type{<:_SetDotProd},
 ) where {T}
     return true
 end
@@ -36,17 +54,15 @@ end
 function test_FactDotProdWithSet(T)
     model = MOI.instantiate(FactDotProdWithSetModel{T}, with_bridge_type = T)
     LRO.Bridges.add_all_bridges(model, T)
-    F = Matrix{T}
-    D = Vector{T}
-    @testset "W" for W in [LRO.WITH_SET, LRO.WITHOUT_SET]
-        @test MOI.supports_add_constrained_variables(
-            model,
-            FactDotProd{W,T,F,D},
-        )
-        @test MOI.supports_add_constrained_variables(
-            model,
-            PosDefFactDotProd{W,T,F},
-        )
+    @testset "$W" for W in [LRO.WITH_SET, LRO.WITHOUT_SET]
+        @testset "psd = $psd" for psd in [false, true]
+            @testset "N = $N" for N in 1:2
+                @test MOI.supports_add_constrained_variables(
+                    model,
+                    set_type(W, T, N; primal = true, psd),
+                )
+            end
+        end
     end
 end
 
