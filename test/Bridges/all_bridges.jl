@@ -71,6 +71,7 @@ function test_LinearCombiInSetModel(T)
     @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITHOUT_SET, T, 1; primal = false, psd = false)) <: LRO.Bridges.Constraint.AppendZeroBridge{T}
 end
 
+# Like SDPLR
 struct FactDotProdWithSetModel{T} <: TestModel{T} end
 
 const _SetDotProd{T,F<:AbstractMatrix{T},D<:AbstractVector{T}} =
