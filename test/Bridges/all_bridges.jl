@@ -8,9 +8,6 @@ import FillArrays
 abstract type TestModel{T} <: MOI.ModelLike end
 MOI.is_empty(::TestModel) = true
 
-# Like SDPLR
-struct FactDotProdWithSetModel{T} <: TestModel{T} end
-
 function set_type(W, T, N; primal::Bool, psd::Bool)
     F = Array{T,N}
     if psd
@@ -37,6 +34,45 @@ function set_type(W, T, N; primal::Bool, psd::Bool)
     end
 end
 
+struct LinearCombiInSetModel{T} <: TestModel{T} end
+
+const _LinearCombiInSet{T,F<:AbstractMatrix{T},D<:AbstractVector{T}} =
+    LRO.LinearCombinationInSet{
+        LRO.WITH_SET,
+        MOI.PositiveSemidefiniteConeTriangle,
+        LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
+    }
+
+function MOI.supports_constraint(
+    ::LinearCombiInSetModel{T},
+    ::Type{MOI.VectorAffineFunction{T}},
+    ::Type{<:_LinearCombiInSet},
+) where {T}
+    return true
+end
+
+function test_LinearCombiInSetModel(T)
+    model = MOI.instantiate(LinearCombiInSetModel{T}, with_bridge_type = T)
+    LRO.Bridges.add_all_bridges(model, T)
+    F = MOI.VectorAffineFunction{T}
+    @testset "$W" for W in [LRO.WITH_SET, LRO.WITHOUT_SET]
+        @testset "psd = $psd" for psd in [false, true]
+            @testset "N = $N" for N in 1:2
+                S = set_type(W, T, N; primal = false, psd)
+                @test MOI.supports_constraint(model, F, S)
+            end
+        end
+    end
+    for psd in [false, true]
+        @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITHOUT_SET, T, 2; primal = false, psd)) <: LRO.Bridges.Constraint.AppendZeroBridge{T}
+        @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITH_SET, T, 1; primal = false, psd)) <: LRO.Bridges.Constraint.ConversionBridge
+    end
+    @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITHOUT_SET, T, 1; primal = false, psd = true)) <: LRO.Bridges.Constraint.ConversionBridge
+    @test MOI.Bridges.bridge_type(model, F, set_type(LRO.WITHOUT_SET, T, 1; primal = false, psd = false)) <: LRO.Bridges.Constraint.AppendZeroBridge{T}
+end
+
+struct FactDotProdWithSetModel{T} <: TestModel{T} end
+
 const _SetDotProd{T,F<:AbstractMatrix{T},D<:AbstractVector{T}} =
     LRO.SetDotProducts{
         LRO.WITH_SET,
@@ -57,13 +93,17 @@ function test_FactDotProdWithSet(T)
     @testset "$W" for W in [LRO.WITH_SET, LRO.WITHOUT_SET]
         @testset "psd = $psd" for psd in [false, true]
             @testset "N = $N" for N in 1:2
-                @test MOI.supports_add_constrained_variables(
-                    model,
-                    set_type(W, T, N; primal = true, psd),
-                )
+                S = set_type(W, T, N; primal = true, psd)
+                @test MOI.supports_add_constrained_variables(model, S)
             end
         end
     end
+    for psd in [false, true]
+        @test MOI.Bridges.bridge_type(model, set_type(LRO.WITHOUT_SET, T, 2; primal = true, psd)) <: LRO.Bridges.Variable.AppendSetBridge{T}
+        @test MOI.Bridges.bridge_type(model, set_type(LRO.WITH_SET, T, 1; primal = true, psd)) <: LRO.Bridges.Variable.ConversionBridge
+    end
+    @test MOI.Bridges.bridge_type(model, set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = true)) <: LRO.Bridges.Variable.ConversionBridge
+    @test MOI.Bridges.bridge_type(model, set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = false)) <: LRO.Bridges.Variable.AppendSetBridge{T}
 end
 
 function runtests()
