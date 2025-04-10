@@ -24,13 +24,14 @@ end
 function test_runtests()
     # Some tests are excluded because UniversalFallback accepts absolutely
     # everything.
-    LRO.Test.runtests(
+    MOI.Test.runtests(
         MOI.Utilities.MockOptimizer(
             MOI.Utilities.UniversalFallback(MOI.Utilities.Model{Float64}()),
         ),
         MOI.Test.Config(),
         warn_unsupported = true,
         verbose = true,
+        test_module = LRO.Test,
     )
     return
 end
