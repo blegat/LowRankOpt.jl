@@ -1,3 +1,8 @@
+# Copyright (c) 2024: Benoît Legat and contributors
+#
+# Use of this source code is governed by an MIT-style license that can be found
+# in the LICENSE.md file or at https://opensource.org/licenses/MIT.
+
 struct AppendSetBridge{T,S,V} <: MOI.Bridges.Variable.SetMapBridge{
     T,
     LRO.SetDotProducts{LRO.WITH_SET,S,V},
