@@ -12,6 +12,14 @@ for filename in readdir(joinpath(@__DIR__, "bridges"); join = true)
     include(filename)
 end
 
+function MOI.get(
+    model::MOI.ModelLike,
+    attr::LRO.InnerAttribute,
+    bridge::MOI.Bridges.Constraint.SetMapBridge,
+)
+    return MOI.get(model, attr, bridge.constraint)
+end
+
 const ConversionBridge{W,T} = MOI.Bridges.Constraint.SetConversionBridge{
     T,
     LRO.LinearCombinationInSet{

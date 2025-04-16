@@ -68,4 +68,37 @@ DIMACS error measures: 5.86e-06 0.00e+00 0.00e+00 0.00e+00 2.25e-05 9.84e-06
 
 julia> objective_value(model)
 17.99998881724702
+
+julia> con_ref = VariableInSetRef(model[:dot_prod_set]);
+```
+
+Use `LRO.InnerAttribute` to request the `SDPLR.Factor` attribute.
+```julia-repl
+julia> MOI.get(model, LRO.InnerAttribute(SDPLR.Factor()), VariableInSetRef(model[:dot_prod_set]))
+4×3 Matrix{Float64}:
+  0.949505   0.31101    0.0414433
+ -0.950269  -0.308646  -0.0415714
+ -0.949503  -0.311095  -0.0406689
+ -0.948855  -0.312898  -0.0420402
+```
+
+To check if SDPLR found an optimal solution, we need to check whether the dual solution is feasible.
+This can be achieved as follows:
+```julia-repl
+julia> dual_set = MOI.dual_set(constraint_object(con_ref).set);
+
+julia> MOI.Utilities.distance_to_set(dual(con_ref), dual_set)
+ERROR: distance_to_set using the distance metric MathOptInterface.Utilities.ProjectionUpperBoundDistance() for set type MathOptInterface.PositiveSemidefiniteConeTriangle has not been implemented yet.
+Stacktrace:
+ [1] error(s::String)
+   @ Base ./error.jl:35
+ [2] distance_to_set(d::MathOptInterface.Utilities.ProjectionUpperBoundDistance, ::Vector{…}, set::MathOptInterface.PositiveSemidefiniteConeTriangle)
+   @ MathOptInterface.Utilities ~/.julia/dev/MathOptInterface/src/Utilities/distance_to_set.jl:75
+ [3] distance_to_set(d::MathOptInterface.Utilities.ProjectionUpperBoundDistance, x::Vector{…}, set::LowRankOpt.LinearCombinationInSet{…})
+   @ LowRankOpt ~/.julia/dev/LowRankOpt/src/distance_to_set.jl:13
+ [4] distance_to_set(point::Vector{…}, set::LowRankOpt.LinearCombinationInSet{…})
+   @ MathOptInterface.Utilities ~/.julia/dev/MathOptInterface/src/Utilities/distance_to_set.jl:71
+ [5] top-level scope
+   @ REPL[94]:1
+Some type information was truncated. Use `show(err)` to see complete types.
 ```
