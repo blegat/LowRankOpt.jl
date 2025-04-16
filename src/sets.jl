@@ -194,8 +194,15 @@ function Base.getindex(m::Factorization, i::Int, j::Int)
     )
 end
 
+function Base.promote_rule(
+    ::Type{Factorization{T,M,S1}},
+    ::Type{Factorization{T,V,S2}},
+) where {T,M<:AbstractMatrix{T},V<:AbstractVector{T},S1,S2}
+    return Factorization{T,M,S1}
+end
+
 function Base.convert(
-    ::Type{<:Factorization{T,F,V}},
+    ::Type{Factorization{T,F,V}},
     f::Factorization{S,<:AbstractVector{S},<:AbstractArray{S,0}},
 ) where {T,S,F<:AbstractMatrix{T},V<:AbstractVector{T}}
     return Factorization{T,F,V}(
