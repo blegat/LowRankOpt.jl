@@ -71,6 +71,17 @@ end
 
 _test_convert(f, a, b) = _test_convert(f(a), f(b))
 
+function test_promotion()
+    F = ones(2, 2)
+    f = ones(2)
+    a = LRO.Factorization(F, ones(2))
+    b = LRO.Factorization(f, 1.0)
+    @test Base.promote_typeof(a, b) == typeof(a)
+    @test Base.promote_typeof(b, a) == typeof(a)
+    @test eltype([a, b]) == typeof(a)
+    @test eltype([b, a]) == typeof(a)
+end
+
 function test_conversion()
     F = reshape([1, 2], 2, 1)
     lowrank = LRO.Factorization(F, [1])
