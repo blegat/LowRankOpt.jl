@@ -5,7 +5,7 @@ function MOI.Utilities.distance_to_set(
 ) where {T,W}
     MOI.Utilities._check_dimension(x, set)
     if W == WITH_SET
-        init = x[length(set.vectors) + 1:end]
+        init = x[length(set.vectors)+1:end]
     else
         init = zeros(T, MOI.dimension(set.set))
     end
