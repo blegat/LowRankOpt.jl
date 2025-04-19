@@ -43,6 +43,8 @@ adapted to exploit the low-rank constraints.
 julia> include(joinpath(dirname(dirname(pathof(LowRankOpt))), "examples", "maxcut.jl"))
 maxcut (generic function with 2 methods)
 
+julia> weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
+
 julia> model = maxcut(weights, SDPLR.Optimizer);
 
 julia> optimize!(model)
@@ -68,4 +70,71 @@ DIMACS error measures: 5.86e-06 0.00e+00 0.00e+00 0.00e+00 2.25e-05 9.84e-06
 
 julia> objective_value(model)
 17.99998881724702
+
+julia> con_ref = VariableInSetRef(model[:dot_prod_set]);
+```
+
+Use `LRO.InnerAttribute` to request the `SDPLR.Factor` attribute.
+```julia-repl
+julia> MOI.get(model, LRO.InnerAttribute(SDPLR.Factor()), VariableInSetRef(model[:dot_prod_set]))
+4×3 Matrix{Float64}:
+  0.949505   0.31101    0.0414433
+ -0.950269  -0.308646  -0.0415714
+ -0.949503  -0.311095  -0.0406689
+ -0.948855  -0.312898  -0.0420402
+```
+We can see that SDPLR decided to search for a solution of rank at most 3.
+To check if SDPLR found an optimal solution, we need to check whether the dual solution is feasible.
+This can be achieved as follows:
+```julia-repl
+julia> dual_set = MOI.dual_set(constraint_object(con_ref).set);
+
+julia> MOI.Utilities.distance_to_set(dual(con_ref), dual_set)
+1.602881211577939e-8
+```
+
+For the MAX-CUT problem, we know there exists a rank-1 solution where
+the entries of the factor are `-1` or `1` depending on the side of the cut
+the nodes are on. Let's now be greedy and search for a solution of rank-1.
+```julia
+julia> set_attribute(model, "maxrank", (m, n) -> 1)
+
+julia> optimize!(model)
+
+            ***   SDPLR 1.03-beta   ***
+
+===================================================
+ major   minor        val        infeas      time  
+---------------------------------------------------
+    1        0   2.68869170e-01  8.7e-01       0
+    2        7   8.10081717e+01  1.0e+01       0
+    3       10  -1.81587378e+01  2.3e-01       0
+    4       11  -1.80062673e+01  1.3e-01       0
+    5       13  -1.79951904e+01  5.0e-02       0
+    6       15  -1.79981240e+01  1.4e-02       0
+    7       16  -1.79998759e+01  2.2e-03       0
+    8       17  -1.79999980e+01  1.9e-04       0
+    9       18  -1.80000000e+01  1.4e-05       0
+   10       19  -1.80000000e+01  7.1e-07       0
+===================================================
+
+DIMACS error measures: 7.12e-07 0.00e+00 0.00e+00 1.31e-05 1.59e-06 -7.81e-06
+
+
+julia> MOI.get(model, LRO.InnerAttribute(SDPLR.Factor()), VariableInSetRef(model[:dot_prod_set]))
+4×1 Matrix{Float64}:
+ -0.9999998713637199
+  0.9999995531365233
+  0.9999997036204064
+  0.9999995498147483
+```
+
+Note that even though a solution of rank-1 exists, SDPLR is more likely to
+converge to a spurious local minimum if we use a lower-rank, so we should
+be careful before claiming that we found the optimal solution.
+Luckily, the following shows that the dual is feasible which gives a certificate
+of primal optimality.
+```julia-repl
+julia> MOI.Utilities.distance_to_set(dual(con_ref), dual_set)
+0.0
 ```

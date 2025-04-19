@@ -1,4 +1,11 @@
 using LinearAlgebra, JuMP, LowRankOpt
+import LowRankOpt as LRO
+
+function e_i(i, n)
+    ei = zeros(n)
+    ei[i] = 1
+    return ei
+end
 
 function maxcut(weights, solver)
     N = LinearAlgebra.checksquare(weights)

@@ -11,6 +11,8 @@ import MathOptInterface as MOI
 import FillArrays
 
 include("sets.jl")
+include("attributes.jl")
+include("distance_to_set.jl")
 include("Test/Test.jl")
 include("Bridges/Bridges.jl")
 
