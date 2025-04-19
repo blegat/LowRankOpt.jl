@@ -122,7 +122,8 @@ function test_set_dot()
     x = [2, -3, -1, 4, -2]
     y = [3, -1, -2, 1, -3]
     for set in [primal, dual]
-        @test MOI.Utilities.set_dot(x, y, set) == LinearAlgebra.dot(x, y) + x[4] * y[4]
+        @test MOI.Utilities.set_dot(x, y, set) ==
+              LinearAlgebra.dot(x, y) + x[4] * y[4]
         c = copy(x)
         c[4] /= 2
         @test MOI.Utilities.dot_coefficients(x, set) == c
