@@ -120,6 +120,18 @@ function MOI.dual_set_type(::Type{LinearCombinationInSet{W,S,V}}) where {W,S,V}
     return SetDotProducts{W,S,V}
 end
 
+function MOI.Utilities.set_dot(x::AbstractVector, y::AbstractVector, set::Union{SetDotProducts{WITH_SET},LinearCombinationInSet{WITH_SET}})
+    n = length(set.vectors)
+    return LinearAlgebra.dot(x[1:n], y[1:n]) + MOI.Utilities.set_dot(x[n+1:end], y[n+1:end], set.set)
+end
+
+function MOI.Utilities.dot_coefficients(x::AbstractVector, set::Union{SetDotProducts{WITH_SET},LinearCombinationInSet{WITH_SET}})
+    c = copy(x)
+    n = length(set.vectors)
+    c[n+1:end] = MOI.Utilities.dot_coefficients(x[n+1:end], set.set)
+    return c
+end
+
 abstract type AbstractFactorization{T,F} <: AbstractMatrix{T} end
 
 function Base.size(m::AbstractFactorization)
