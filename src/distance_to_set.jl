@@ -8,7 +8,7 @@ function MOI.Utilities.distance_to_set(
     vec = x[(n+1):end]
     init = MOI.Utilities.distance_to_set(d, vec, set.set)^2
     return √sum(1:n; init) do i
-        (x[i] - MOI.Utilities.set_dot(set.vectors[i], vec, set.set))^2
+        return (x[i] - MOI.Utilities.set_dot(set.vectors[i], vec, set.set))^2
     end
 end
 

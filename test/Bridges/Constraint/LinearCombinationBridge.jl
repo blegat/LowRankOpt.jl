@@ -69,7 +69,10 @@ MOI.is_set_by_optimize(::Custom) = false
 
 function test_attribute(T::Type)
     inner = MOI.Utilities.UniversalFallback(MOI.Utilities.Model{T}())
-    model = MOI.Bridges._bridged_model(LRO.Bridges.Constraint.LinearCombinationBridge{T}, inner)
+    model = MOI.Bridges._bridged_model(
+        LRO.Bridges.Constraint.LinearCombinationBridge{T},
+        inner,
+    )
     cx = _model(T, model)
     F = MOI.VectorAffineFunction{T}
     S = MOI.PositiveSemidefiniteConeTriangle

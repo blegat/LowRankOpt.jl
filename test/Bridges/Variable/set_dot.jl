@@ -78,7 +78,10 @@ MOI.is_set_by_optimize(c::Custom) = c.is_set_by_optimize
 
 function test_attribute(T::Type)
     inner = MOI.Utilities.UniversalFallback(MOI.Utilities.Model{T}())
-    model = MOI.Bridges._bridged_model(LRO.Bridges.Variable.DotProductsBridge{T}, inner)
+    model = MOI.Bridges._bridged_model(
+        LRO.Bridges.Variable.DotProductsBridge{T},
+        inner,
+    )
     cx = _model(T, model)
     F = MOI.VectorOfVariables
     S = MOI.PositiveSemidefiniteConeTriangle
@@ -96,7 +99,11 @@ function test_attribute(T::Type)
             @test MOI.is_set_by_optimize(attr) == is_set_by_optimize
         end
     end
-    @test_throws MOI.GetAttributeNotAllowed{Custom} MOI.get(inner.model, attr, ci)
+    @test_throws MOI.GetAttributeNotAllowed{Custom} MOI.get(
+        inner.model,
+        attr,
+        ci,
+    )
 end
 
 end  # module
