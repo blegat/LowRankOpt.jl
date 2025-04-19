@@ -21,27 +21,30 @@ function runtests()
     return
 end
 
+function _model(T, model)
+    _, cx = MOI.add_constrained_variables(
+        model,
+        LRO.LinearCombinationInSet{LRO.WITH_SET}(
+            MOI.PositiveSemidefiniteConeTriangle(2),
+            LRO.TriangleVectorization.([
+                T[
+                    1 2
+                    2 3
+                ],
+                T[
+                    4 5
+                    5 6
+                ],
+            ]),
+        ),
+    )
+    return cx
+end
+
 function test_psd(T::Type)
     MOI.Bridges.runtests(
         LRO.Bridges.Constraint.LinearCombinationBridge,
-        model -> begin
-            x, _ = MOI.add_constrained_variables(
-                model,
-                LRO.LinearCombinationInSet{LRO.WITH_SET}(
-                    MOI.PositiveSemidefiniteConeTriangle(2),
-                    LRO.TriangleVectorization.([
-                        T[
-                            1 2
-                            2 3
-                        ],
-                        T[
-                            4 5
-                            5 6
-                        ],
-                    ]),
-                ),
-            )
-        end,
+        Base.Fix1(_model, T),
         model -> begin
             x = MOI.add_variables(model, 5)
             MOI.add_constraint(
@@ -59,6 +62,22 @@ function test_psd(T::Type)
         constraint_start = [18, 42, 1, 2, 3],
     )
     return
+end
+
+struct Custom <: MOI.AbstractConstraintAttribute end
+MOI.is_set_by_optimize(::Custom) = false
+
+function test_attribute(T::Type)
+    inner = MOI.Utilities.UniversalFallback(MOI.Utilities.Model{T}())
+    model = MOI.Bridges._bridged_model(LRO.Bridges.Constraint.LinearCombinationBridge{T}, inner)
+    cx = _model(T, model)
+    F = MOI.VectorAffineFunction{T}
+    S = MOI.PositiveSemidefiniteConeTriangle
+    ci = only(MOI.get(inner, MOI.ListOfConstraintIndices{F,S}()))
+    MOI.set(inner, Custom(), ci, "test")
+    @test MOI.get(inner, Custom(), ci) == "test"
+    @test MOI.get(inner, LRO.InnerAttribute(Custom()), ci) == "test"
+    @test MOI.get(model, LRO.InnerAttribute(Custom()), cx) == "test"
 end
 
 end  # module

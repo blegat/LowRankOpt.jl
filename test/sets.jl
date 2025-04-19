@@ -128,6 +128,12 @@ function test_set_dot()
         c[4] /= 2
         @test MOI.Utilities.dot_coefficients(x, set) == c
     end
+    @test MOI.Utilities.distance_to_set(y, primal) ≈ 5.291502622
+    @test MOI.Utilities.distance_to_set(y, dual) ≈ 5
+    primal = LRO.SetDotProducts{LRO.WITHOUT_SET}(psd, [zeros(3), ones(3)])
+    dual = MOI.dual_set(primal)
+    y = y[1:2]
+    @test MOI.Utilities.distance_to_set(y, dual) ≈ 2
 end
 
 function runtests()
