@@ -26,10 +26,17 @@ LRO.add_all_bridges(model, Float64)
 Then, either use the `LRO.SetDotProducts` or `LRO.LinearCombinationInSet`.
 [Check with `print_active_bridges(model)`](https://jump.dev/JuMP.jl/stable/tutorials/conic/ellipse_approx/)
 to see if the solver receives the low-rank constraint or if it is transformed to classical constraints.
+
 The solvers that support `LRO.SetDotProducts` are:
-* [DSDP.jl](https://github.com/jump-dev/DSDP.jl/pull/37), [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl/pull/844), [SDPLR.jl](https://github.com/jump-dev/SDPLR.jl/pull/26)
-The solvers that support `LRO.LinearCombinationInSet` are:
+
+* [DSDP.jl](https://github.com/jump-dev/DSDP.jl/pull/37)
 * [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl/pull/844)
+* [SDPLR.jl](https://github.com/jump-dev/SDPLR.jl/pull/26)
+
+The solvers that support `LRO.LinearCombinationInSet` are:
+
+* [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl/pull/844)
+
 If you use `LRO.LinearCombinationInSet` while the solvers supports `LRO.SetDotProducts` or vice versa, simply [use a `Dualization.jl` layer](https://jump.dev/JuMP.jl/stable/tutorials/conic/dualization/).
 
 Note that `Hypatia.jl` only supports `LRO.SetDotProducts{LRO.WITHOUT_SET}` or `LRO.LinearCombinationInSet{LRO.WITHOUT_SET}` and not the `LRO.WITH_SET` version.
