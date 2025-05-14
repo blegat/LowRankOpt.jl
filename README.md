@@ -31,7 +31,7 @@ The solvers that support `LRO.SetDotProducts` are:
 
 * [DSDP.jl](https://github.com/jump-dev/DSDP.jl) : [⚠ WIP](https://github.com/jump-dev/DSDP.jl/pull/37)
 * [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl) : [⚠ WIP](https://github.com/jump-dev/Hypatia.jl/pull/844)
-* [SDPLR.jl](https://github.com/jump-dev/SDPLR.jl) : [⚠ WIP](https://github.com/jump-dev/SDPLR.jl/pull/26)
+* [SDPLR.jl](https://github.com/jump-dev/SDPLR.jl) since [v0.2](https://github.com/jump-dev/SDPLR.jl/releases/tag/v0.2.0)
 
 The solvers that support `LRO.LinearCombinationInSet` are:
 
