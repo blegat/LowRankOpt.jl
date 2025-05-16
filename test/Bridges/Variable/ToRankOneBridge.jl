@@ -27,7 +27,7 @@ function _test_psd(T::Type, W)
         model -> begin
             x, _ = MOI.add_constrained_variables(
                 model,
-                LRO.SetDotProducts{LRO.WITHOUT_SET}(
+                LRO.SetDotProducts{W}(
                     MOI.PositiveSemidefiniteConeTriangle(2),
                     LRO.TriangleVectorization.(
                         LRO.positive_semidefinite_factorization.([
@@ -46,7 +46,7 @@ function _test_psd(T::Type, W)
         model -> begin
             x, _ = MOI.add_constrained_variables(
                 model,
-                LRO.SetDotProducts{LRO.WITHOUT_SET}(
+                LRO.SetDotProducts{W}(
                     MOI.PositiveSemidefiniteConeTriangle(2),
                     LRO.TriangleVectorization.(
                         LRO.positive_semidefinite_factorization.([
@@ -73,6 +73,58 @@ end
 function test_psd(T::Type)
     _test_psd(T, LRO.WITH_SET)
     _test_psd(T, LRO.WITHOUT_SET)
+    return
+end
+
+function test_with_set(T::Type)
+    MOI.Bridges.runtests(
+        LRO.Bridges.Variable.ToRankOneBridge,
+        model -> begin
+            x, _ = MOI.add_constrained_variables(
+                model,
+                LRO.SetDotProducts{LRO.WITH_SET}(
+                    MOI.PositiveSemidefiniteConeTriangle(2),
+                    LRO.TriangleVectorization.([
+                        LRO.Factorization(
+                            T[
+                                1 3
+                                2 4
+                            ],
+                            T[5, 6],
+                        ),
+                    ]),
+                ),
+            )
+            MOI.add_constraint(model, one(T) * x[1], MOI.EqualTo(zero(T)))
+            MOI.add_constraint(model, one(T) * x[2], MOI.LessThan(zero(T)))
+        end,
+        model -> begin
+            x, _ = MOI.add_constrained_variables(
+                model,
+                LRO.SetDotProducts{LRO.WITH_SET}(
+                    MOI.PositiveSemidefiniteConeTriangle(2),
+                    LRO.TriangleVectorization.([
+                        LRO.Factorization(
+                            T[1, 2],
+                            reshape(T[5], tuple()),
+                        ),
+                        LRO.Factorization(
+                            T[3, 4],
+                            reshape(T[6], tuple()),
+                        ),
+                    ]),
+                ),
+            )
+            MOI.add_constraint(
+                model,
+                one(T) * x[1] + one(T) * x[2],
+                MOI.EqualTo(zero(T)),
+            )
+            MOI.add_constraint(model, one(T) * x[3], MOI.LessThan(zero(T)))
+        end;
+        cannot_unbridge = true,
+        eltype = T,
+    )
     return
 end
 
