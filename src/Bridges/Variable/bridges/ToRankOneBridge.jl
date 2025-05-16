@@ -18,36 +18,32 @@ end
 
 function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{<:ToRankOneBridge},
-    ::Type{<:LRO.SetDotProducts{
-        W,
-        S,
-        LRO.TriangleVectorization{
-            T,
-            LRO.Factorization{
-                T,
-                F,
-                D,
-            },
+    ::Type{
+        <:LRO.SetDotProducts{
+            W,
+            S,
+            LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
         },
-    }},
+    },
 ) where {T,W,S,F<:AbstractMatrix{T},D<:AbstractVector{T}}
     return true
 end
 
 lower_dimensional_type(::Type{Array{T,N}}) where {T,N} = Array{T,N-1}
 import FillArrays
-lower_dimensional_type(::Type{FillArrays.Ones{T,1,I}}) where {T,I} = FillArrays.Ones{T,0,Tuple{}}
+function lower_dimensional_type(::Type{FillArrays.Ones{T,1,I}}) where {T,I}
+    return FillArrays.Ones{T,0,Tuple{}}
+end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:ToRankOneBridge{T}},
-    ::Type{<:LRO.SetDotProducts{
-        W,
-        S,
-        LRO.TriangleVectorization{
-            T,
-            LRO.Factorization{T,F,D},
+    ::Type{
+        <:LRO.SetDotProducts{
+            W,
+            S,
+            LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
         },
-    }},
+    },
 ) where {T,W,S,F<:AbstractMatrix{T},D<:AbstractVector{T}}
     V = LRO.TriangleVectorization{
         T,
@@ -67,7 +63,7 @@ function MOI.Bridges.Variable.bridge_constrained_variable(
 ) where {T,W,S,V}
     ranks = Int[size(v.matrix.factor, 2) for v in set.vectors]
     cs = cumsum(ranks)
-    ranges = UnitRange.([1; (cs[1:end-1] .+ 1)], cs)
+    ranges = UnitRange.([1; (cs[1:(end-1)] .+ 1)], cs)
     variables, constraint = MOI.add_constrained_variables(
         model,
         MOI.Bridges.inverse_map_set(BT, set),
@@ -76,10 +72,10 @@ function MOI.Bridges.Variable.bridge_constrained_variable(
 end
 
 function _split_into_rank_ones(F::LRO.Factorization)
-    return [LRO.Factorization(
-        F.factor[:, i],
-        F.scaling[reshape([i], tuple())],
-    ) for i in axes(F.factor, 2)]
+    return [
+        LRO.Factorization(F.factor[:, i], F.scaling[reshape([i], tuple())]) for
+        i in axes(F.factor, 2)
+    ]
 end
 
 function _split_into_rank_ones(v::LRO.TriangleVectorization)

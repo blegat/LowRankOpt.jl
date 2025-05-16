@@ -29,13 +29,15 @@ function _test_psd(T::Type, W)
                 model,
                 LRO.SetDotProducts{LRO.WITHOUT_SET}(
                     MOI.PositiveSemidefiniteConeTriangle(2),
-                    LRO.TriangleVectorization.(LRO.positive_semidefinite_factorization.([
-                        T[
-                            1 3
-                            2 4
-                        ],
-                        T[5; 6;;],
-                    ])),
+                    LRO.TriangleVectorization.(
+                        LRO.positive_semidefinite_factorization.([
+                            T[
+                                1 3
+                                2 4
+                            ],
+                            T[5; 6;;],
+                        ]),
+                    ),
                 ),
             )
             MOI.add_constraint(model, one(T) * x[1], MOI.EqualTo(zero(T)))
@@ -46,14 +48,20 @@ function _test_psd(T::Type, W)
                 model,
                 LRO.SetDotProducts{LRO.WITHOUT_SET}(
                     MOI.PositiveSemidefiniteConeTriangle(2),
-                    LRO.TriangleVectorization.(LRO.positive_semidefinite_factorization.([
-                        T[1, 2],
-                        T[3, 4],
-                        T[5, 6],
-                    ])),
+                    LRO.TriangleVectorization.(
+                        LRO.positive_semidefinite_factorization.([
+                            T[1, 2],
+                            T[3, 4],
+                            T[5, 6],
+                        ]),
+                    ),
                 ),
             )
-            MOI.add_constraint(model, one(T) * x[1] + one(T) * x[2], MOI.EqualTo(zero(T)))
+            MOI.add_constraint(
+                model,
+                one(T) * x[1] + one(T) * x[2],
+                MOI.EqualTo(zero(T)),
+            )
             MOI.add_constraint(model, one(T) * x[3], MOI.LessThan(zero(T)))
         end;
         cannot_unbridge = true,
