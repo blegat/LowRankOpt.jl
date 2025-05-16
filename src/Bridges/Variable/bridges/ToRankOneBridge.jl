@@ -13,7 +13,7 @@ struct ToRankOneBridge{T,W,S,V} <: MOI.Bridges.Variable.SetMapBridge{
         MOI.VectorOfVariables,
         LRO.SetDotProducts{W,S,V},
     }
-    num_vectors::Int
+    ranges::Vector{UnitRange{Int}}
 end
 
 function MOI.Bridges.Variable.supports_constrained_variable(
@@ -34,6 +34,10 @@ function MOI.Bridges.Variable.supports_constrained_variable(
     return true
 end
 
+lower_dimensional_type(::Type{Array{T,N}}) where {T,N} = Array{T,N-1}
+import FillArrays
+lower_dimensional_type(::Type{FillArrays.Ones{T,1,I}}) where {T,I} = FillArrays.Ones{T,0,Tuple{}}
+
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:ToRankOneBridge{T}},
     ::Type{<:LRO.SetDotProducts{
@@ -45,11 +49,13 @@ function MOI.Bridges.Variable.concrete_bridge_type(
         },
     }},
 ) where {T,W,S,F<:AbstractMatrix{T},D<:AbstractVector{T}}
-    F1 = MA.promote_operation(getindex, F, Colon, Int)
-    D1 = MA.promote_operation(getindex, D, Array{Int,0})
     V = LRO.TriangleVectorization{
         T,
-        LRO.Factorization{T,F1,D1},
+        LRO.Factorization{
+            T,
+            lower_dimensional_type(F),
+            lower_dimensional_type(D),
+        },
     }
     return ToRankOneBridge{T,W,S,V}
 end
@@ -57,39 +63,90 @@ end
 function MOI.Bridges.Variable.bridge_constrained_variable(
     BT::Type{ToRankOneBridge{T,W,S,V}},
     model::MOI.ModelLike,
-    set::LRO.SetDotProducts{W,S,V},
+    set::LRO.SetDotProducts{W,S},
 ) where {T,W,S,V}
+    ranks = Int[size(v.matrix.factor, 2) for v in set.vectors]
+    cs = cumsum(ranks)
+    ranges = UnitRange.([1; (cs[1:end-1] .+ 1)], cs)
     variables, constraint = MOI.add_constrained_variables(
         model,
         MOI.Bridges.inverse_map_set(BT, set),
     )
-    return BT(variables, constraint, length(set.vectors))
+    return BT(variables, constraint, ranges)
+end
+
+function _split_into_rank_ones(F::LRO.Factorization)
+    return [LRO.Factorization(
+        F.factor[:, i],
+        F.scaling[reshape([i], tuple())],
+    ) for i in axes(F.factor, 2)]
+end
+
+function _split_into_rank_ones(v::LRO.TriangleVectorization)
+    return LRO.TriangleVectorization.(_split_into_rank_ones(v.matrix))
+end
+
+# It is not impemente in FillArrays, see
+# https://github.com/JuliaArrays/FillArrays.jl/issues/23
+function _reduce_vcat(v::Vector{FillArrays.Ones{T,0,Tuple{}}}) where {T}
+    return FillArrays.Ones{T}(length(v))
+end
+# We also cannot rely on `Base` to return the right type:
+# julia> reduce(vcat, [reshape([1], tuple())])
+# 0-dimensional Array{Int64, 0}:
+# 1
+# which is a bit since it works for the next dimension
+# julia> reduce(hcat, [reshape([1], 1)])
+# 1×1 Matrix{Int64}:
+# 1
+_reduce_vcat(v::Vector{Array{T,0}}) where {T} = only.(v)
+
+function _merge_rank_ones(Fs::Vector{<:LRO.Factorization})
+    return LRO.Factorization(
+        reduce(hcat, [F.factor for F in Fs]),
+        _reduce_vcat([F.scaling for F in Fs]),
+    )
+end
+
+function _merge_rank_ones(vectors::Vector{<:LRO.TriangleVectorization})
+    matrices = [vector.matrix for vector in vectors]
+    return LRO.TriangleVectorization(_merge_rank_ones(matrices))
 end
 
 function MOI.Bridges.map_set(
-    ::ToRankOneBridge,
-    set::LRO.SetDotProducts{LRO.WITH_SET},
-)
-    return LRO.SetDotProducts{LRO.WITHOUT_SET}(set.set, set.vectors)
+    bridge::ToRankOneBridge,
+    set::LRO.SetDotProducts{W},
+) where {W}
+    vectors = _merge_rank_ones.(getindex.(Ref(set.vectors), bridge.ranges))
+    return LRO.SetDotProducts{W}(set.set, vectors)
 end
 
 function MOI.Bridges.inverse_map_set(
     ::Type{<:ToRankOneBridge},
-    set::LRO.SetDotProducts{LRO.WITHOUT_SET},
-)
-    return LRO.SetDotProducts{LRO.WITH_SET}(set.set, set.vectors)
+    set::LRO.SetDotProducts{W},
+) where {W}
+    vectors = reduce(vcat, _split_into_rank_ones.(set.vectors))
+    return LRO.SetDotProducts{W}(set.set, vectors)
+end
+
+function _sum(::Type{T}, v::MOI.VectorOfVariables) where {T}
+    return MOI.ScalarAffineFunction(
+        MOI.ScalarAffineTerm.(one(T), v.variables),
+        zero(T),
+    )
 end
 
 function MOI.Bridges.map_function(
-    ::ToRankOneBridge,
+    bridge::ToRankOneBridge{T},
     func,
     i::MOI.Bridges.IndexInVector,
-)
-    return MOI.Utilities.eachscalar(func)[i.value]
-end
-
-function MOI.Bridges.map_function(bridge::ToRankOneBridge, func)
-    return MOI.Utilities.eachscalar(func)[1:bridge.num_vectors]
+) where {T}
+    scalars = MOI.Utilities.eachscalar(func)
+    if i.value in eachindex(bridge.ranges)
+        return _sum(T, scalars[bridge.ranges[i.value]])
+    else
+        return scalars[i.value]
+    end
 end
 
 # This returns `true` by default for `SetMapBridge` but setting
