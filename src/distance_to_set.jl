@@ -2,7 +2,7 @@ function MOI.Utilities.distance_to_set(
     d::MOI.Utilities.ProjectionUpperBoundDistance,
     x::AbstractVector{T},
     set::SetDotProducts{WITH_SET},
-) where {T,W}
+) where {T}
     MOI.Utilities._check_dimension(x, set)
     n = length(set.vectors)
     vec = x[(n+1):end]
