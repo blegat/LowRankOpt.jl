@@ -141,7 +141,7 @@ function MOI.Bridges.map_function(
     if i.value in eachindex(bridge.ranges)
         return _sum(T, scalars[bridge.ranges[i.value]])
     else
-        return scalars[i.value - length(bridge.ranges) + last(last(bridge.ranges))]
+        return scalars[i.value-length(bridge.ranges)+last(last(bridge.ranges))]
     end
 end
 

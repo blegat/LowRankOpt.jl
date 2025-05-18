@@ -104,14 +104,8 @@ function test_with_set(T::Type)
                 LRO.SetDotProducts{LRO.WITH_SET}(
                     MOI.PositiveSemidefiniteConeTriangle(2),
                     LRO.TriangleVectorization.([
-                        LRO.Factorization(
-                            T[1, 2],
-                            reshape(T[5], tuple()),
-                        ),
-                        LRO.Factorization(
-                            T[3, 4],
-                            reshape(T[6], tuple()),
-                        ),
+                        LRO.Factorization(T[1, 2], reshape(T[5], tuple())),
+                        LRO.Factorization(T[3, 4], reshape(T[6], tuple())),
                     ]),
                 ),
             )
