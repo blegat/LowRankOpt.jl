@@ -49,16 +49,11 @@ function MOI.Bridges.Variable.bridge_constrained_variable(
 end
 
 function _rescale(m::LRO.Factorization, D, scaling)
-    return LRO.Factorization(
-        m.factor,
-        convert(D, reshape([scaling], tuple())),
-    )
+    return LRO.Factorization(m.factor, convert(D, reshape([scaling], tuple())))
 end
 
 function _rescale(t::LRO.TriangleVectorization, D, scaling)
-    return LRO.TriangleVectorization(
-        _rescale(t.matrix, D, scaling),
-    )
+    return LRO.TriangleVectorization(_rescale(t.matrix, D, scaling))
 end
 
 function MOI.Bridges.map_set(
@@ -67,19 +62,12 @@ function MOI.Bridges.map_set(
 ) where {T,W,S,F,D}
     return LRO.SetDotProducts{W}(
         set.set,
-        _rescale.(
-            set.vectors,
-            D,
-            bridge.scaling,
-        ),
+        _rescale.(set.vectors, D, bridge.scaling),
     )
 end
 
 function _unscale(m::LRO.Factorization{T}) where {T}
-    return LRO.Factorization(
-        m.factor,
-        FillArrays.Ones{T}(tuple()),
-    )
+    return LRO.Factorization(m.factor, FillArrays.Ones{T}(tuple()))
 end
 
 function _unscale(t::LRO.TriangleVectorization)

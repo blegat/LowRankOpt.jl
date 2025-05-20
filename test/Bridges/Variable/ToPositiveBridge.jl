@@ -30,14 +30,8 @@ function _test(T::Type, W)
                 LRO.SetDotProducts{W}(
                     MOI.PositiveSemidefiniteConeTriangle(2),
                     LRO.TriangleVectorization.([
-                        LRO.Factorization(
-                            T[1, 2],
-                            T(3),
-                        ),
-                        LRO.Factorization(
-                            T[4, 5],
-                            T(6),
-                        ),
+                        LRO.Factorization(T[1, 2], T(3)),
+                        LRO.Factorization(T[4, 5], T(6)),
                     ]),
                 ),
             )
