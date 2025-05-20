@@ -3,15 +3,15 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
-struct ToRankOneBridge{T,W,S,V} <: MOI.Bridges.Variable.SetMapBridge{
+struct ToRankOneBridge{T,W,S,V1,V2} <: MOI.Bridges.Variable.SetMapBridge{
     T,
-    LRO.SetDotProducts{W,S,V},
-    LRO.SetDotProducts{W,S,V},
+    LRO.SetDotProducts{W,S,V1},
+    LRO.SetDotProducts{W,S,V2},
 }
     variables::Vector{MOI.VariableIndex}
     constraint::MOI.ConstraintIndex{
         MOI.VectorOfVariables,
-        LRO.SetDotProducts{W,S,V},
+        LRO.SetDotProducts{W,S,V1},
     }
     ranges::Vector{UnitRange{Int}}
 end
@@ -37,15 +37,16 @@ end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:ToRankOneBridge{T}},
-    ::Type{
-        <:LRO.SetDotProducts{
-            W,
-            S,
-            LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
-        },
-    },
-) where {T,W,S,F<:AbstractMatrix{T},D<:AbstractVector{T}}
-    V = LRO.TriangleVectorization{
+    ::Type{<:LRO.SetDotProducts{W,S,V2}},
+) where {
+    T,
+    W,
+    S,
+    F<:AbstractMatrix{T},
+    D<:AbstractVector{T},
+    V2<:LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
+}
+    V1 = LRO.TriangleVectorization{
         T,
         LRO.Factorization{
             T,
@@ -53,14 +54,14 @@ function MOI.Bridges.Variable.concrete_bridge_type(
             lower_dimensional_type(D),
         },
     }
-    return ToRankOneBridge{T,W,S,V}
+    return ToRankOneBridge{T,W,S,V1,V2}
 end
 
 function MOI.Bridges.Variable.bridge_constrained_variable(
-    BT::Type{ToRankOneBridge{T,W,S,V}},
+    BT::Type{ToRankOneBridge{T,W,S,V1,V2}},
     model::MOI.ModelLike,
     set::LRO.SetDotProducts{W,S},
-) where {T,W,S,V}
+) where {T,W,S,V1,V2}
     ranks = Int[size(v.matrix.factor, 2) for v in set.vectors]
     cs = cumsum(ranks)
     ranges = UnitRange.([1; (cs[1:(end-1)] .+ 1)], cs)
