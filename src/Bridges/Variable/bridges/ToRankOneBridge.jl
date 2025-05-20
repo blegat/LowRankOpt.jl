@@ -37,14 +37,15 @@ end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:ToRankOneBridge{T}},
-    ::Type{
-        <:LRO.SetDotProducts{
-            W,
-            S,
-            V2,
-        },
-    },
-) where {T,W,S,F<:AbstractMatrix{T},D<:AbstractVector{T},V2<:LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}}}
+    ::Type{<:LRO.SetDotProducts{W,S,V2}},
+) where {
+    T,
+    W,
+    S,
+    F<:AbstractMatrix{T},
+    D<:AbstractVector{T},
+    V2<:LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}},
+}
     V1 = LRO.TriangleVectorization{
         T,
         LRO.Factorization{
