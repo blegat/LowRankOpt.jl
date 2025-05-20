@@ -58,10 +58,10 @@ function MOI.Bridges.Variable.concrete_bridge_type(
 end
 
 function MOI.Bridges.Variable.bridge_constrained_variable(
-    BT::Type{ToRankOneBridge{T,W,S,V}},
+    BT::Type{ToRankOneBridge{T,W,S,V1,V2}},
     model::MOI.ModelLike,
     set::LRO.SetDotProducts{W,S},
-) where {T,W,S,V}
+) where {T,W,S,V1,V2}
     ranks = Int[size(v.matrix.factor, 2) for v in set.vectors]
     cs = cumsum(ranks)
     ranges = UnitRange.([1; (cs[1:(end-1)] .+ 1)], cs)
