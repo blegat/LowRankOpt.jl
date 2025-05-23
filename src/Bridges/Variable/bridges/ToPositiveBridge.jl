@@ -4,17 +4,16 @@
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
 const _TriFact{T,F,D} = LRO.TriangleVectorization{T,LRO.Factorization{T,F,D}}
-const _One{T} = FillArrays.Ones{T,0,Tuple{}}
 
 struct ToPositiveBridge{T,W,S,F,D} <: MOI.Bridges.Variable.SetMapBridge{
     T,
-    LRO.SetDotProducts{W,S,_TriFact{T,F,_One{T}}},
+    LRO.SetDotProducts{W,S,_TriFact{T,F,LRO.One{T}}},
     LRO.SetDotProducts{W,S,_TriFact{T,F,D}},
 }
     variables::Vector{MOI.VariableIndex}
     constraint::MOI.ConstraintIndex{
         MOI.VectorOfVariables,
-        LRO.SetDotProducts{W,S,_TriFact{T,F,_One{T}}},
+        LRO.SetDotProducts{W,S,_TriFact{T,F,LRO.One{T}}},
     }
     scaling::Vector{T}
 end
@@ -23,7 +22,7 @@ function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{<:ToPositiveBridge{T}},
     ::Type{<:LRO.SetDotProducts{W,S,_TriFact{T,F,D}}},
 ) where {T,W,S,F<:AbstractVector{T},D<:AbstractArray{T,0}}
-    return D !== _One{T}
+    return D !== LRO.One{T}
 end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
@@ -67,7 +66,7 @@ function MOI.Bridges.map_set(
 end
 
 function _unscale(m::LRO.Factorization{T}) where {T}
-    return LRO.Factorization(m.factor, FillArrays.Ones{T}(tuple()))
+    return LRO.Factorization(m.factor, LRO.One{T}(tuple()))
 end
 
 function _unscale(t::LRO.TriangleVectorization)

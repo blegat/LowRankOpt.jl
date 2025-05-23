@@ -8,7 +8,6 @@ module TestAllBridges
 using Test
 import MathOptInterface as MOI
 import LowRankOpt as LRO
-import FillArrays
 
 abstract type TestModel{T} <: MOI.ModelLike end
 MOI.is_empty(::TestModel) = true
@@ -17,9 +16,9 @@ function set_type(W, T, N; primal::Bool, psd::Bool)
     F = Array{T,N}
     if psd
         if N == 2
-            V = FillArrays.Ones{T,N - 1,Tuple{Base.OneTo{Int}}}
+            V = LRO.Ones{T}
         else
-            V = FillArrays.Ones{T,0,Tuple{}}
+            V = LRO.One{T}
         end
     else
         V = Array{T,N - 1}
