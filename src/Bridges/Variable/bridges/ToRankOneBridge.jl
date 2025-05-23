@@ -30,9 +30,8 @@ function MOI.Bridges.Variable.supports_constrained_variable(
 end
 
 lower_dimensional_type(::Type{Array{T,N}}) where {T,N} = Array{T,N-1}
-import FillArrays
-function lower_dimensional_type(::Type{FillArrays.Ones{T,1,I}}) where {T,I}
-    return FillArrays.Ones{T,0,Tuple{}}
+function lower_dimensional_type(::Type{LRO.Ones{T}}) where {T}
+    return LRO.One{T}
 end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
@@ -83,10 +82,10 @@ function _split_into_rank_ones(v::LRO.TriangleVectorization)
     return LRO.TriangleVectorization.(_split_into_rank_ones(v.matrix))
 end
 
-# It is not impemente in FillArrays, see
+# It is not impemented in FillArrays, see
 # https://github.com/JuliaArrays/FillArrays.jl/issues/23
-function _reduce_vcat(v::Vector{FillArrays.Ones{T,0,Tuple{}}}) where {T}
-    return FillArrays.Ones{T}(length(v))
+function _reduce_vcat(v::Vector{LRO.One{T}}) where {T}
+    return LRO.Ones{T}(Base.OneTo(length(v)))
 end
 # We also cannot rely on `Base` to return the right type:
 # julia> reduce(vcat, [reshape([1], tuple())])

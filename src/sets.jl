@@ -255,16 +255,28 @@ function MOI.Bridges.Constraint.conversion_cost(
     return Inf
 end
 
+# Solvers are recommented to use this constant instead of hardcoding this
+# `FillArrays` type so that the solver does not have to explicitly `import`
+# `FillArrays` nor explicitly add it to its dependency so that it remains
+# a detail that's internal to LowRankOpt that we can easily change later
+# The rest of the code of LowRankOpt should also use these two constants
+# and not `FillArrays` directly.
+
+import FillArrays
+
+const One{T} = FillArrays.Ones{T,0,Tuple{}}
+const Ones{T} = FillArrays.Ones{T,1,Tuple{Base.OneTo{Int}}}
+
 function positive_semidefinite_factorization(
     factor::AbstractVector{T},
 ) where {T}
-    return Factorization(factor, FillArrays.Ones{T}(tuple()))
+    return Factorization(factor, One{T}(tuple()))
 end
 
 function positive_semidefinite_factorization(
     factor::AbstractMatrix{T},
 ) where {T}
-    return Factorization(factor, FillArrays.Ones{T}(size(factor, 2)))
+    return Factorization(factor, Ones{T}(Base.OneTo(size(factor, 2))))
 end
 
 """

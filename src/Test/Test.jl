@@ -10,10 +10,6 @@ import MathOptInterface as MOI
 const MOIU = MOI.Utilities
 import LowRankOpt as LRO
 
-import FillArrays
-
-const One{T} = FillArrays.Ones{T,0,Tuple{}}
-
 """
 The goal is to find the maximum lower bound `γ` for the polynomial `x^2 - 2x`.
 Using samples `-1` and `1`, the polynomial `x^2 - 2x - γ` evaluates at `-γ`
@@ -104,7 +100,7 @@ function MOI.Test.setup_test(
                     MOI.PositiveSemidefiniteConeTriangle,
                     LRO.TriangleVectorization{
                         T,
-                        LRO.Factorization{T,Vector{T},One{T}},
+                        LRO.Factorization{T,Vector{T},LRO.One{T}},
                     },
                 },
             ) => [T[0, 1]],
@@ -188,7 +184,7 @@ function MOI.Test.setup_test(
                 LRO.LinearCombinationInSet{
                     LRO.WITHOUT_SET,
                     MOI.PositiveSemidefiniteConeTriangle,
-                    LRO.Factorization{T,Vector{T},One{T}},
+                    LRO.Factorization{T,Vector{T},LRO.One{T}},
                 },
             ) => [T[4, 0]],
         ),
