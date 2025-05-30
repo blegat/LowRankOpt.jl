@@ -15,4 +15,8 @@ include("distance_to_set.jl")
 include("Test/Test.jl")
 include("Bridges/Bridges.jl")
 
+include("model.jl")
+include("schur.jl")
+include("MOI_wrapper.jl")
+
 end # module LowRankOpt

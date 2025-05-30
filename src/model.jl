@@ -6,7 +6,7 @@ import MutableArithmetics as MA
 import MathOptInterface as MOI
 
 """
-    MyModel
+    Model
 
 Model representing the problem:
 ```math
@@ -26,7 +26,7 @@ The fields of the `struct` as related to the arrays of the above formulation as 
 * The matrix ``C_i`` is given by `C[i]`.
 * The matrix ``A_{i,j}`` is given by `-A[i,j]`.
 """
-mutable struct MyModel{T,A<:AbstractMatrix{T}}
+mutable struct Model{T,A<:AbstractMatrix{T}}
     C::Vector{SparseArrays.SparseMatrixCSC{T,Int}}
     A::Matrix{A}
     b::Vector{T}
@@ -35,7 +35,7 @@ mutable struct MyModel{T,A<:AbstractMatrix{T}}
     C_lin::SparseArrays.SparseMatrixCSC{T, Int64}
     msizes::Vector{Int64}
 
-    function MyModel(
+    function Model(
         C::Vector{SparseArrays.SparseMatrixCSC{T,Int}},
         A::Matrix{AT},
         b::Vector{T},
@@ -61,9 +61,9 @@ struct ScalarIndex
     value::Int64
 end
 
-num_scalars(model::MyModel) = length(model.d_lin)
+num_scalars(model::Model) = length(model.d_lin)
 
-function scalar_indices(model::MyModel)
+function scalar_indices(model::Model)
     return MOI.Utilities.LazyMap{ScalarIndex}(ScalarIndex, Base.OneTo(num_scalars(model)))
 end
 
@@ -71,36 +71,36 @@ struct MatrixIndex
     value::Int64
 end
 
-num_matrices(model::MyModel) = length(model.C)
+num_matrices(model::Model) = length(model.C)
 
-function matrix_indices(model::MyModel)
+function matrix_indices(model::Model)
     return MOI.Utilities.LazyMap{MatrixIndex}(MatrixIndex, Base.OneTo(num_matrices(model)))
 end
 
-side_dimension(model::MyModel, i::MatrixIndex) = model.msizes[i.value]
+side_dimension(model::Model, i::MatrixIndex) = model.msizes[i.value]
 
 struct ConstraintIndex
     value::Int64
 end
-num_constraints(model::MyModel) = length(model.b)
-function constraint_indices(model::MyModel)
+num_constraints(model::Model) = length(model.b)
+function constraint_indices(model::Model)
     return MOI.Utilities.LazyMap{ConstraintIndex}(ConstraintIndex, Base.OneTo(num_constraints(model)))
 end
 
 # Should be only used with `norm`
-jac(model::MyModel, i::ConstraintIndex, ::Type{ScalarIndex}) = model.C_lin[i.value,:]
-function norm_jac(model::MyModel{T}, i::MatrixIndex) where {T}
+jac(model::Model, i::ConstraintIndex, ::Type{ScalarIndex}) = model.C_lin[i.value,:]
+function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
     if isempty(model.A)
         return zero(T)
     end
     return norm(model.A[i.value, :])
 end
 
-function obj(model::MyModel, X, i::MatrixIndex)
+function obj(model::Model, X, i::MatrixIndex)
     return -dot(model.C[i.value], X)
 end
 
-function obj(model::MyModel, X, ::Type{MatrixIndex})
+function obj(model::Model, X, ::Type{MatrixIndex})
     result = zero(eltype(eltype(X)))
     for mat_idx in matrix_indices(model)
         result += obj(model, X[mat_idx.value], mat_idx)
@@ -108,32 +108,32 @@ function obj(model::MyModel, X, ::Type{MatrixIndex})
     return result
 end
 
-function obj(model::MyModel, X_lin, ::Type{ScalarIndex})
+function obj(model::Model, X_lin, ::Type{ScalarIndex})
     return -dot(model.d_lin, X_lin)
 end
 
-function obj(model::MyModel, X_lin, X)
+function obj(model::Model, X_lin, X)
     return model.b_const + obj(model, X, MatrixIndex) - dot(model.d_lin, X_lin)
 end
 
-dual_obj(model::MyModel, y) = -dot(model.b, y) + model.b_const
+dual_obj(model::Model, y) = -dot(model.b, y) + model.b_const
 
-function jtprod(model::MyModel, ::Type{ScalarIndex}, y)
+function jtprod(model::Model, ::Type{ScalarIndex}, y)
     return -model.C_lin' * y
 end
 
-function dual_cons(model::MyModel, ::Type{ScalarIndex}, y, S)
+function dual_cons(model::Model, ::Type{ScalarIndex}, y, S)
     return model.d_lin - S + jtprod(model, ScalarIndex, y)
 end
 
-function buffer_for_jtprod(model::MyModel)
+function buffer_for_jtprod(model::Model)
     if iszero(num_matrices(model))
         return
     end
     return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
 end
 
-function buffer_for_jtprod(model::MyModel, mat_idx::MatrixIndex)
+function buffer_for_jtprod(model::Model, mat_idx::MatrixIndex)
     if iszero(num_constraints(model))
         return
     end
@@ -144,7 +144,7 @@ function buffer_for_jtprod(model::MyModel, mat_idx::MatrixIndex)
     )
 end
 
-function _add_mul!(A::SparseMatrixCSC, B::SparseMatrixCSC, α)
+function _add_mul!(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC, α)
     for col in axes(A, 2)
         range_A = SparseArrays.nzrange(A, col)
         it_A = iterate(range_A)
@@ -159,9 +159,9 @@ function _add_mul!(A::SparseMatrixCSC, B::SparseMatrixCSC, α)
     end
 end
 
-_zero!(A::SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
+_zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
 
-function jtprod!(buffer, model::MyModel, mat_idx::MatrixIndex, y)
+function jtprod!(buffer, model::Model, mat_idx::MatrixIndex, y)
     if iszero(num_constraints(model))
         return MA.Zero()
     end
@@ -172,27 +172,27 @@ function jtprod!(buffer, model::MyModel, mat_idx::MatrixIndex, y)
     return buffer
 end
 
-function dual_cons!(buffer, model::MyModel, mat_idx::MatrixIndex, y, S)
+function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y, S)
     i = mat_idx.value
     return jtprod!(buffer[i], model, mat_idx, y) + model.C[i] - S[i]
 end
 
-objgrad(model::MyModel, ::Type{ScalarIndex}) = model.d_lin
-objgrad(model::MyModel, i::MatrixIndex) = model.C[i.value]
+objgrad(model::Model, ::Type{ScalarIndex}) = model.d_lin
+objgrad(model::Model, i::MatrixIndex) = model.C[i.value]
 
-cons_constant(model::MyModel) = model.b
+cons_constant(model::Model) = model.b
 
-function cons(model::MyModel, x, X)
+function cons(model::Model, x, X)
     return model.b - jprod(model, x, X)
 end
 
-function jprod(model::MyModel, i::MatrixIndex, W)
+function jprod(model::Model, i::MatrixIndex, W)
     return eltype(W)[
         -dot(model.A[i.value, j], W) for j in 1:num_constraints(model)
     ]
 end
 
-function jprod(model::MyModel, w, W)
+function jprod(model::Model, w, W)
     h = model.C_lin * w
     for i in matrix_indices(model)
         h += jprod(model, i, W[i.value])

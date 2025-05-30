@@ -43,6 +43,11 @@ function test_conic_PositiveSemidefinite_RankOne_polynomial(
             LRO.positive_semidefinite_factorization(T[1, 1]),
         ]),
     )
+    @show MOI.supports_constraint(
+        model,
+        MOI.VectorAffineFunction{T},
+        typeof(set),
+    )
     MOI.Test.@requires MOI.supports_constraint(
         model,
         MOI.VectorAffineFunction{T},
@@ -70,6 +75,7 @@ function test_conic_PositiveSemidefinite_RankOne_polynomial(
         if MOI.Test._supports(config, MOI.ConstraintDual)
             @test MOI.get(model, MOI.DualStatus()) == MOI.FEASIBLE_POINT
         end
+        @show MOI.get(model, MOI.ObjectiveValue())
         @test ≈(MOI.get(model, MOI.ObjectiveValue()), T(-1), config)
         if MOI.Test._supports(config, MOI.DualObjectiveValue)
             @test ≈(MOI.get(model, MOI.DualObjectiveValue()), T(-1), config)
@@ -127,6 +133,10 @@ function test_conic_PositiveSemidefinite_RankOne_moment(
             LRO.positive_semidefinite_factorization(T[1, -1]),
             LRO.positive_semidefinite_factorization(T[1, 1]),
         ]),
+    )
+    @show MOI.supports_add_constrained_variables(
+        model,
+        typeof(set),
     )
     MOI.Test.@requires MOI.supports_add_constrained_variables(
         model,

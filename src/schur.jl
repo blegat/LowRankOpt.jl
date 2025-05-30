@@ -1,7 +1,7 @@
 # Adapted from Loraine.jl
 
 # Computes `⟨A * W, W * B⟩` for symmetric sparse matrices `A` and `B`
-function _dot(A::SparseMatrixCSC, B::SparseMatrixCSC, W::AbstractMatrix)
+function _dot(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC, W::AbstractMatrix)
     @assert LinearAlgebra.checksquare(W) == LinearAlgebra.checksquare(A) == LinearAlgebra.checksquare(B)
     # After these asserts, we know that `A`, `B` and `W` are square and
     # have the same sizes so we can safely use `@inbounds`
@@ -28,7 +28,7 @@ function _dot(A::SparseMatrixCSC, B::SparseMatrixCSC, W::AbstractMatrix)
     return result
 end
 
-function buffer_for_schur_complement(model::MyModel, κ)
+function buffer_for_schur_complement(model::Model, κ)
     n = num_constraints(model)
     σ = zeros(Int64, n, num_matrices(model))
     last_dense = zeros(Int64, num_matrices(model))
@@ -62,7 +62,7 @@ end
 
 #########################
 
-function schur_complement(buffer, model::MyModel, W, ::Type{MatrixIndex})
+function schur_complement(buffer, model::Model, W, ::Type{MatrixIndex})
     n = num_constraints(model)
     BBBB = zeros(eltype(eltype(W)), n, n)
     for mat_idx in matrix_indices(model)
@@ -140,7 +140,7 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA_jW⟩
-function schur_complement(buffer, model::MyModel, w, W::AbstractVector)
+function schur_complement(buffer, model::Model, w, W::AbstractVector)
     H = MA.Zero()
     if num_matrices(model) > 0
         H = MA.add!!(H, schur_complement(buffer, model, W, MatrixIndex))
@@ -155,14 +155,14 @@ function schur_complement(buffer, model::MyModel, w, W::AbstractVector)
     return Hermitian(H, :L)
 end
 
-function schur_complement(model::MyModel, w, ::Type{ScalarIndex})
+function schur_complement(model::Model, w, ::Type{ScalarIndex})
     return model.C_lin * spdiagm(w) * model.C_lin'
 end
 
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
-function eval_schur_complement!(buffer, result, model::MyModel, w, W, y)
+function eval_schur_complement!(buffer, result, model::Model, w, W, y)
     result .= 0.0
     for mat_idx in matrix_indices(model)
         i = mat_idx.value
