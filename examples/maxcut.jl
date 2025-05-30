@@ -7,9 +7,14 @@ function e_i(i, n)
     return ei
 end
 
-function maxcut(weights, solver)
+function maxcut_objective(weights)
     N = LinearAlgebra.checksquare(weights)
     L = Diagonal(weights * ones(N)) - weights
+    return L / 4
+end
+
+function maxcut(weights, solver)
+    N = LinearAlgebra.checksquare(weights)
     model = Model(solver)
     LRO.Bridges.add_all_bridges(backend(model).optimizer, Float64)
     cone = MOI.PositiveSemidefiniteConeTriangle(N)
@@ -26,7 +31,7 @@ function maxcut(weights, solver)
         dot_prod_set[length(factors) .+ (1:MOI.dimension(cone))],
         SymmetricMatrixShape(N),
     )
-    @objective(model, Max, dot(L, X) / 4)
+    @objective(model, Max, dot(maxcut_objective(weights), X))
     @constraint(model, dot_prod .== 1)
     return model
 end
