@@ -18,5 +18,6 @@ include("Bridges/Bridges.jl")
 include("model.jl")
 include("schur.jl")
 include("MOI_wrapper.jl")
+include("BurerMonteiro.jl")
 
 end # module LowRankOpt

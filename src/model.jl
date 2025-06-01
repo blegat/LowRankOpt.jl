@@ -4,6 +4,7 @@ import SparseArrays
 import LinearAlgebra
 import MutableArithmetics as MA
 import MathOptInterface as MOI
+import NLPModels
 
 """
     Model
@@ -26,13 +27,14 @@ The fields of the `struct` as related to the arrays of the above formulation as 
 * The matrix ``C_i`` is given by `C[i]`.
 * The matrix ``A_{i,j}`` is given by `-A[i,j]`.
 """
-mutable struct Model{T,A<:AbstractMatrix{T}}
+mutable struct Model{T,A<:AbstractMatrix{T}} <: NLPModels.AbstractNLPModel{T,Vector{T}}
+    meta::NLPModels.NLPModelMeta{T,Vector{T}}
     C::Vector{SparseArrays.SparseMatrixCSC{T,Int}}
     A::Matrix{A}
     b::Vector{T}
     b_const::T
-    d_lin::SparseArrays.SparseVector{T, Int64}
-    C_lin::SparseArrays.SparseMatrixCSC{T, Int64}
+    d_lin::SparseArrays.SparseVector{T,Int64}
+    C_lin::SparseArrays.SparseMatrixCSC{T,Int64}
     msizes::Vector{Int64}
 
     function Model(
@@ -40,11 +42,10 @@ mutable struct Model{T,A<:AbstractMatrix{T}}
         A::Matrix{AT},
         b::Vector{T},
         b_const::T,
-        d_lin::SparseArrays.SparseVector{T, Int64},
-        C_lin::SparseArrays.SparseMatrixCSC{T, Int64},
+        d_lin::SparseArrays.SparseVector{T,Int64},
+        C_lin::SparseArrays.SparseMatrixCSC{T,Int64},
         msizes::Vector{Int64},
     ) where {T,AT<:AbstractMatrix{T}}
-
         model = new{T,AT}()
         model.C = C
         model.A = A
@@ -53,9 +54,24 @@ mutable struct Model{T,A<:AbstractMatrix{T}}
         model.d_lin = d_lin
         model.C_lin = C_lin
         model.msizes = msizes
+        model.meta = NLPModels.NLPModelMeta(
+            num_scalars(model) + sum(
+                Base.Fix1(side_dimension, model),
+                matrix_indices(model);
+                init = 0
+            ),
+        )
         return model
     end
 end
+
+function NLPModels.unconstrained(model::Model)
+    return iszero(num_constraints(model))
+end
+
+# TODO the scalar actually have lower bounds and the SDP variables too
+#      but these are not box constraints
+NLPModels.has_bounds(::Model) = false
 
 struct ScalarIndex
     value::Int64
@@ -88,7 +104,9 @@ function constraint_indices(model::Model)
 end
 
 # Should be only used with `norm`
-jac(model::Model, i::ConstraintIndex, ::Type{ScalarIndex}) = model.C_lin[i.value,:]
+NLPModels.jac(model::Model, ::Type{ScalarIndex}) = model.C_lin
+NLPModels.jac(model::Model, i::ConstraintIndex, j::MatrixIndex) = model.A[j.value, i.value]
+NLPModels.jac(model::Model, i::ConstraintIndex, ::Type{ScalarIndex}) = model.C_lin[i.value,:]
 function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
     if isempty(model.A)
         return zero(T)
@@ -96,24 +114,32 @@ function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
     return norm(model.A[i.value, :])
 end
 
-function obj(model::Model, X, i::MatrixIndex)
-    return -dot(model.C[i.value], X)
+function NLPModels.obj(model::Model, X, i::MatrixIndex)
+    return -LinearAlgebra.dot(model.C[i.value], X)
 end
 
-function obj(model::Model, X, ::Type{MatrixIndex})
-    result = zero(eltype(eltype(X)))
-    for mat_idx in matrix_indices(model)
-        result += obj(model, X[mat_idx.value], mat_idx)
+function NLPModels.obj(model::Model, x, ::Type{MatrixIndex})
+    result = zero(eltype(x))
+    for i in matrix_indices(model)
+        result += NLPModels.obj(model, x[i], i)
     end
     return result
 end
 
-function obj(model::Model, X_lin, ::Type{ScalarIndex})
-    return -dot(model.d_lin, X_lin)
+function NLPModels.obj(model::Model, x, ::Type{ScalarIndex})
+    return -LinearAlgebra.dot(model.d_lin, x[ScalarIndex])
 end
 
-function obj(model::Model, X_lin, X)
-    return model.b_const + obj(model, X, MatrixIndex) - dot(model.d_lin, X_lin)
+function NLPModels.obj(model::Model, x)
+    return model.b_const + NLPModels.obj(model, x, MatrixIndex) + NLPModels.obj(model, x, ScalarIndex)
+end
+
+function NLPModels.grad!(model::Model, _, g)
+    copyto!(g[ScalarIndex], model.d_lin)
+    for i in matrix_indices(model)
+        copyto!(g[i], model.C[i.value])
+    end
+    return g
 end
 
 dual_obj(model::Model, y) = -dot(model.b, y) + model.b_const
@@ -177,25 +203,28 @@ function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y, S)
     return jtprod!(buffer[i], model, mat_idx, y) + model.C[i] - S[i]
 end
 
-objgrad(model::Model, ::Type{ScalarIndex}) = model.d_lin
-objgrad(model::Model, i::MatrixIndex) = model.C[i.value]
+NLPModels.grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
+NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
 cons_constant(model::Model) = model.b
 
-function cons(model::Model, x, X)
-    return model.b - jprod(model, x, X)
+function NLPModels.cons!(model::Model, x, cx)
+    NLPModels.jprod!(model, x, x, cx)
+    cx .*= -1
+    cx .+= model.b
+    return cx
 end
 
-function jprod(model::Model, i::MatrixIndex, W)
-    return eltype(W)[
-        -dot(model.A[i.value, j], W) for j in 1:num_constraints(model)
-    ]
-end
-
-function jprod(model::Model, w, W)
-    h = model.C_lin * w
-    for i in matrix_indices(model)
-        h += jprod(model, i, W[i.value])
+function add_jprod!(model::Model, i::MatrixIndex, V, Jv)
+    for j in 1:num_constraints(model)
+        Jv[j] -= LinearAlgebra.dot(model.A[i.value, j], V)
     end
-    return h
+end
+
+function NLPModels.jprod!(model::Model, _, v, Jv)
+    LinearAlgebra.mul!(Jv, model.C_lin, v[ScalarIndex])
+    for i in matrix_indices(model)
+        add_jprod!(model, i, v[i], Jv)
+    end
+    return Jv
 end

@@ -1,3 +1,4 @@
+import SolverCore
 import NLPModelsJuMP
 
 const VAF{T} = MOI.VectorAffineFunction{T}
@@ -39,7 +40,12 @@ const OptimizerCache{T} = MOI.Utilities.GenericModel{
 }
 
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
+    solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
+    stats::Union{
+        Nothing,
+        SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any},
+    }
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T},PSD},Int64}
     lin_cones::Union{Nothing,NNGCones{T}}
     max_sense::Bool
@@ -49,6 +55,8 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
 
     function Optimizer{T}() where {T}
         return new{T}(
+            nothing,
+            nothing,
             nothing,
             Dict{MOI.ConstraintIndex{VAF{T},PSD},Int64}(),
             nothing,
@@ -79,7 +87,7 @@ MOI.get(::Optimizer, ::MOI.SolverName) = "Loraine"
 # MOI.RawOptimizerAttribute
 
 function MOI.supports(::Optimizer, param::MOI.RawOptimizerAttribute)
-    return haskey(Solvers.DEFAULT_OPTIONS, param.name)
+    return true
 end
 
 function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
@@ -131,16 +139,18 @@ function MOI.supports_constraint(::Optimizer{T}, ::Type{VAF{T}}, ::Type{<:SUPPOR
     return true
 end
 
+SOLVER_OPTIONS = ["solver", "sub_solver", "ranks"]
+
 function MOI.optimize!(model::Optimizer)
     options = Dict{Symbol, Any}(
-        Symbol(key) => model.options[key] for key in keys(model.options) if key != "solver"
+        Symbol(key) => model.options[key] for key in keys(model.options) if !(key in SOLVER_OPTIONS)
     )
     if model.silent
         options[:verbose] = 0
     else
         options[:verbose] = 1
     end
-    model.stats = SolverCore.GenericExecutionStats(model.nlp)
+    model.stats = SolverCore.GenericExecutionStats(model.model)
     SolverCore.solve!(model.solver, model.model, model.stats; options...)
     return
 end
@@ -228,7 +238,10 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
         options["verb"] = 0
     end
     dest.lin_cones = Cd_lin.sets
-    dest.solver = dest.options["solver"](dest.nlp)
+    options = Dict{Symbol, Any}(
+        Symbol(key) => dest.options[key] for key in keys(dest.options) if key in SOLVER_OPTIONS && key != "solver"
+    )
+    dest.solver = dest.options["solver"](dest.model; options...)
     return MOI.Utilities.identity_index_map(src)
 end
 
