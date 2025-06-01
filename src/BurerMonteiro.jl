@@ -1,6 +1,7 @@
 module BurerMonteiro
 
 import LinearAlgebra
+import FillArrays
 import SolverCore
 import NLPModels
 import LowRankOpt as LRO
@@ -54,11 +55,20 @@ struct Solution{T,VT<:AbstractVector{T}}
     dim::Dimensions
 end
 
-Base.eltype(::Type{<:Solution{T}}) where {T} = T
-Base.eltype(x::Solution) = eltype(typeof(x))
+struct _OuterProduct{T,UT<:AbstractVector{T},VT<:AbstractVector{T}}
+    x::Solution{T,VT}
+    v::Solution{T,UT}
+end
+
+Base.eltype(::Type{<:Union{Solution{T},_OuterProduct{T}}}) where {T} = T
+Base.eltype(x::Union{Solution,_OuterProduct}) = eltype(typeof(x))
 
 function Base.getindex(s::Solution, ::Type{LRO.ScalarIndex})
     return view(s.x, Base.OneTo(s.dim.num_scalars))
+end
+
+function Base.getindex(s::_OuterProduct, ::Type{LRO.ScalarIndex})
+    return getindex(s.v, LRO.ScalarIndex)
 end
 
 function Base.getindex(s::Solution, mi::LRO.MatrixIndex)
@@ -69,6 +79,12 @@ function Base.getindex(s::Solution, mi::LRO.MatrixIndex)
         s.dim.ranks[i],
     )
     return LRO.positive_semidefinite_factorization(U)
+end
+
+function Base.getindex(s::_OuterProduct{T}, i::LRO.MatrixIndex) where {T}
+    U = s.x[i]
+    V = s.v[i]
+    return LRO.AsymmetricFactorization(U, V, FillArrays.Fill(T(2), size(U, 2)))
 end
 
 function NLPModels.obj(model::Model, x::AbstractVector)
@@ -91,6 +107,14 @@ function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     NLPModels.cons!(model.model, Solution(x, model.dim), cx)
 end
 
+function NLPModels.jprod!(model::Model, x::AbstractVector, v::AbstractVector, Jv::AbstractVector)
+    X = Solution(x, model.dim)
+    V = Solution(v, model.dim)
+    # The second argument is ignored as it is linear so it does
+    # not matter that we give `x`
+    NLPModels.jprod!(model.model, X, _OuterProduct(X, V), Jv)
+end
+
 function NLPModels.jtprod!(model::Model, x::AbstractVector, y::AbstractVector, Jtv::AbstractVector)
     X = Solution(x, model.dim)
     JtV = Solution(Jtv, model.dim)
@@ -104,7 +128,7 @@ function NLPModels.jtprod!(model::Model, x::AbstractVector, y::AbstractVector, J
         for j in eachindex(y)
             A = NLPModels.jac(model.model, LRO.ConstraintIndex(j), i)
             LinearAlgebra.mul!(U, A, X[i].factor)
-            U ./= 2
+            U .*= 2
         end
     end
     return Jtv

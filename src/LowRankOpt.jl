@@ -10,6 +10,7 @@ import KrylovKit
 import MathOptInterface as MOI
 
 include("sets.jl")
+include("factorization.jl")
 include("attributes.jl")
 include("distance_to_set.jl")
 include("Test/Test.jl")
