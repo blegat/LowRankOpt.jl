@@ -98,7 +98,7 @@ function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     for i in LRO.matrix_indices(model.model)
         C = NLPModels.grad(model.model, i)
         LinearAlgebra.mul!(G[i].factor, C, X[i].factor)
-        G[i].factor ./= 2
+        G[i].factor .*= -2
     end
     return g
 end
@@ -128,10 +128,27 @@ function NLPModels.jtprod!(model::Model, x::AbstractVector, y::AbstractVector, J
         for j in eachindex(y)
             A = NLPModels.jac(model.model, LRO.ConstraintIndex(j), i)
             LinearAlgebra.mul!(U, A, X[i].factor)
-            U .*= 2
+            U .*= (2y[j])
         end
     end
     return Jtv
+end
+
+function NLPModels.hprod!(model::Model{T}, ::AbstractVector, y, v::AbstractVector, Hv::AbstractVector; obj_weight = one(T)) where {T}
+    V = Solution(v, model.dim)
+    HV = Solution(Hv, model.dim)
+    fill!(Hv, zero(eltype(Hv)))
+    for i in LRO.matrix_indices(model.model)
+        Vi = V[i].factor
+        C = NLPModels.grad(model.model, i)
+        Hvi = HV[i].factor
+        Hvi .+= C * Vi
+        Hvi .*= 2obj_weight
+        for j in 1:model.meta.ncon
+            A = NLPModels.jac(model.model, LRO.ConstraintIndex(j), i)
+            Hvi .+= A * Vi .* (2y[j])
+        end
+    end
 end
 
 struct Solver{T,ST} <: SolverCore.AbstractOptimizationSolver
@@ -149,8 +166,7 @@ end
 
 function SolverCore.solve!(
     solver::Solver,
-    model::NLPModels.AbstractNLPModel, # Same as `solver.model.model`
-    stats::SolverCore.GenericExecutionStats;
+    model::NLPModels.AbstractNLPModel; # Same as `solver.model.model`
     kws...,
 )
     SolverCore.solve!(solver.solver, solver.model, solver.stats; kws...)

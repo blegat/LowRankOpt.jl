@@ -203,7 +203,7 @@ function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y, S)
     return jtprod!(buffer[i], model, mat_idx, y) + model.C[i] - S[i]
 end
 
-NLPModels.grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
+NLPModels.grad(model::Model, ::Type{ScalarIndex}) = -model.d_lin
 NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
 cons_constant(model::Model) = model.b

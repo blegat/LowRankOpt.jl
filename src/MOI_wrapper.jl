@@ -42,10 +42,6 @@ const OptimizerCache{T} = MOI.Utilities.GenericModel{
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
-    stats::Union{
-        Nothing,
-        SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any},
-    }
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T},PSD},Int64}
     lin_cones::Union{Nothing,NNGCones{T}}
     max_sense::Bool
@@ -55,7 +51,6 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
 
     function Optimizer{T}() where {T}
         return new{T}(
-            nothing,
             nothing,
             nothing,
             Dict{MOI.ConstraintIndex{VAF{T},PSD},Int64}(),
@@ -82,7 +77,7 @@ function MOI.empty!(optimizer::Optimizer)
     return
 end
 
-MOI.get(::Optimizer, ::MOI.SolverName) = "Loraine"
+MOI.get(::Optimizer, ::MOI.SolverName) = "LowRankOpt"
 
 # MOI.RawOptimizerAttribute
 
@@ -150,8 +145,7 @@ function MOI.optimize!(model::Optimizer)
     else
         options[:verbose] = 1
     end
-    model.stats = SolverCore.GenericExecutionStats(model.model)
-    SolverCore.solve!(model.solver, model.model, model.stats; options...)
+    SolverCore.solve!(model.solver, model.model; options...)
     return
 end
 
@@ -253,11 +247,11 @@ function MOI.copy_to(dest::Optimizer{T}, src::MOI.ModelLike) where {T}
 end
 
 function MOI.get(optimizer::Optimizer, ::MOI.SolveTimeSec)
-    return optimizer.stats.elapsed_time
+    return optimizer.solver.stats.elapsed_time
 end
 
 function MOI.get(optimizer::Optimizer, ::MOI.RawStatusString)
-    return SolverCore.STATUSES[optimizer.stats.status]
+    return SolverCore.STATUSES[optimizer.solver.stats.status]
 end
 
 struct RawStatus <: MOI.AbstractModelAttribute
@@ -267,14 +261,14 @@ end
 MOI.is_set_by_optimize(::RawStatus) = true
 
 function MOI.get(optimizer::Optimizer, attr::RawStatus)
-    return getfield(optimizer.stats, attr.name)
+    return getfield(optimizer.solver.stats, attr.name)
 end
 
 function MOI.get(optimizer::Optimizer, ::MOI.TerminationStatus)
-  if isnothing(optimizer.stats)
+  if isnothing(optimizer.solver.stats)
     return MOI.OPTIMIZE_NOT_CALLED
   end
-  return NLPModelsJuMP.TERMINATION_STATUS[optimizer.stats.status]
+  return NLPModelsJuMP.TERMINATION_STATUS[optimizer.solver.stats.status]
 end
 
 function MOI.get(model::Optimizer, ::MOI.ResultCount)
@@ -298,13 +292,13 @@ end
 
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
-    val = optimizer.stats.objective
+    val = optimizer.solver.stats.objective
     return optimizer.max_sense ? -val : val
 end
 
 function MOI.get(optimizer::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
   MOI.check_result_index_bounds(optimizer, attr)
-  return optimizer.stats.solution[vi.value]
+  return optimizer.solver.stats.solution[vi.value]
 end
 
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
