@@ -69,15 +69,23 @@ Base.view(s::ShapedSolution, i::MatrixIndex) = s.matrices[i.value]
 """
     Model
 
-Model representing the problem:
+Model representing the primal-dual pair of problems:
 ```math
 \\begin{aligned}
-\\max {} & b^\\top y - b_\\text{const}
+\\min {} & \\sum_{i=1}^\\text{nlmi}
+\\langle C_i, X_i \\rangle + \\langle d_\\text{lin}, x \\rangle &
+\\max {} & b^\\top y
 \\\\
-& \\sum_{j=1}^n y_j A_{i,j} \\preceq C_i
+\\text{s.t. } & \\sum_{i=1}^\\text{nlmi} \\langle A_{i,j}, X_i \\rangle + (C_\\text{lin} x)_j = b_j
+\\qquad
+\\forall j \\in \\{1,\\ldots,m\\} &
+\\text{s.t. } & \\sum_{j=1}^m y_j A_{i,j} \\preceq C_i
 \\qquad
 \\forall i \\in \\{1,\\ldots,\\text{nlmi}\\}
 \\\\
+& x \\ge 0, X_i \\succeq 0
+\\qquad
+\\forall i \\in \\{1,\\ldots,\\text{nlmi}\\} &
 & C_\\text{lin}^\\top y \\le d_\\text{lin}
 \\end{aligned}
 ```
@@ -85,7 +93,7 @@ The fields of the `struct` as related to the arrays of the above formulation as 
 
 * The ``i``th PSD constraint is of size `msize[i] × msisze[i]`
 * The matrix ``C_i`` is given by `C[i]`.
-* The matrix ``A_{i,j}`` is given by `-A[i,j]`.
+* The matrix ``A_{i,j}`` is given by `A[i,j]`.
 """
 mutable struct Model{T,A<:AbstractMatrix{T}} <: NLPModels.AbstractNLPModel{T,Vector{T}}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
@@ -93,7 +101,6 @@ mutable struct Model{T,A<:AbstractMatrix{T}} <: NLPModels.AbstractNLPModel{T,Vec
     C::Vector{SparseArrays.SparseMatrixCSC{T,Int}}
     A::Matrix{A}
     b::Vector{T}
-    b_const::T
     d_lin::SparseArrays.SparseVector{T,Int64}
     C_lin::SparseArrays.SparseMatrixCSC{T,Int64}
     msizes::Vector{Int64}
@@ -102,7 +109,6 @@ mutable struct Model{T,A<:AbstractMatrix{T}} <: NLPModels.AbstractNLPModel{T,Vec
         C::Vector{SparseArrays.SparseMatrixCSC{T,Int}},
         A::Matrix{AT},
         b::Vector{T},
-        b_const::T,
         d_lin::SparseArrays.SparseVector{T,Int64},
         C_lin::SparseArrays.SparseMatrixCSC{T,Int64},
         msizes::Vector{Int64},
@@ -111,7 +117,6 @@ mutable struct Model{T,A<:AbstractMatrix{T}} <: NLPModels.AbstractNLPModel{T,Vec
         model.C = C
         model.A = A
         model.b = b
-        model.b_const = b_const
         model.d_lin = d_lin
         model.C_lin = C_lin
         model.msizes = msizes
@@ -184,7 +189,7 @@ function NLPModels.obj(model::Model, x, ::Type{ScalarIndex})
 end
 
 function NLPModels.obj(model::Model, x)
-    return model.b_const + NLPModels.obj(model, x, MatrixIndex) + NLPModels.obj(model, x, ScalarIndex)
+    return NLPModels.obj(model, x, MatrixIndex) + NLPModels.obj(model, x, ScalarIndex)
 end
 
 function NLPModels.grad!(model::Model, _, g)
@@ -195,7 +200,7 @@ function NLPModels.grad!(model::Model, _, g)
     return g
 end
 
-dual_obj(model::Model, y) = -LinearAlgebra.dot(model.b, y) + model.b_const
+dual_obj(model::Model, y) = -LinearAlgebra.dot(model.b, y)
 
 function jtprod(model::Model, ::Type{ScalarIndex}, y)
     return -model.C_lin' * y

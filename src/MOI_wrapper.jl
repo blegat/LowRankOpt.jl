@@ -75,6 +75,7 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.solver = nothing
     optimizer.model = nothing
     optimizer.lin_cones = nothing
+    optimizer.objective_constant = NaN
     return
 end
 
@@ -193,7 +194,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
     end
     for row in eachindex(back)
         lmi_id, i, j = back[row]
-        _add(lmi_id, 1, i, j, -psd_AC.constants[row])
+        _add(lmi_id, 1, i, j, psd_AC.constants[row])
     end
     for var = 1:n
         for k in SparseArrays.nzrange(psd_A, var)
@@ -204,9 +205,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
     end
     dest.max_sense = MOI.get(src, MOI.ObjectiveSense()) == MOI.MAX_SENSE
     obj = MOI.get(src, MOI.ObjectiveFunction{MOI.ScalarAffineFunction{T}}())
-    # objective_constant = MOI.constant(obj) # TODO # MK: done(?)
-    b_const = obj.constant
-    b_const = dest.max_sense ? -b_const : b_const
+    dest.objective_constant = MOI.constant(obj)
     b0 = zeros(T, n)
     for term in obj.terms
         b0[term.variable.value] += term.coefficient
@@ -216,10 +215,9 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
 
     AA = SparseArrays.SparseMatrixCSC{T,Int}[SparseArrays.sparse(IJV...) for IJV in A]
     dest.model = Model(
-        -AA[:,1],
+        AA[:,1],
         AA[:,2:end],
         b,
-        b_const,
         convert(SparseArrays.SparseVector{T,Int64}, SparseArrays.sparsevec(Cd_lin.constants)),
         C_lin,
         msizes,
@@ -299,6 +297,8 @@ function MOI.get(optimizer::Optimizer, attr::MOI.PrimalStatus)
         return MOI.NO_SOLUTION
     elseif MOI.get(optimizer, MOI.TerminationStatus()) in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
+    elseif MOI.get(optimizer, MOI.TerminationStatus()) == MOI.INFEASIBLE
+        return MOI.INFEASIBLE_POINT
     else
         # TODO
         return MOI.UNKNOWN_RESULT_STATUS
@@ -308,7 +308,7 @@ end
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     val = dual_obj(optimizer.model, optimizer.solver.stats.multipliers)
-    return optimizer.max_sense ? -val : val
+    return optimizer.objective_constant + (optimizer.max_sense ? -val : val)
 end
 
 function MOI.get(optimizer::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
@@ -319,7 +319,7 @@ end
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     val = optimizer.solver.stats.objective
-    return optimizer.max_sense ? -val : val
+    return optimizer.objective_constant + (optimizer.max_sense ? -val : val)
 end
 
 function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
