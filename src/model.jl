@@ -12,6 +12,7 @@ struct Dimensions
     offsets::Vector{Int64}
 end
 
+num_matrices(d::Dimensions) = length(d.side_dimensions)
 Base.length(d::Dimensions) = d.offsets[end]
 
 struct ScalarIndex
@@ -30,6 +31,10 @@ struct VectorizedSolution{T} <: AbstractSolution{T}
     x::Vector{T}
     dim::Dimensions
 end
+
+LinearAlgebra.dot(x::VectorizedSolution, z::VectorizedSolution) = LinearAlgebra.dot(x.x, z.x)
+
+num_matrices(x::VectorizedSolution) = num_matrices(x.dim)
 
 Base.similar(s::VectorizedSolution) = VectorizedSolution(similar(s.x), s.dim)
 
@@ -55,6 +60,7 @@ function Base.view(s::VectorizedSolution, i::MatrixIndex)
 end
 
 Base.setindex!(s::VectorizedSolution, v, i::Integer) = setindex!(s.x, v, i)
+Base.getindex(s::VectorizedSolution, i::Integer) = getindex(s.x, i)
 
 struct ShapedSolution{T,MT<:AbstractMatrix{T}} <: AbstractSolution{T}
     scalars::Vector{T}
@@ -89,6 +95,7 @@ Model representing the primal-dual pair of problems:
 & C_\\text{lin}^\\top y \\le d_\\text{lin}
 \\end{aligned}
 ```
+This corresponds to [this primal-dual pair](https://plato.asu.edu/dimacs/node2.html).
 The fields of the `struct` as related to the arrays of the above formulation as follows:
 
 * The ``i``th PSD constraint is of size `msize[i] × msisze[i]`
@@ -147,7 +154,7 @@ end
 
 num_matrices(model::Model) = length(model.C)
 
-function matrix_indices(model::Model)
+function matrix_indices(model::Union{Model,AbstractSolution})
     return MOI.Utilities.LazyMap{MatrixIndex}(MatrixIndex, Base.OneTo(num_matrices(model)))
 end
 
@@ -261,8 +268,8 @@ function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y)
     return model.C[i] - jtprod!(buffer[i], model, mat_idx, y)
 end
 
-NLPModels.grad(model::Model, ::Type{ScalarIndex}) = -model.d_lin
-NLPModels.grad(model::Model, i::MatrixIndex) = -model.C[i.value]
+NLPModels.grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
+NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
 cons_constant(model::Model) = model.b
 
