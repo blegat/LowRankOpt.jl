@@ -141,8 +141,6 @@ function MOI.optimize!(model::Optimizer)
     )
     if model.silent
         options[:verbose] = 0
-    else
-        options[:verbose] = 1
     end
     SolverCore.solve!(model.solver, model.model; options...)
     return
@@ -182,7 +180,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
         I, J, V, _, _ = A[lmi_id, k]
         push!(I, i)
         push!(J, j)
-        push!(V, -v)
+        push!(V, v)
         return
     end
     function _add(lmi_id, k, i, j, coef)
@@ -200,7 +198,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
         for k in SparseArrays.nzrange(psd_A, var)
             lmi_id, i, j = back[SparseArrays.rowvals(psd_A)[k]]
             col = 1 + var
-            _add(lmi_id, col, i, j, SparseArrays.nonzeros(psd_A)[k])
+            _add(lmi_id, col, i, j, -SparseArrays.nonzeros(psd_A)[k])
         end
     end
     dest.max_sense = MOI.get(src, MOI.ObjectiveSense()) == MOI.MAX_SENSE
@@ -308,7 +306,7 @@ end
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     val = dual_obj(optimizer.model, optimizer.solver.stats.multipliers)
-    return optimizer.objective_constant + (optimizer.max_sense ? -val : val)
+    return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
 end
 
 function MOI.get(optimizer::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
@@ -319,7 +317,7 @@ end
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     val = optimizer.solver.stats.objective
-    return optimizer.objective_constant + (optimizer.max_sense ? -val : val)
+    return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
 end
 
 function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)

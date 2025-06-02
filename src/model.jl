@@ -185,7 +185,7 @@ function NLPModels.obj(model::Model, x, ::Type{MatrixIndex})
 end
 
 function NLPModels.obj(model::Model, x, ::Type{ScalarIndex})
-    return -LinearAlgebra.dot(model.d_lin, x[ScalarIndex])
+    return LinearAlgebra.dot(model.d_lin, x[ScalarIndex])
 end
 
 function NLPModels.obj(model::Model, x)
@@ -200,7 +200,7 @@ function NLPModels.grad!(model::Model, _, g)
     return g
 end
 
-dual_obj(model::Model, y) = -LinearAlgebra.dot(model.b, y)
+dual_obj(model::Model, y) = LinearAlgebra.dot(model.b, y)
 
 function jtprod(model::Model, ::Type{ScalarIndex}, y)
     return model.C_lin' * y
@@ -258,11 +258,11 @@ end
 
 function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y)
     i = mat_idx.value
-    return -jtprod!(buffer[i], model, mat_idx, y) - model.C[i]
+    return model.C[i] - jtprod!(buffer[i], model, mat_idx, y)
 end
 
 NLPModels.grad(model::Model, ::Type{ScalarIndex}) = -model.d_lin
-NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
+NLPModels.grad(model::Model, i::MatrixIndex) = -model.C[i.value]
 
 cons_constant(model::Model) = model.b
 
