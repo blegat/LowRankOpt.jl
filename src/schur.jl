@@ -93,8 +93,8 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
                 fill!(tmp2, zero(T))
                 add_jprod!(model, mat_idx, tmp, tmp2)
                 indi = σ[ii:end,ilmi]
-                BBBB[indi,i] .= -tmp2[indi]
-                BBBB[i,indi] .= -tmp2[indi]
+                BBBB[indi,i] .= tmp2[indi]
+                BBBB[i,indi] .= tmp2[indi]
             else
                 if !iszero(SparseArrays.nnz(Ai))
                     if SparseArrays.nnz(Ai) > 1

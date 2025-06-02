@@ -182,7 +182,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
         I, J, V, _, _ = A[lmi_id, k]
         push!(I, i)
         push!(J, j)
-        push!(V, v)
+        push!(V, -v)
         return
     end
     function _add(lmi_id, k, i, j, coef)

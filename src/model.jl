@@ -163,7 +163,7 @@ end
 
 # Should be only used with `norm`
 NLPModels.jac(model::Model, ::Type{ScalarIndex}) = model.C_lin
-NLPModels.jac(model::Model, i::ConstraintIndex, j::MatrixIndex) = model.A[j.value, i.value]
+NLPModels.jac(model::Model, i::ConstraintIndex, j::MatrixIndex) = -model.A[j.value, i.value]
 NLPModels.jac(model::Model, i::ConstraintIndex, ::Type{ScalarIndex}) = model.C_lin[i.value,:]
 function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
     if isempty(model.A)
@@ -173,7 +173,7 @@ function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
 end
 
 function NLPModels.obj(model::Model, X, i::MatrixIndex)
-    return -LinearAlgebra.dot(model.C[i.value], X)
+    return LinearAlgebra.dot(model.C[i.value], X)
 end
 
 function NLPModels.obj(model::Model, x, ::Type{MatrixIndex})
@@ -251,14 +251,14 @@ function jtprod!(buffer, model::Model, mat_idx::MatrixIndex, y)
     end
     _zero!(buffer)
     for j in eachindex(y)
-        _add_mul!(buffer, model.A[mat_idx.value, j], y[j])
+        _add_mul!(buffer, model.A[mat_idx.value, j], -y[j])
     end
     return buffer
 end
 
 function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y, S)
     i = mat_idx.value
-    return jtprod!(buffer[i], model, mat_idx, y) + model.C[i] - S[i]
+    return jtprod!(buffer[i], model, mat_idx, y) - model.C[i] - S[i]
 end
 
 NLPModels.grad(model::Model, ::Type{ScalarIndex}) = -model.d_lin
@@ -275,7 +275,7 @@ end
 
 function add_jprod!(model::Model, i::MatrixIndex, V, Jv)
     for j in 1:num_constraints(model)
-        Jv[j] -= LinearAlgebra.dot(model.A[i.value, j], V)
+        Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end
 end
 
