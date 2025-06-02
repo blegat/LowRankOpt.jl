@@ -72,6 +72,7 @@ end
 MOI.is_empty(optimizer::Optimizer) = isnothing(optimizer.model)
 
 function MOI.empty!(optimizer::Optimizer)
+    optimizer.solver = nothing
     optimizer.model = nothing
     optimizer.lin_cones = nothing
     return
@@ -90,9 +91,6 @@ function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
         throw(MOI.UnsupportedAttribute(param))
     end
     optimizer.options[param.name] = value
-    if !isnothing(optimizer.solver)
-        setproperty!(optimizer.solver, Symbol(param.name), value)
-    end
     return
 end
 
@@ -264,11 +262,28 @@ function MOI.get(optimizer::Optimizer, attr::RawStatus)
     return getfield(optimizer.solver.stats, attr.name)
 end
 
+# From the point of view of the solver, only a local solution is found.
+# However, this this is a convex problem, this is actually a global minimum!
+# We define this function instead of hard-coding `MOI.OPTIMAL` so that
+# `BurerMonteiro` can override it since it is solving a non-convex formulation.
+function termination_status(solver::SolverCore.AbstractOptimizationSolver)
+    if isnothing(solver.stats)
+        return MOI.OPTIMIZE_NOT_CALLED
+    end
+    status = NLPModelsJuMP.TERMINATION_STATUS[solver.stats.status]
+    if status == MOI.LOCALLY_SOLVED
+        status = MOI.OPTIMAL
+    elseif status == MOI.LOCALLY_INFEASIBLE
+        status = MOI.INFEASIBLE
+    end
+    return status
+end
+
 function MOI.get(optimizer::Optimizer, ::MOI.TerminationStatus)
-  if isnothing(optimizer.solver.stats)
-    return MOI.OPTIMIZE_NOT_CALLED
-  end
-  return NLPModelsJuMP.TERMINATION_STATUS[optimizer.solver.stats.status]
+    if isnothing(optimizer.solver)
+        return MOI.OPTIMIZE_NOT_CALLED
+    end
+    return termination_status(optimizer.solver)
 end
 
 function MOI.get(model::Optimizer, ::MOI.ResultCount)
@@ -282,7 +297,7 @@ end
 function MOI.get(optimizer::Optimizer, attr::MOI.PrimalStatus)
     if attr.result_index > MOI.get(optimizer, MOI.ResultCount())
         return MOI.NO_SOLUTION
-    elseif MOI.get(optimizer, MOI.TerminationStatus()) == MOI.LOCALLY_SOLVED
+    elseif MOI.get(optimizer, MOI.TerminationStatus()) in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
     else
         # TODO
@@ -292,25 +307,33 @@ end
 
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
-    val = optimizer.solver.stats.objective
+    val = dual_obj(optimizer.model, optimizer.solver.stats.multipliers)
     return optimizer.max_sense ? -val : val
 end
 
 function MOI.get(optimizer::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
-  MOI.check_result_index_bounds(optimizer, attr)
-  return optimizer.solver.stats.solution[vi.value]
+    MOI.check_result_index_bounds(optimizer, attr)
+    return optimizer.solver.stats.multipliers[vi.value]
 end
 
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
-    val = Solvers.obj(optimizer.solver.model, optimizer.solver.X_lin, optimizer.solver.X)::T
+    val = optimizer.solver.stats.objective
     return optimizer.max_sense ? -val : val
 end
 
-function MOI.get(::Optimizer, ::MOI.DualStatus)
-    # TODO
-    return MOI.NO_SOLUTION
+function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
+    if attr.result_index > MOI.get(optimizer, MOI.ResultCount())
+        return MOI.NO_SOLUTION
+    elseif MOI.get(optimizer, MOI.TerminationStatus()) in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
+        return MOI.FEASIBLE_POINT
+    else
+        # TODO
+        return MOI.UNKNOWN_RESULT_STATUS
+    end
 end
+
+_solution(optimizer::Optimizer)  = VectorizedSolution(optimizer.solver.stats.solution, optimizer.model.dim)
 
 function MOI.get(
     optimizer::Optimizer{T},
@@ -319,9 +342,7 @@ function MOI.get(
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     lmi_id = optimizer.lmi_id[ci]
-    X = optimizer.solver.X[lmi_id]
-    n = optimizer.solver.model.msizes[lmi_id]
-    return [X[i, j] for j = 1:n for i = 1:j]::Vector{T}
+    return TriangleVectorization(_solution(optimizer)[MatrixIndex(lmi_id)])
 end
 
 function MOI.get(
@@ -331,5 +352,5 @@ function MOI.get(
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
-    return optimizer.solver.X_lin[rows]::Vector{T}
+    return _solution(optimizer)[ScalarIndex][rows]
 end

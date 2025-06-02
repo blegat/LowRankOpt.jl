@@ -7,18 +7,18 @@ function _dot(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC, 
     # have the same sizes so we can safely use `@inbounds`
     result = zero(eltype(A))
     @inbounds for i in axes(A, 2)
-        nzA = nzrange(A, i)
+        nzA = SparseArrays.nzrange(A, i)
         if !isempty(nzA)
             for j in axes(B, 2)
-                nzB = nzrange(B, j)
+                nzB = SparseArrays.nzrange(B, j)
                 if !isempty(nzB)
                     AW = zero(result)
                     for k in nzA
-                        AW += nonzeros(A)[k] * W[rowvals(A)[k], j]
+                        AW += SparseArrays.nonzeros(A)[k] * W[SparseArrays.rowvals(A)[k], j]
                     end
                     WB = zero(result)
                     for k in nzB
-                        WB += W[i, rowvals(B)[k]] * nonzeros(B)[k]
+                        WB += W[i, SparseArrays.rowvals(B)[k]] * SparseArrays.nonzeros(B)[k]
                     end
                     result += AW * WB
                 end
@@ -64,11 +64,11 @@ end
 
 function schur_complement(buffer, model::Model, W, ::Type{MatrixIndex})
     n = num_constraints(model)
-    BBBB = zeros(eltype(eltype(W)), n, n)
-    for mat_idx in matrix_indices(model)
-        BBBB += schur_complement(buffer, model, mat_idx, W[mat_idx.value])
+    H = zeros(eltype(eltype(W)), n, n)
+    for i in matrix_indices(model)
+        H += schur_complement(buffer, model, i, W[i])
     end
-    return BBBB
+    return H
 end
 
 #####
@@ -80,26 +80,28 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
     dim = side_dimension(model, mat_idx)
     @assert dim == size(W, 1) == size(W, 2)
     tmp1 = Matrix{T}(undef, size(W, 2), dim)
+    tmp2 = Vector{T}(undef, num_constraints(model))
     tmp  = zeros(T, size(W, 2), dim)
 
     for ii = 1:n
         i = σ[ii,ilmi]
         Ai = model.A[ilmi, i]
-        if nnz(Ai) > 0
+        if SparseArrays.nnz(Ai) > 0
             if ii <= last_dense[ilmi]
-                mul!(tmp1, W, Ai)
-                mul!(tmp, tmp1, W)
-                tmp2 = jprod(model, mat_idx, tmp)
+                LinearAlgebra.mul!(tmp1, W, Ai)
+                LinearAlgebra.mul!(tmp, tmp1, W)
+                fill!(tmp2, zero(T))
+                add_jprod!(model, mat_idx, tmp, tmp2)
                 indi = σ[ii:end,ilmi]
                 BBBB[indi,i] .= -tmp2[indi]
                 BBBB[i,indi] .= -tmp2[indi]
             else
-                if !iszero(nnz(Ai))
-                    if nnz(Ai) > 1
+                if !iszero(SparseArrays.nnz(Ai))
+                    if SparseArrays.nnz(Ai) > 1
                         @inbounds for jj = ii:n
                             j = σ[jj,ilmi]
                             Aj = model.A[ilmi, j]
-                            if !iszero(nnz(Aj))
+                            if !iszero(SparseArrays.nnz(Aj))
                                 ttt = _dot(Ai, Aj, W)
                                 if i >= j
                                     BBBB[i,j] = ttt
@@ -110,17 +112,17 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
                         end   
                     else
                         # A is symmetric
-                        iiiiAi = jjjiAi = only(rowvals(Ai))
-                        vvvi = only(nonzeros(Ai))
+                        iiiiAi = jjjiAi = only(SparseArrays.rowvals(Ai))
+                        vvvi = only(SparseArrays.nonzeros(Ai))
                         @inbounds for jj = ii:n
                             j = σ[jj,ilmi]
                             Ajjj = model.A[ilmi, j]
                             # As we sort the matrices in decreasing `nnz` order,
                             # the rest of matrices is either zero or have only
                             # one entry
-                            if !iszero(nnz(Ajjj))
-                                iiijAj = jjjjAj = only(rowvals(Ajjj))
-                                vvvj = only(nonzeros(Ajjj))
+                            if !iszero(SparseArrays.nnz(Ajjj))
+                                iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
+                                vvvj = only(SparseArrays.nonzeros(Ajjj))
                                 ttt = vvvi * W[iiiiAi,iiijAj] * W[jjjiAi,jjjjAj] * vvvj
                                 if i >= j
                                     BBBB[i,j] = ttt
@@ -140,34 +142,33 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA_jW⟩
-function schur_complement(buffer, model::Model, w, W::AbstractVector)
+function schur_complement(buffer, model::Model, W::AbstractVector)
     H = MA.Zero()
     if num_matrices(model) > 0
         H = MA.add!!(H, schur_complement(buffer, model, W, MatrixIndex))
     end
     if num_scalars(model) > 0
-        H = MA.add!!(H, schur_complement(model, w, ScalarIndex))
+        H = MA.add!!(H, schur_complement(model, W[ScalarIndex], ScalarIndex))
     end
     if H isa MA.Zero
         n = num_constraints(model)
-        H = zeros(eltype(w), n, n)
+        H = zeros(eltype(W), n, n)
     end
-    return Hermitian(H, :L)
+    return LinearAlgebra.Hermitian(H, :L)
 end
 
 function schur_complement(model::Model, w, ::Type{ScalarIndex})
-    return model.C_lin * spdiagm(w) * model.C_lin'
+    return model.C_lin * SparseArrays.spdiagm(w) * model.C_lin'
 end
 
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
-function eval_schur_complement!(buffer, result, model::Model, w, W, y)
-    result .= 0.0
-    for mat_idx in matrix_indices(model)
-        i = mat_idx.value
-        result .-= jprod(model, mat_idx, W[i] * jtprod!(buffer[i], model, mat_idx, y) * W[i])
+function eval_schur_complement!(buffer, result, model::Model, W, y)
+    fill!(result, zero(eltype(result)))
+    for i in matrix_indices(model)
+        add_jprod!(model, i, -W[i] * jtprod!(buffer[i.value], model, i, y) * W[i], result)
     end
-    result .+= model.C_lin * (w .* (model.C_lin' * y))
+    result .+= model.C_lin * (W[ScalarIndex] .* (model.C_lin' * y))
     return result
 end
