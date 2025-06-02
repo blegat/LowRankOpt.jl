@@ -110,7 +110,7 @@ function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     for i in LRO.matrix_indices(model.model)
         C = NLPModels.grad(model.model, i)
         LinearAlgebra.mul!(G[i].factor, C, X[i].factor)
-        G[i].factor .*= -2
+        G[i].factor .*= 2
     end
     return g
 end
