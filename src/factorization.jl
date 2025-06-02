@@ -12,7 +12,7 @@ end
 
 function Base.getindex(m::AbstractFactorization, i::Int, j::Int)
     left = left_factor(m)
-    right = left_factor(m)
+    right = right_factor(m)
     return sum(
         left[i, k] * m.scaling[k] * right[j, k]' for
         k in eachindex(m.scaling)

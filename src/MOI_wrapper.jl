@@ -75,6 +75,7 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.solver = nothing
     optimizer.model = nothing
     optimizer.lin_cones = nothing
+    empty!(optimizer.lmi_id)
     optimizer.objective_constant = NaN
     return
 end
@@ -271,6 +272,8 @@ function termination_status(solver::SolverCore.AbstractOptimizationSolver)
         status = MOI.OPTIMAL
     elseif status == MOI.LOCALLY_INFEASIBLE
         status = MOI.INFEASIBLE
+    elseif status == MOI.NORM_LIMIT
+        status = MOI.DUAL_INFEASIBLE
     end
     return status
 end

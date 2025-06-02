@@ -50,18 +50,30 @@ struct Model{T,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
     end
 end
 
-struct Solution{T,VT<:AbstractVector{T}}
+struct Solution{T,VT<:AbstractVector{T}} <: AbstractVector{T}
     x::VT
     dim::Dimensions
 end
 
-struct _OuterProduct{T,UT<:AbstractVector{T},VT<:AbstractVector{T}}
+struct _OuterProduct{T,UT<:AbstractVector{T},VT<:AbstractVector{T}} <: AbstractVector{T}
     x::Solution{T,VT}
     v::Solution{T,UT}
 end
 
 Base.eltype(::Type{<:Union{Solution{T},_OuterProduct{T}}}) where {T} = T
 Base.eltype(x::Union{Solution,_OuterProduct}) = eltype(typeof(x))
+
+Base.size(s::Solution) = size(s.x)
+Base.getindex(s::Solution, i::Integer) = getindex(s.x, i)
+
+Base.size(s::_OuterProduct) = size(s.x)
+function Base.show(io::IO, s::_OuterProduct)
+    print(io, "_OuterProduct(")
+    print(io, s.x)
+    print(io, ", ")
+    print(io, s.v)
+    print(io, ")")
+end
 
 function Base.getindex(s::Solution, ::Type{LRO.ScalarIndex})
     return view(s.x, Base.OneTo(s.dim.num_scalars))
@@ -82,8 +94,8 @@ function Base.getindex(s::Solution, mi::LRO.MatrixIndex)
 end
 
 function Base.getindex(s::_OuterProduct{T}, i::LRO.MatrixIndex) where {T}
-    U = s.x[i]
-    V = s.v[i]
+    U = s.x[i].factor
+    V = s.v[i].factor
     return LRO.AsymmetricFactorization(U, V, FillArrays.Fill(T(2), size(U, 2)))
 end
 
@@ -125,10 +137,10 @@ function NLPModels.jtprod!(model::Model, x::AbstractVector, y::AbstractVector, J
     )
     for i in LRO.matrix_indices(model.model)
         U = JtV[i].factor
+        fill!(U, zero(eltype(U)))
         for j in eachindex(y)
             A = NLPModels.jac(model.model, LRO.ConstraintIndex(j), i)
-            LinearAlgebra.mul!(U, A, X[i].factor)
-            U .*= (2y[j])
+            U .+= A * X[i].factor .* (2y[j])
         end
     end
     return Jtv
@@ -146,9 +158,10 @@ function NLPModels.hprod!(model::Model{T}, ::AbstractVector, y, v::AbstractVecto
         Hvi .*= 2obj_weight
         for j in 1:model.meta.ncon
             A = NLPModels.jac(model.model, LRO.ConstraintIndex(j), i)
-            Hvi .+= A * Vi .* (2y[j])
+            Hvi .-= A * Vi .* (2y[j])
         end
     end
+    Hv
 end
 
 struct Solver{T,ST} <: SolverCore.AbstractOptimizationSolver
