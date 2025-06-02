@@ -167,7 +167,7 @@ end
 function eval_schur_complement!(buffer, result, model::Model, W, y)
     fill!(result, zero(eltype(result)))
     for i in matrix_indices(model)
-        add_jprod!(model, i, -W[i] * jtprod!(buffer[i.value], model, i, y) * W[i], result)
+        add_jprod!(model, i, W[i] * jtprod!(buffer[i.value], model, i, y) * W[i], result)
     end
     result .+= model.C_lin * (W[ScalarIndex] .* (model.C_lin' * y))
     return result
