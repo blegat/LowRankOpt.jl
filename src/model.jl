@@ -6,6 +6,26 @@ import MutableArithmetics as MA
 import MathOptInterface as MOI
 import NLPModels
 
+struct Solution{T} <: AbstractVector{T}
+    scalars::Vector{T}
+    matrices::Vector{LinearAlgebra.Symmetric{T,Matrix{T}}}
+end
+
+function Base.zero(::Type{Solution{T}}, num_scalars::Integer, side_dimensions) where {T}
+    return Solution{T}(
+        zeros(T, num_scalars),
+        [LinearAlgebra.Symmetric(zeros(T, d, d)) for d in side_dimensions]
+    )
+end
+
+struct Meta{T} <: NLPModels.AbstractNLPModelMeta{T,Solution{T}}
+  nvar::Int
+  x0::Solution{T}
+  ncon::Int
+  y0::Vector{T}
+  minimize::Bool
+end
+
 """
     Model
 
@@ -28,7 +48,7 @@ The fields of the `struct` as related to the arrays of the above formulation as 
 * The matrix ``A_{i,j}`` is given by `-A[i,j]`.
 """
 mutable struct Model{T,A<:AbstractMatrix{T}} <: NLPModels.AbstractNLPModel{T,Vector{T}}
-    meta::NLPModels.NLPModelMeta{T,Vector{T}}
+    meta::Meta{T}
     C::Vector{SparseArrays.SparseMatrixCSC{T,Int}}
     A::Matrix{A}
     b::Vector{T}
@@ -54,12 +74,16 @@ mutable struct Model{T,A<:AbstractMatrix{T}} <: NLPModels.AbstractNLPModel{T,Vec
         model.d_lin = d_lin
         model.C_lin = C_lin
         model.msizes = msizes
-        model.meta = NLPModels.NLPModelMeta(
+        model.meta = Meta{T}(
             num_scalars(model) + sum(
                 Base.Fix1(side_dimension, model),
                 matrix_indices(model);
                 init = 0
             ),
+            zero(Solution{T}, num_scalars(model), msizes),
+            length(b),
+            zero(b),
+            true,
         )
         return model
     end

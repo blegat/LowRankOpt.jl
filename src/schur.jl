@@ -35,7 +35,7 @@ function buffer_for_schur_complement(model::Model, κ)
 
     for mat_idx in matrix_indices(model)
         i = mat_idx.value
-        nzA = [nnz(model.A[i, j]) for j in 1:n]
+        nzA = [SparseArrays.nnz(model.A[i, j]) for j in 1:n]
         σ[:,i] = sortperm(nzA, rev = true)
         sorted = nzA[σ[:,i]]
 
