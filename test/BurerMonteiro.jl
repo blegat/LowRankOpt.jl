@@ -64,12 +64,25 @@ end
 @testset "Simple LP" begin
     model = Model(LRO.Optimizer)
     @variable(model, x)
-    @constraint(model, x + 1 >= 0)
-    @objective(model, Min, x)
+    @constraint(model, con_ref, 1 - x in Nonnegatives())
+    @objective(model, Max, x)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
+    set_attribute(model, "verbose", 1)
     set_attribute(model, "ranks", Int[])
+
+    set_attribute(model, "max_iter", 0)
     optimize!(model)
+    @test termination_status(model) == MOI.ITERATION_LIMIT
+    diff_check(model)
+
+    set_attribute(model, "max_iter", 10)
+    optimize!(model)
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test value(x) ≈ 1
+    @test dual(con_ref) ≈ 1
+    @test objective_value(model) ≈ 1
+    @test dual_objective_value(model) ≈ 1
     diff_check(model)
 end
 
@@ -80,13 +93,19 @@ end
     @objective(model, Max, x)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
-    set_attribute(model, "max_iter", 20)
     set_attribute(model, "ranks", [1])
     set_attribute(model, "verbose", 2)
     @test solver_name(model) == "LowRankOpt with no solver loaded yet"
+
+    set_attribute(model, "max_iter", 0)
     optimize!(model)
     solution_summary(model)
     @test solver_name(model) == "BurerMonteiro with Percival"
+    @test termination_status(model) == MOI.ITERATION_LIMIT
+    diff_check(model)
+
+    set_attribute(model, "max_iter", 10)
+    optimize!(model)
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test primal_status(model) == MOI.FEASIBLE_POINT
     @test dual_status(model) == MOI.FEASIBLE_POINT
@@ -94,11 +113,11 @@ end
     t = MOI.get(model, MOI.ConstraintDual(), con_ref)
     @test t isa LRO.TriangleVectorization
     @test t.matrix isa LRO.Factorization
-    @test_broken t.matrix ≈ ones(1, 1)
-    @test_broken only(dual(con_ref)) ≈ 1
+    @test t.matrix ≈ ones(1, 1)
+    @test only(dual(con_ref)) ≈ 1
     solution_summary(model)
     @test objective_value(model) ≈ 1
-    @test_broken dualobjective_value(model) ≈ 1
+    @test dual_objective_value(model) ≈ 1
     diff_check(model)
 end
 
@@ -109,8 +128,6 @@ end
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
     set_attribute(model, "ranks", [1])
-    set_attribute(model, "max_iter", 200)
-    set_attribute(model, "max_eval", 200)
     set_attribute(model, "verbose", 2)
     optimize!(model)
     solution_summary(model)

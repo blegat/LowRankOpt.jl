@@ -180,9 +180,6 @@ function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
 end
 
 function NLPModels.obj(model::Model, X, i::MatrixIndex)
-    @show model.C[i.value]
-    @show X
-    @show LinearAlgebra.dot(model.C[i.value], X)
     return LinearAlgebra.dot(model.C[i.value], X)
 end
 

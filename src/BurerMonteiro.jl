@@ -118,9 +118,10 @@ function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
 end
 
 function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
-    NLPModels.cons!(model.model, Solution(x, model.dim), cx)
-    @show cx
-    cx
+    X = Solution(x, model.dim)
+    # We don't call `cons!` as we don't want to include `-b` since the constraint
+    # is encoded as `b <= c(x) <= b` and we just need to specify `c(x)` here.
+    NLPModels.jprod!(model.model, X, X, cx)
 end
 
 function NLPModels.jprod!(model::Model, x::AbstractVector, v::AbstractVector, Jv::AbstractVector)

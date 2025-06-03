@@ -332,7 +332,6 @@ end
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     val = optimizer.solver.stats.objective
-    @show val
     return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
 end
 
