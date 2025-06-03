@@ -22,6 +22,13 @@ function test_vecprod(f, len, J; tol = 1e-6)
 end
 
 import NLPModels, FiniteDiff
+
+function grad_check(model, x; tol = 1e-6)
+    f(x) = NLPModels.obj(model, x)
+    g = FiniteDiff.finite_difference_gradient(f, x)
+    @test NLPModels.grad(model, x) ≈ g rtol = tol atol = tol
+end
+
 function jac_check(model, x; kws...)
     f(x) = NLPModels.cons(model, x)
     J = FiniteDiff.finite_difference_jacobian(f, x)
@@ -47,6 +54,7 @@ function diff_check(model)
     bm = b.solver.model
     x = rand(bm.meta.nvar)
     @testset "Gradient" begin
+        grad_check(bm, x)
         @test isempty(NLPModelsTest.gradient_check(bm; x))
     end
     @testset "Jacobian" begin
@@ -57,30 +65,31 @@ function diff_check(model)
     end
 end
 
-function full_check(model)
-    set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
-    set_attribute(model, "sub_solver", Percival.PercivalSolver)
-    set_attribute(model, "max_iter", 0)
-    set_attribute(model, "max_eval", 0)
-    set_attribute(model, "ranks", [1])
-    optimize!(model)
-    diff_check(model)
-end
-
 @testset "Simple LP" begin
     model = Model(LowRankOpt.Optimizer)
     @variable(model, x)
     @constraint(model, x + 1 >= 0)
     @objective(model, Min, x)
-    full_check(model)
+    set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
+    set_attribute(model, "sub_solver", Percival.PercivalSolver)
+    optimize!(model)
+    diff_check(model)
 end
 
 @testset "Simple SDP" begin
     model = Model(LowRankOpt.Optimizer)
     @variable(model, x)
-    @constraint(model, x * ones(1, 1) in PSDCone())
-    @objective(model, Min, x)
-    full_check(model)
+    @constraint(model, (1 - x) * ones(1, 1) in PSDCone())
+    @objective(model, Max, x)
+    set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
+    set_attribute(model, "sub_solver", Percival.PercivalSolver)
+    set_attribute(model, "max_iter", 10)
+    set_attribute(model, "ranks", [1])
+    set_attribute(model, "verbose", 2)
+    optimize!(model)
+    solution_summary(model)
+    @test objective_value(model) ≈ 1
+    diff_check(model)
 end
 
 @testset "Simple SDP" begin
