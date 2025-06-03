@@ -80,7 +80,18 @@ function MOI.empty!(optimizer::Optimizer)
     return
 end
 
-MOI.get(::Optimizer, ::MOI.SolverName) = "LowRankOpt"
+# /!\ FIXME type piracy
+function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::MOI.SolverName)
+    return string(parentmodule(typeof(solver)))
+end
+
+function MOI.get(optimizer::Optimizer, attr::MOI.SolverName)
+    if isnothing(optimizer.solver)
+        return "LowRankOpt with no solver loaded yet"
+    else
+        return MOI.get(optimizer.solver, attr)
+    end
+end
 
 # MOI.RawOptimizerAttribute
 
@@ -263,7 +274,8 @@ end
 # However, this this is a convex problem, this is actually a global minimum!
 # We define this function instead of hard-coding `MOI.OPTIMAL` so that
 # `BurerMonteiro` can override it since it is solving a non-convex formulation.
-function termination_status(solver::SolverCore.AbstractOptimizationSolver)
+# FIXME This is type piracy, this should be moved to an extension of SolverCore maybe ?
+function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::MOI.TerminationStatus)
     if isnothing(solver.stats)
         return MOI.OPTIMIZE_NOT_CALLED
     end
@@ -278,11 +290,11 @@ function termination_status(solver::SolverCore.AbstractOptimizationSolver)
     return status
 end
 
-function MOI.get(optimizer::Optimizer, ::MOI.TerminationStatus)
+function MOI.get(optimizer::Optimizer, attr::MOI.TerminationStatus)
     if isnothing(optimizer.solver)
         return MOI.OPTIMIZE_NOT_CALLED
     end
-    return termination_status(optimizer.solver)
+    return MOI.get(optimizer.solver, attr)
 end
 
 function MOI.get(model::Optimizer, ::MOI.ResultCount)
@@ -320,6 +332,7 @@ end
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     val = optimizer.solver.stats.objective
+    @show val
     return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
 end
 
@@ -334,7 +347,13 @@ function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
     end
 end
 
-_solution(optimizer::Optimizer)  = VectorizedSolution(optimizer.solver.stats.solution, optimizer.model.dim)
+struct Solution <: MOI.AbstractModelAttribute end
+MOI.is_set_by_optimize(::Solution) = true
+
+function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::Solution)
+    return VectorizedSolution(solver.solver.stats.solution, solver.model.dim)
+end
+MOI.get(optimizer::Optimizer, attr::Solution) = MOI.get(optimizer.solver, attr)
 
 function MOI.get(
     optimizer::Optimizer{T},
@@ -343,7 +362,8 @@ function MOI.get(
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     lmi_id = optimizer.lmi_id[ci]
-    return TriangleVectorization(_solution(optimizer)[MatrixIndex(lmi_id)])
+    sol = MOI.get(optimizer, Solution())
+    return TriangleVectorization(sol[MatrixIndex(lmi_id)])
 end
 
 function MOI.get(
@@ -353,5 +373,6 @@ function MOI.get(
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
-    return _solution(optimizer)[ScalarIndex][rows]
+    sol = MOI.get(optimizer, Solution())
+    return sol[ScalarIndex][rows]
 end

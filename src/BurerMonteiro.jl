@@ -4,6 +4,8 @@ import LinearAlgebra
 import FillArrays
 import SolverCore
 import NLPModels
+import MathOptInterface as MOI
+import NLPModelsJuMP
 import LowRankOpt as LRO
 
 struct Dimensions
@@ -117,6 +119,8 @@ end
 
 function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     NLPModels.cons!(model.model, Solution(x, model.dim), cx)
+    @show cx
+    cx
 end
 
 function NLPModels.jprod!(model::Model, x::AbstractVector, v::AbstractVector, Jv::AbstractVector)
@@ -185,5 +189,20 @@ function SolverCore.solve!(
     SolverCore.solve!(solver.solver, solver.model, solver.stats; kws...)
 end
 
+function MOI.get(solver::Solver, attr::MOI.SolverName)
+    return "BurerMonteiro with " * MOI.get(solver.solver, attr)
+end
+
+function MOI.get(solver::Solver, ::MOI.TerminationStatus)
+    if isnothing(solver.stats)
+        return MOI.OPTIMIZE_NOT_CALLED
+    end
+    return NLPModelsJuMP.TERMINATION_STATUS[solver.stats.status]
+    # TODO if the dual is feasible, we can still claim that we found the optimal
+end
+
+function MOI.get(solver::Solver, ::LRO.Solution)
+    return Solution(solver.stats.solution, solver.model.dim)
+end
 
 end

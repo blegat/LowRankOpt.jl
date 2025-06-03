@@ -1,4 +1,5 @@
 using Test
+using LinearAlgebra
 using JuMP
 import LowRankOpt as LRO
 import Percival
@@ -61,7 +62,7 @@ function diff_check(model)
 end
 
 @testset "Simple LP" begin
-    model = Model(LowRankOpt.Optimizer)
+    model = Model(LRO.Optimizer)
     @variable(model, x)
     @constraint(model, x + 1 >= 0)
     @objective(model, Min, x)
@@ -73,25 +74,38 @@ end
 end
 
 @testset "Simple SDP" begin
-    model = Model(LowRankOpt.Optimizer)
+    model = Model(LRO.Optimizer)
     @variable(model, x)
-    @constraint(model, (1 - x) * ones(1, 1) in PSDCone())
+    @constraint(model, con_ref, Symmetric((1 - x) * ones(1, 1)) in PSDCone())
     @objective(model, Max, x)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
-    set_attribute(model, "max_iter", 10)
+    set_attribute(model, "max_iter", 20)
     set_attribute(model, "ranks", [1])
     set_attribute(model, "verbose", 2)
+    @test solver_name(model) == "LowRankOpt with no solver loaded yet"
     optimize!(model)
     solution_summary(model)
+    @test solver_name(model) == "BurerMonteiro with Percival"
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test primal_status(model) == MOI.FEASIBLE_POINT
+    @test dual_status(model) == MOI.FEASIBLE_POINT
+    @test value(x) ≈ 1
+    t = MOI.get(model, MOI.ConstraintDual(), con_ref)
+    @test t isa LRO.TriangleVectorization
+    @test t.matrix isa LRO.Factorization
+    @test_broken t.matrix ≈ ones(1, 1)
+    @test_broken only(dual(con_ref)) ≈ 1
+    solution_summary(model)
     @test objective_value(model) ≈ 1
+    @test_broken dualobjective_value(model) ≈ 1
     diff_check(model)
 end
 
 @testset "Simple SDP" begin
     include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
     weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
-    model = maxcut(weights, LowRankOpt.Optimizer)
+    model = maxcut(weights, LRO.Optimizer)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
     set_attribute(model, "ranks", [1])
