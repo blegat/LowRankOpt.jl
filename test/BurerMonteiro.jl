@@ -1,12 +1,7 @@
 using Test
-using LowRankOpt
+using JuMP
+import LowRankOpt as LRO
 import Percival
-
-set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
-set_attribute(model, "sub_solver", Percival.PercivalSolver)
-set_attribute(model, "ranks", [1])
-optimize!(model)
-solution_summary(model)
 
 function test_vecprod(f, len, J; tol = 1e-6)
     v = ones(len)
@@ -72,6 +67,7 @@ end
     @objective(model, Min, x)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
+    set_attribute(model, "ranks", Int[])
     optimize!(model)
     diff_check(model)
 end

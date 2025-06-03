@@ -1,5 +1,6 @@
 [deps]
 FiniteDiff = "6a86dc24-6348-571c-b903-95158fe2bd41"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LowRankOpt = "607ca3ad-272e-43c8-bcbe-fc71b56c935c"
 MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
