@@ -81,7 +81,10 @@ function MOI.empty!(optimizer::Optimizer)
 end
 
 # /!\ FIXME type piracy
-function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::MOI.SolverName)
+function MOI.get(
+    solver::SolverCore.AbstractOptimizationSolver,
+    ::MOI.SolverName,
+)
     return string(parentmodule(typeof(solver)))
 end
 
@@ -134,22 +137,30 @@ end
 
 function MOI.supports(
     ::Optimizer,
-    ::Union{MOI.ObjectiveSense,MOI.ObjectiveFunction{MOI.ScalarAffineFunction{T}}},
+    ::Union{
+        MOI.ObjectiveSense,
+        MOI.ObjectiveFunction{MOI.ScalarAffineFunction{T}},
+    },
 ) where {T}
     return true
 end
 
 const SUPPORTED_CONES = Union{NNG,PSD}
 
-function MOI.supports_constraint(::Optimizer{T}, ::Type{VAF{T}}, ::Type{<:SUPPORTED_CONES}) where {T}
+function MOI.supports_constraint(
+    ::Optimizer{T},
+    ::Type{VAF{T}},
+    ::Type{<:SUPPORTED_CONES},
+) where {T}
     return true
 end
 
 SOLVER_OPTIONS = ["solver", "sub_solver", "ranks"]
 
 function MOI.optimize!(model::Optimizer)
-    options = Dict{Symbol, Any}(
-        Symbol(key) => model.options[key] for key in keys(model.options) if !(key in SOLVER_OPTIONS)
+    options = Dict{Symbol,Any}(
+        Symbol(key) => model.options[key] for
+        key in keys(model.options) if !(key in SOLVER_OPTIONS)
     )
     if model.silent
         options[:verbose] = 0
@@ -168,21 +179,26 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
     C_lin = -convert(SM, C_lin')
     n = MOI.get(src, MOI.NumberOfVariables())
     nlmi = MOI.get(src, MOI.NumberOfConstraints{VAF{T},PSD}())
-    A = Matrix{Tuple{Vector{Int64},Vector{Int64},Vector{T},Int64,Int64}}(undef, nlmi, n + 1)
+    A = Matrix{Tuple{Vector{Int64},Vector{Int64},Vector{T},Int64,Int64}}(
+        undef,
+        nlmi,
+        n + 1,
+    )
     back = Vector{Tuple{Int64,Int64,Int64}}(undef, size(psd_A, 1))
     empty!(dest.lmi_id)
     row = 0
     msizes = Int64[]
-    for (lmi_id, ci) in enumerate(MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},PSD}()))
+    for (lmi_id, ci) in
+        enumerate(MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},PSD}()))
         dest.lmi_id[ci] = lmi_id
         set = MOI.get(src, MOI.ConstraintSet(), ci)
         d = set.side_dimension
         push!(msizes, d)
-        for k = 1:(n+1)
+        for k in 1:(n+1)
             A[lmi_id, k] = (Int64[], Int64[], T[], d, d)
         end
-        for j = 1:d
-            for i = 1:j
+        for j in 1:d
+            for i in 1:j
                 row += 1
                 back[row] = (lmi_id, i, j)
             end
@@ -206,7 +222,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
         lmi_id, i, j = back[row]
         _add(lmi_id, 1, i, j, psd_AC.constants[row])
     end
-    for var = 1:n
+    for var in 1:n
         for k in SparseArrays.nzrange(psd_A, var)
             lmi_id, i, j = back[SparseArrays.rowvals(psd_A)[k]]
             col = 1 + var
@@ -223,12 +239,17 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
     b = dest.max_sense ? b0 : -b0
     # b = max_sense ? -b0 : b0
 
-    AA = SparseArrays.SparseMatrixCSC{T,Int}[SparseArrays.sparse(IJV...) for IJV in A]
+    AA = SparseArrays.SparseMatrixCSC{T,Int}[
+        SparseArrays.sparse(IJV...) for IJV in A
+    ]
     dest.model = Model(
-        AA[:,1],
-        AA[:,2:end],
+        AA[:, 1],
+        AA[:, 2:end],
         b,
-        convert(SparseArrays.SparseVector{T,Int64}, SparseArrays.sparsevec(Cd_lin.constants)),
+        convert(
+            SparseArrays.SparseVector{T,Int64},
+            SparseArrays.sparsevec(Cd_lin.constants),
+        ),
         C_lin,
         msizes,
     )
@@ -238,8 +259,9 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
         options["verb"] = 0
     end
     dest.lin_cones = Cd_lin.sets
-    options = Dict{Symbol, Any}(
-        Symbol(key) => dest.options[key] for key in keys(dest.options) if key in SOLVER_OPTIONS && key != "solver"
+    options = Dict{Symbol,Any}(
+        Symbol(key) => dest.options[key] for key in keys(dest.options) if
+        key in SOLVER_OPTIONS && key != "solver"
     )
     dest.solver = dest.options["solver"](dest.model; options...)
     return MOI.Utilities.identity_index_map(src)
@@ -275,7 +297,10 @@ end
 # We define this function instead of hard-coding `MOI.OPTIMAL` so that
 # `BurerMonteiro` can override it since it is solving a non-convex formulation.
 # FIXME This is type piracy, this should be moved to an extension of SolverCore maybe ?
-function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::MOI.TerminationStatus)
+function MOI.get(
+    solver::SolverCore.AbstractOptimizationSolver,
+    ::MOI.TerminationStatus,
+)
     if isnothing(solver.stats)
         return MOI.OPTIMIZE_NOT_CALLED
     end
@@ -308,7 +333,8 @@ end
 function MOI.get(optimizer::Optimizer, attr::MOI.PrimalStatus)
     if attr.result_index > MOI.get(optimizer, MOI.ResultCount())
         return MOI.NO_SOLUTION
-    elseif MOI.get(optimizer, MOI.TerminationStatus()) in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
+    elseif MOI.get(optimizer, MOI.TerminationStatus()) in
+           [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
     elseif MOI.get(optimizer, MOI.TerminationStatus()) == MOI.INFEASIBLE
         return MOI.INFEASIBLE_POINT
@@ -324,12 +350,19 @@ function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
     return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
 end
 
-function MOI.get(optimizer::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
+function MOI.get(
+    optimizer::Optimizer,
+    attr::MOI.VariablePrimal,
+    vi::MOI.VariableIndex,
+)
     MOI.check_result_index_bounds(optimizer, attr)
     return optimizer.solver.stats.multipliers[vi.value]
 end
 
-function MOI.get(optimizer::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
+function MOI.get(
+    optimizer::Optimizer{T},
+    attr::MOI.DualObjectiveValue,
+) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     val = optimizer.solver.stats.objective
     return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
@@ -338,7 +371,8 @@ end
 function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
     if attr.result_index > MOI.get(optimizer, MOI.ResultCount())
         return MOI.NO_SOLUTION
-    elseif MOI.get(optimizer, MOI.TerminationStatus()) in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
+    elseif MOI.get(optimizer, MOI.TerminationStatus()) in
+           [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
     else
         # TODO

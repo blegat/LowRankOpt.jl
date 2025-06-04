@@ -3,8 +3,14 @@
 # https://github.com/kocvara/Loraine.jl/blob/bd2821ba830786a78f04081d7e8f5cac25e56cac/src/makeBBBB.jl
 
 # Computes `⟨A * W, W * B⟩` for symmetric sparse matrices `A` and `B`
-function _dot(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC, W::AbstractMatrix)
-    @assert LinearAlgebra.checksquare(W) == LinearAlgebra.checksquare(A) == LinearAlgebra.checksquare(B)
+function _dot(
+    A::SparseArrays.SparseMatrixCSC,
+    B::SparseArrays.SparseMatrixCSC,
+    W::AbstractMatrix,
+)
+    @assert LinearAlgebra.checksquare(W) ==
+            LinearAlgebra.checksquare(A) ==
+            LinearAlgebra.checksquare(B)
     # After these asserts, we know that `A`, `B` and `W` are square and
     # have the same sizes so we can safely use `@inbounds`
     result = zero(eltype(A))
@@ -16,11 +22,15 @@ function _dot(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC, 
                 if !isempty(nzB)
                     AW = zero(result)
                     for k in nzA
-                        AW += SparseArrays.nonzeros(A)[k] * W[SparseArrays.rowvals(A)[k], j]
+                        AW +=
+                            SparseArrays.nonzeros(A)[k] *
+                            W[SparseArrays.rowvals(A)[k], j]
                     end
                     WB = zero(result)
                     for k in nzB
-                        WB += W[i, SparseArrays.rowvals(B)[k]] * SparseArrays.nonzeros(B)[k]
+                        WB +=
+                            W[i, SparseArrays.rowvals(B)[k]] *
+                            SparseArrays.nonzeros(B)[k]
                     end
                     result += AW * WB
                 end
@@ -38,8 +48,8 @@ function buffer_for_schur_complement(model::Model, κ)
     for mat_idx in matrix_indices(model)
         i = mat_idx.value
         nzA = [SparseArrays.nnz(model.A[i, j]) for j in 1:n]
-        σ[:,i] = sortperm(nzA, rev = true)
-        sorted = nzA[σ[:,i]]
+        σ[:, i] = sortperm(nzA, rev = true)
+        sorted = nzA[σ[:, i]]
 
         last_dense[i] = something(findlast(Base.Fix1(isless, κ), sorted), 0)
     end
@@ -47,12 +57,12 @@ function buffer_for_schur_complement(model::Model, κ)
     return σ, last_dense
 end
 
-function makeH_rank1(n,nlmi,B,G)
+function makeH_rank1(n, nlmi, B, G)
     tmp = zeros(Float64, n, n)
     H = zeros(Float64, n, n)
-    for ilmi = 1:nlmi
+    for ilmi in 1:nlmi
         BB = transpose(B[ilmi] * G[ilmi])
-        mul!(tmp,BB',BB)
+        mul!(tmp, BB', BB)
         if ilmi == 1
             H = tmp .^ 2
         else
@@ -74,7 +84,12 @@ function schur_complement(buffer, model::Model, W, ::Type{MatrixIndex})
 end
 
 #####
-function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T}
+function schur_complement(
+    buffer,
+    model,
+    mat_idx,
+    W::AbstractMatrix{T},
+) where {T}
     σ, last_dense = buffer
     ilmi = mat_idx.value
     n = num_constraints(model)
@@ -83,10 +98,10 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
     @assert dim == size(W, 1) == size(W, 2)
     tmp1 = Matrix{T}(undef, size(W, 2), dim)
     tmp2 = Vector{T}(undef, num_constraints(model))
-    tmp  = zeros(T, size(W, 2), dim)
+    tmp = zeros(T, size(W, 2), dim)
 
-    for ii = 1:n
-        i = σ[ii,ilmi]
+    for ii in 1:n
+        i = σ[ii, ilmi]
         Ai = model.A[ilmi, i]
         if SparseArrays.nnz(Ai) > 0
             if ii <= last_dense[ilmi]
@@ -94,46 +109,51 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
                 LinearAlgebra.mul!(tmp, tmp1, W)
                 fill!(tmp2, zero(T))
                 add_jprod!(model, mat_idx, tmp, tmp2)
-                indi = σ[ii:end,ilmi]
-                H[indi,i] .= tmp2[indi]
-                H[i,indi] .= tmp2[indi]
+                indi = σ[ii:end, ilmi]
+                H[indi, i] .= tmp2[indi]
+                H[i, indi] .= tmp2[indi]
             else
                 if !iszero(SparseArrays.nnz(Ai))
                     if SparseArrays.nnz(Ai) > 1
-                        @inbounds for jj = ii:n
-                            j = σ[jj,ilmi]
+                        @inbounds for jj in ii:n
+                            j = σ[jj, ilmi]
                             Aj = model.A[ilmi, j]
                             if !iszero(SparseArrays.nnz(Aj))
                                 ttt = _dot(Ai, Aj, W)
                                 if i >= j
-                                    H[i,j] = ttt
+                                    H[i, j] = ttt
                                 else
-                                    H[j,i] = ttt
+                                    H[j, i] = ttt
                                 end
-                            end  
-                        end   
+                            end
+                        end
                     else
                         # A is symmetric
                         iiiiAi = jjjiAi = only(SparseArrays.rowvals(Ai))
                         vvvi = only(SparseArrays.nonzeros(Ai))
-                        @inbounds for jj = ii:n
-                            j = σ[jj,ilmi]
+                        @inbounds for jj in ii:n
+                            j = σ[jj, ilmi]
                             Ajjj = model.A[ilmi, j]
                             # As we sort the matrices in decreasing `nnz` order,
                             # the rest of matrices is either zero or have only
                             # one entry
                             if !iszero(SparseArrays.nnz(Ajjj))
-                                iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
+                                iiijAj =
+                                    jjjjAj = only(SparseArrays.rowvals(Ajjj))
                                 vvvj = only(SparseArrays.nonzeros(Ajjj))
-                                ttt = vvvi * W[iiiiAi,iiijAj] * W[jjjiAi,jjjjAj] * vvvj
+                                ttt =
+                                    vvvi *
+                                    W[iiiiAi, iiijAj] *
+                                    W[jjjiAi, jjjjAj] *
+                                    vvvj
                                 if i >= j
-                                    H[i,j] = ttt
+                                    H[i, j] = ttt
                                 else
-                                    H[j,i] = ttt
+                                    H[j, i] = ttt
                                 end
                             end
-                        end 
-                    end   
+                        end
+                    end
                 end
             end
         end
@@ -169,7 +189,12 @@ end
 function eval_schur_complement!(buffer, result, model::Model, W, y)
     fill!(result, zero(eltype(result)))
     for i in matrix_indices(model)
-        add_jprod!(model, i, W[i] * jtprod!(buffer[i.value], model, i, y) * W[i], result)
+        add_jprod!(
+            model,
+            i,
+            W[i] * jtprod!(buffer[i.value], model, i, y) * W[i],
+            result,
+        )
     end
     result .+= model.C_lin * (W[ScalarIndex] .* (model.C_lin' * y))
     return result

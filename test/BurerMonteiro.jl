@@ -30,19 +30,35 @@ function jac_check(model, x; kws...)
     f(x) = NLPModels.cons(model, x)
     J = FiniteDiff.finite_difference_jacobian(f, x)
     @testset "jprod" begin
-        test_vecprod(v -> NLPModels.jprod(model, x, v), model.meta.nvar, J; kws...)
+        test_vecprod(
+            v -> NLPModels.jprod(model, x, v),
+            model.meta.nvar,
+            J;
+            kws...,
+        )
     end
     @testset "jtprod" begin
-        test_vecprod(v -> NLPModels.jtprod(model, x, v), model.meta.ncon, J'; kws...)
+        test_vecprod(
+            v -> NLPModels.jtprod(model, x, v),
+            model.meta.ncon,
+            J';
+            kws...,
+        )
     end
 end
 
 function hess_check(model, x; kws...)
     obj_weight = rand()
     y = rand(model.meta.ncon)
-    f(x) = obj_weight * NLPModels.obj(model, x) - dot(y, NLPModels.cons(model, x))
+    f(x) =
+        obj_weight * NLPModels.obj(model, x) - dot(y, NLPModels.cons(model, x))
     J = FiniteDiff.finite_difference_hessian(f, x)
-    test_vecprod(v -> NLPModels.hprod(model, x, y, v; obj_weight), model.meta.nvar, J; kws...)
+    return test_vecprod(
+        v -> NLPModels.hprod(model, x, y, v; obj_weight),
+        model.meta.nvar,
+        J;
+        kws...,
+    )
 end
 
 using NLPModelsTest
@@ -65,7 +81,8 @@ function diff_check(model)
     end
 end
 
-@testset "Simple LP $opt" for opt in [LRO.Optimizer, dual_optimizer(LRO.Optimizer)]
+@testset "Simple LP $opt" for opt in
+                              [LRO.Optimizer, dual_optimizer(LRO.Optimizer)]
     model = Model(dual_optimizer(LRO.Optimizer))
     @variable(model, x)
     @constraint(model, con_ref, 1 - x in Nonnegatives())
@@ -90,7 +107,10 @@ end
     diff_check(model)
 end;
 
-@testset "Simple SDP $opt" for (is_dual, opt) in [(false, LRO.Optimizer), (true, dual_optimizer(LRO.Optimizer))]
+@testset "Simple SDP $opt" for (is_dual, opt) in [
+    (false, LRO.Optimizer),
+    (true, dual_optimizer(LRO.Optimizer)),
+]
     model = Model(opt)
     @variable(model, x)
     @constraint(model, con_ref, Symmetric((1 - x) * ones(1, 1)) in PSDCone())
@@ -100,7 +120,8 @@ end;
     set_attribute(model, "ranks", [1])
     set_attribute(model, "verbose", 2)
     if is_dual
-        @test solver_name(model) == "Dual model with LowRankOpt with no solver loaded yet attached"
+        @test solver_name(model) ==
+              "Dual model with LowRankOpt with no solver loaded yet attached"
     else
         @test solver_name(model) == "LowRankOpt with no solver loaded yet"
     end
@@ -109,7 +130,8 @@ end;
     optimize!(model)
     solution_summary(model)
     if is_dual
-        @test solver_name(model) == "Dual model with BurerMonteiro with Percival attached"
+        @test solver_name(model) ==
+              "Dual model with BurerMonteiro with Percival attached"
     else
         @test solver_name(model) == "BurerMonteiro with Percival"
     end
@@ -135,7 +157,10 @@ end;
     diff_check(model)
 end;
 
-@testset "Simple SDP $opt" for (is_dual, opt) in [(false, LRO.Optimizer), (true, dual_optimizer(LRO.Optimizer))]
+@testset "Simple SDP $opt" for (is_dual, opt) in [
+    (false, LRO.Optimizer),
+    (true, dual_optimizer(LRO.Optimizer)),
+]
     include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
     weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     model = maxcut(weights, opt)

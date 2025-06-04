@@ -14,8 +14,7 @@ function Base.getindex(m::AbstractFactorization, i::Int, j::Int)
     left = left_factor(m)
     right = right_factor(m)
     return sum(
-        left[i, k] * m.scaling[k] * right[j, k]' for
-        k in eachindex(m.scaling)
+        left[i, k] * m.scaling[k] * right[j, k]' for k in eachindex(m.scaling)
     )
 end
 
@@ -186,7 +185,11 @@ function AsymmetricFactorization(
     right::AbstractMatrix{T},
     scaling::AbstractVector{T},
 ) where {T}
-    return AsymmetricFactorization{T,typeof(left),typeof(scaling)}(left, right, scaling)
+    return AsymmetricFactorization{T,typeof(left),typeof(scaling)}(
+        left,
+        right,
+        scaling,
+    )
 end
 
 function AsymmetricFactorization(
@@ -194,7 +197,11 @@ function AsymmetricFactorization(
     right::AbstractVector{T},
     scaling::AbstractArray{T,0},
 ) where {T}
-    return AsymmetricFactorization{T,typeof(left),typeof(scaling)}(left, right, scaling)
+    return AsymmetricFactorization{T,typeof(left),typeof(scaling)}(
+        left,
+        right,
+        scaling,
+    )
 end
 
 left_factor(m::AsymmetricFactorization) = m.left

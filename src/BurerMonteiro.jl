@@ -16,7 +16,8 @@ struct Dimensions
 end
 
 function Dimensions(model::LRO.Model, ranks)
-    side_dimensions = [LRO.side_dimension(model, i) for i in LRO.matrix_indices(model)]
+    side_dimensions =
+        [LRO.side_dimension(model, i) for i in LRO.matrix_indices(model)]
     num_scalars = LRO.num_scalars(model)
     offsets = num_scalars .+ [0; cumsum(side_dimensions .* ranks)]
     return Dimensions(num_scalars, side_dimensions, ranks, offsets)
@@ -41,7 +42,10 @@ struct Model{T,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
                 ncon = ncon,
                 x0 = rand(n),
                 y0 = rand(ncon),
-                lvar = [fill(zero(T), dim.num_scalars); fill(typemin(T), n - dim.num_scalars)],
+                lvar = [
+                    fill(zero(T), dim.num_scalars);
+                    fill(typemin(T), n - dim.num_scalars)
+                ],
                 uvar = fill(typemax(T), n),
                 lcon = LRO.cons_constant(model),
                 ucon = LRO.cons_constant(model),
@@ -57,7 +61,8 @@ struct Solution{T,VT<:AbstractVector{T}} <: AbstractVector{T}
     dim::Dimensions
 end
 
-struct _OuterProduct{T,UT<:AbstractVector{T},VT<:AbstractVector{T}} <: AbstractVector{T}
+struct _OuterProduct{T,UT<:AbstractVector{T},VT<:AbstractVector{T}} <:
+       AbstractVector{T}
     x::Solution{T,VT}
     v::Solution{T,UT}
 end
@@ -74,7 +79,7 @@ function Base.show(io::IO, s::_OuterProduct)
     print(io, s.x)
     print(io, ", ")
     print(io, s.v)
-    print(io, ")")
+    return print(io, ")")
 end
 
 function Base.getindex(s::Solution, ::Type{LRO.ScalarIndex})
@@ -88,7 +93,7 @@ end
 function Base.getindex(s::Solution, mi::LRO.MatrixIndex)
     i = mi.value
     U = reshape(
-        view(s.x, (1 + s.dim.offsets[i]):s.dim.offsets[i+1]),
+        view(s.x, (1+s.dim.offsets[i]):s.dim.offsets[i+1]),
         s.dim.side_dimensions[i],
         s.dim.ranks[i],
     )
@@ -121,18 +126,28 @@ function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     X = Solution(x, model.dim)
     # We don't call `cons!` as we don't want to include `-b` since the constraint
     # is encoded as `b <= c(x) <= b` and we just need to specify `c(x)` here.
-    NLPModels.jprod!(model.model, X, X, cx)
+    return NLPModels.jprod!(model.model, X, X, cx)
 end
 
-function NLPModels.jprod!(model::Model, x::AbstractVector, v::AbstractVector, Jv::AbstractVector)
+function NLPModels.jprod!(
+    model::Model,
+    x::AbstractVector,
+    v::AbstractVector,
+    Jv::AbstractVector,
+)
     X = Solution(x, model.dim)
     V = Solution(v, model.dim)
     # The second argument is ignored as it is linear so it does
     # not matter that we give `x`
-    NLPModels.jprod!(model.model, X, _OuterProduct(X, V), Jv)
+    return NLPModels.jprod!(model.model, X, _OuterProduct(X, V), Jv)
 end
 
-function NLPModels.jtprod!(model::Model, x::AbstractVector, y::AbstractVector, Jtv::AbstractVector)
+function NLPModels.jtprod!(
+    model::Model,
+    x::AbstractVector,
+    y::AbstractVector,
+    Jtv::AbstractVector,
+)
     X = Solution(x, model.dim)
     JtV = Solution(Jtv, model.dim)
     LinearAlgebra.mul!(
@@ -151,7 +166,14 @@ function NLPModels.jtprod!(model::Model, x::AbstractVector, y::AbstractVector, J
     return Jtv
 end
 
-function NLPModels.hprod!(model::Model{T}, ::AbstractVector, y, v::AbstractVector, Hv::AbstractVector; obj_weight = one(T)) where {T}
+function NLPModels.hprod!(
+    model::Model{T},
+    ::AbstractVector,
+    y,
+    v::AbstractVector,
+    Hv::AbstractVector;
+    obj_weight = one(T),
+) where {T}
     V = Solution(v, model.dim)
     HV = Solution(Hv, model.dim)
     fill!(Hv, zero(eltype(Hv)))
@@ -166,7 +188,7 @@ function NLPModels.hprod!(model::Model{T}, ::AbstractVector, y, v::AbstractVecto
             Hvi .-= A * Vi .* (2y[j])
         end
     end
-    Hv
+    return Hv
 end
 
 struct Solver{T,ST} <: SolverCore.AbstractOptimizationSolver
@@ -187,7 +209,7 @@ function SolverCore.solve!(
     model::NLPModels.AbstractNLPModel; # Same as `solver.model.model`
     kws...,
 )
-    SolverCore.solve!(solver.solver, solver.model, solver.stats; kws...)
+    return SolverCore.solve!(solver.solver, solver.model, solver.stats; kws...)
 end
 
 function MOI.get(solver::Solver, attr::MOI.SolverName)
