@@ -185,12 +185,16 @@ end;
 
 @testset "MOI runtests" begin
     model = LRO.Optimizer()
-    MOI.set(model, MOI.RawOptimizerAttribute("solver"), LRO.BurerMonteiro.Solver)
-    MOI.set(model, MOI.RawOptimizerAttribute("sub_solver"), Percival.PercivalSolver)
-    config = MOI.Test.Config()
-    MOI.Test.runtests(
+    MOI.set(
         model,
-        config;
-        include = ["Silent"],
+        MOI.RawOptimizerAttribute("solver"),
+        LRO.BurerMonteiro.Solver,
     )
+    MOI.set(
+        model,
+        MOI.RawOptimizerAttribute("sub_solver"),
+        Percival.PercivalSolver,
+    )
+    config = MOI.Test.Config()
+    MOI.Test.runtests(model, config; include = ["Silent"])
 end;
