@@ -293,7 +293,12 @@ function dual_cons(model::Model, ::Type{ScalarIndex}, y::AbstractVector)
     return model.d_lin - jtprod(model, ScalarIndex, y)
 end
 
-function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y::AbstractVector)
+function dual_cons!(
+    buffer,
+    model::Model,
+    mat_idx::MatrixIndex,
+    y::AbstractVector,
+)
     i = mat_idx.value
     return model.C[i] - jtprod!(buffer[i], model, mat_idx, y)
 end
@@ -309,7 +314,12 @@ function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     return cx
 end
 
-function add_jprod!(model::Model, i::MatrixIndex, V::AbstractVector, Jv::AbstractVector)
+function add_jprod!(
+    model::Model,
+    i::MatrixIndex,
+    V::AbstractVector,
+    Jv::AbstractVector,
+)
     for j in 1:num_constraints(model)
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end
