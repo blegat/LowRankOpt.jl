@@ -1,4 +1,6 @@
-# Adapted from Loraine.jl
+# This code computes the Schur complement using the ideas detailed in [FKN97, Section 3]
+# It was adapted from dapted from Michal Kocvara's code in
+# https://github.com/kocvara/Loraine.jl/blob/bd2821ba830786a78f04081d7e8f5cac25e56cac/src/makeBBBB.jl
 
 # Computes `⟨A * W, W * B⟩` for symmetric sparse matrices `A` and `B`
 function _dot(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC, W::AbstractMatrix)
@@ -45,19 +47,19 @@ function buffer_for_schur_complement(model::Model, κ)
     return σ, last_dense
 end
 
-function makeBBBB_rank1(n,nlmi,B,G)
+function makeH_rank1(n,nlmi,B,G)
     tmp = zeros(Float64, n, n)
-    BBBB = zeros(Float64, n, n)
+    H = zeros(Float64, n, n)
     for ilmi = 1:nlmi
         BB = transpose(B[ilmi] * G[ilmi])
         mul!(tmp,BB',BB)
         if ilmi == 1
-            BBBB = tmp .^ 2
+            H = tmp .^ 2
         else
-            BBBB += tmp .^ 2
+            H += tmp .^ 2
         end
     end
-    return BBBB
+    return H
 end
 
 #########################
@@ -76,7 +78,7 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
     σ, last_dense = buffer
     ilmi = mat_idx.value
     n = num_constraints(model)
-    BBBB = zeros(T, n, n)
+    H = zeros(T, n, n)
     dim = side_dimension(model, mat_idx)
     @assert dim == size(W, 1) == size(W, 2)
     tmp1 = Matrix{T}(undef, size(W, 2), dim)
@@ -93,8 +95,8 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
                 fill!(tmp2, zero(T))
                 add_jprod!(model, mat_idx, tmp, tmp2)
                 indi = σ[ii:end,ilmi]
-                BBBB[indi,i] .= tmp2[indi]
-                BBBB[i,indi] .= tmp2[indi]
+                H[indi,i] .= tmp2[indi]
+                H[i,indi] .= tmp2[indi]
             else
                 if !iszero(SparseArrays.nnz(Ai))
                     if SparseArrays.nnz(Ai) > 1
@@ -104,9 +106,9 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
                             if !iszero(SparseArrays.nnz(Aj))
                                 ttt = _dot(Ai, Aj, W)
                                 if i >= j
-                                    BBBB[i,j] = ttt
+                                    H[i,j] = ttt
                                 else
-                                    BBBB[j,i] = ttt
+                                    H[j,i] = ttt
                                 end
                             end  
                         end   
@@ -125,9 +127,9 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
                                 vvvj = only(SparseArrays.nonzeros(Ajjj))
                                 ttt = vvvi * W[iiiiAi,iiijAj] * W[jjjiAi,jjjjAj] * vvvj
                                 if i >= j
-                                    BBBB[i,j] = ttt
+                                    H[i,j] = ttt
                                 else
-                                    BBBB[j,i] = ttt
+                                    H[j,i] = ttt
                                 end
                             end
                         end 
@@ -136,7 +138,7 @@ function schur_complement(buffer, model, mat_idx, W::AbstractMatrix{T}) where {T
             end
         end
     end
-    return BBBB
+    return H
 end
 
 # [HKS24, (5b)]
