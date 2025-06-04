@@ -157,11 +157,11 @@ end;
     diff_check(model)
 end;
 
-@testset "Simple SDP $opt" for (is_dual, opt) in [
+include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
+@testset "Max-CUT $opt" for (is_dual, opt) in [
     (false, LRO.Optimizer),
     (true, dual_optimizer(LRO.Optimizer)),
 ]
-    include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
     weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     model = maxcut(weights, opt)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
@@ -174,7 +174,7 @@ end;
     @test termination_status(model) == MOI.ITERATION_LIMIT
     diff_check(model)
 
-    set_attribute(model, "max_iter", 10)
+    set_attribute(model, "max_iter", 20)
     optimize!(model)
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 18
