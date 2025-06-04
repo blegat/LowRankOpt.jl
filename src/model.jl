@@ -317,7 +317,7 @@ end
 function add_jprod!(
     model::Model,
     i::MatrixIndex,
-    V::AbstractVector,
+    V::AbstractMatrix,
     Jv::AbstractVector,
 )
     for j in 1:num_constraints(model)
