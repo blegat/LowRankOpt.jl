@@ -216,7 +216,7 @@ function MOI.get(solver::Solver, attr::MOI.SolverName)
     return "BurerMonteiro with " * MOI.get(solver.solver, attr)
 end
 
-function MOI.get(solver::Solver, ::MOI.TerminationStatus)
+function MOI.get(solver::Solver, ::LRO.ConvexTerminationStatus)
     if isnothing(solver.stats)
         return MOI.OPTIMIZE_NOT_CALLED
     end

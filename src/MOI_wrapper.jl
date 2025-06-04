@@ -103,17 +103,11 @@ function MOI.supports(::Optimizer, param::MOI.RawOptimizerAttribute)
 end
 
 function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
-    if !MOI.supports(optimizer, param)
-        throw(MOI.UnsupportedAttribute(param))
-    end
     optimizer.options[param.name] = value
     return
 end
 
 function MOI.get(optimizer::Optimizer, param::MOI.RawOptimizerAttribute)
-    if !MOI.supports(optimizer, param)
-        throw(MOI.UnsupportedAttribute(param))
-    end
     return optimizer.options[param.name]
 end
 
@@ -127,11 +121,6 @@ function MOI.set(optimizer::Optimizer, ::MOI.Silent, value::Bool)
 end
 
 MOI.get(optimizer::Optimizer, ::MOI.Silent) = optimizer.silent
-
-function MOI.set(optimizer::Optimizer, ::MOI.ObjectiveSense, value::Bool)
-    optimizer.max_sense = value
-    return
-end
 
 # MOI.supports
 
@@ -255,9 +244,6 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
     )
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
     options = copy(dest.options)
-    if dest.silent
-        options["verb"] = 0
-    end
     dest.lin_cones = Cd_lin.sets
     options = Dict{Symbol,Any}(
         Symbol(key) => dest.options[key] for key in keys(dest.options) if
@@ -296,7 +282,9 @@ end
 # However, this this is a convex problem, this is actually a global minimum!
 # We define this function instead of hard-coding `MOI.OPTIMAL` so that
 # `BurerMonteiro` can override it since it is solving a non-convex formulation.
-# FIXME This is type piracy, this should be moved to an extension of SolverCore maybe ?
+struct ConvexTerminationStatus <: MOI.AbstractModelAttribute end
+MOI.is_set_by_optimize(::ConvexTerminationStatus) = true
+
 function MOI.get(
     solver::SolverCore.AbstractOptimizationSolver,
     ::MOI.TerminationStatus,
@@ -315,11 +303,11 @@ function MOI.get(
     return status
 end
 
-function MOI.get(optimizer::Optimizer, attr::MOI.TerminationStatus)
+function MOI.get(optimizer::Optimizer, ::MOI.TerminationStatus)
     if isnothing(optimizer.solver)
         return MOI.OPTIMIZE_NOT_CALLED
     end
-    return MOI.get(optimizer.solver, attr)
+    return MOI.get(optimizer.solver, ConvexTerminationStatus())
 end
 
 function MOI.get(model::Optimizer, ::MOI.ResultCount)

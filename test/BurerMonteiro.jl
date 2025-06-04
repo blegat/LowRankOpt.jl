@@ -89,7 +89,7 @@ end
     @objective(model, Max, x)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
-    set_attribute(model, "verbose", 1)
+    set_silent(model)
     set_attribute(model, "ranks", Int[])
 
     set_attribute(model, "max_iter", 0)
@@ -104,6 +104,7 @@ end
     @test dual(con_ref) ≈ 1
     @test objective_value(model) ≈ 1
     @test dual_objective_value(model) ≈ 1
+    @test abs(MOI.get(model, LRO.RawStatus(:solution))[1]) < 1e-6
     diff_check(model)
 end;
 
@@ -137,6 +138,7 @@ end;
     end
     @test termination_status(model) == MOI.ITERATION_LIMIT
     diff_check(model)
+    @test MOI.get(backend(model), MOI.RawOptimizerAttribute("max_iter")) == 0
 
     set_attribute(model, "max_iter", 10)
     optimize!(model)
@@ -179,4 +181,16 @@ include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 18
     diff_check(model)
+end;
+
+@testset "MOI runtests" begin
+    model = LRO.Optimizer()
+    MOI.set(model, MOI.RawOptimizerAttribute("solver"), LRO.BurerMonteiro.Solver)
+    MOI.set(model, MOI.RawOptimizerAttribute("sub_solver"), Percival.PercivalSolver)
+    config = MOI.Test.Config()
+    MOI.Test.runtests(
+        model,
+        config;
+        include = ["Silent"],
+    )
 end;
