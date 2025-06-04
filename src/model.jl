@@ -204,11 +204,11 @@ function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
     return LinearAlgebra.norm(model.A[i.value, :])
 end
 
-function NLPModels.obj(model::Model, X, i::MatrixIndex)
+function NLPModels.obj(model::Model, X::AbstractMatrix, i::MatrixIndex)
     return LinearAlgebra.dot(model.C[i.value], X)
 end
 
-function NLPModels.obj(model::Model, x, ::Type{MatrixIndex})
+function NLPModels.obj(model::Model, x::AbstractVector, ::Type{MatrixIndex})
     result = zero(eltype(x))
     for i in matrix_indices(model)
         result += NLPModels.obj(model, x[i], i)
@@ -216,16 +216,16 @@ function NLPModels.obj(model::Model, x, ::Type{MatrixIndex})
     return result
 end
 
-function NLPModels.obj(model::Model, x, ::Type{ScalarIndex})
+function NLPModels.obj(model::Model, x::AbstractVector, ::Type{ScalarIndex})
     return LinearAlgebra.dot(model.d_lin, x[ScalarIndex])
 end
 
-function NLPModels.obj(model::Model, x)
+function NLPModels.obj(model::Model, x::AbstractVector)
     return NLPModels.obj(model, x, MatrixIndex) +
            NLPModels.obj(model, x, ScalarIndex)
 end
 
-function NLPModels.grad!(model::Model, _, g)
+function NLPModels.grad!(model::Model, _::AbstractVector, g::AbstractVector)
     copyto!(g[ScalarIndex], model.d_lin)
     for i in matrix_indices(model)
         copyto!(g[i], model.C[i.value])
@@ -233,9 +233,9 @@ function NLPModels.grad!(model::Model, _, g)
     return g
 end
 
-dual_obj(model::Model, y) = LinearAlgebra.dot(model.b, y)
+dual_obj(model::Model, y::AbstractVector) = LinearAlgebra.dot(model.b, y)
 
-function jtprod(model::Model, ::Type{ScalarIndex}, y)
+function jtprod(model::Model, ::Type{ScalarIndex}, y::AbstractVector)
     return model.C_lin' * y
 end
 
@@ -256,6 +256,7 @@ function buffer_for_jtprod(model::Model, mat_idx::MatrixIndex)
     )
 end
 
+# Computes `A .+= B * α`
 function _add_mul!(
     A::SparseArrays.SparseMatrixCSC,
     B::SparseArrays.SparseMatrixCSC,
@@ -288,11 +289,11 @@ function jtprod!(buffer, model::Model, mat_idx::MatrixIndex, y)
     return buffer
 end
 
-function dual_cons(model::Model, ::Type{ScalarIndex}, y)
+function dual_cons(model::Model, ::Type{ScalarIndex}, y::AbstractVector)
     return model.d_lin - jtprod(model, ScalarIndex, y)
 end
 
-function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y)
+function dual_cons!(buffer, model::Model, mat_idx::MatrixIndex, y::AbstractVector)
     i = mat_idx.value
     return model.C[i] - jtprod!(buffer[i], model, mat_idx, y)
 end
@@ -308,7 +309,7 @@ function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     return cx
 end
 
-function add_jprod!(model::Model, i::MatrixIndex, V, Jv)
+function add_jprod!(model::Model, i::MatrixIndex, V::AbstractVector, Jv::AbstractVector)
     for j in 1:num_constraints(model)
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end

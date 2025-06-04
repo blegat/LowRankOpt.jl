@@ -1,4 +1,6 @@
 # This code computes the Schur complement using the ideas detailed in [FKN97, Section 3]
+# This is useful to compute search direction in primal-dual interior-point methods for semidefinite programs [FKN97]
+# [FKN97] Fujisawa, Katsuki, Masakazu Kojima, and Kazuhide Nakata. "Exploiting sparsity in primal-dual interior-point methods for semidefinite programming." Mathematical Programming 79 (1997): 235-253.
 # It was adapted from dapted from Michal Kocvara's code in
 # https://github.com/kocvara/Loraine.jl/blob/bd2821ba830786a78f04081d7e8f5cac25e56cac/src/makeBBBB.jl
 
@@ -63,11 +65,7 @@ function makeH_rank1(n, nlmi, B, G)
     for ilmi in 1:nlmi
         BB = transpose(B[ilmi] * G[ilmi])
         mul!(tmp, BB', BB)
-        if ilmi == 1
-            H = tmp .^ 2
-        else
-            H += tmp .^ 2
-        end
+        H .+= tmp .^ 2
     end
     return H
 end
