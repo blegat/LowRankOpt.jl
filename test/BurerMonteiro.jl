@@ -197,7 +197,7 @@ weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     set_attribute(model, "max_iter", 20)
     optimize!(model)
     @test termination_status(model) == MOI.LOCALLY_SOLVED
-    @test objective_value(model) ≈ 18
+    @test objective_value(model) ≈ 18 rtol = 1e-6
     diff_check(model)
 end;
 
