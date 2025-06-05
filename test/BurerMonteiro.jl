@@ -145,9 +145,15 @@ end;
     @test termination_status(model) == MOI.ITERATION_LIMIT
     diff_check(model)
     if !is_dual # See https://github.com/jump-dev/Dualization.jl/issues/195
-        @test MOI.supports(unsafe_backend(model), MOI.RawOptimizerAttribute("max_iter"))
+        @test MOI.supports(
+            unsafe_backend(model),
+            MOI.RawOptimizerAttribute("max_iter"),
+        )
     end
-    @test MOI.get(unsafe_backend(model), MOI.RawOptimizerAttribute("max_iter")) == 0
+    @test MOI.get(
+        unsafe_backend(model),
+        MOI.RawOptimizerAttribute("max_iter"),
+    ) == 0
 
     set_attribute(model, "max_iter", 10)
     optimize!(model)
@@ -225,10 +231,7 @@ function ConvexSolver(model::LRO.Model)
     return ConvexSolver(model, stats)
 end
 
-function SolverCore.solve!(
-    ::ConvexSolver,
-    ::LRO.Model,
-)
+function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
     return
 end
 
