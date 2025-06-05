@@ -238,6 +238,21 @@ function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
     return
 end
 
+function schur_test(model, w, κ)
+    schur_buffer = LRO.buffer_for_schur_complement(model, κ)
+    jtprod_buffer = LRO.buffer_for_jtprod(model)
+    y = rand(model.meta.ncon)
+    H = LRO.schur_complement(schur_buffer, model, w)
+    Hy = similar(y)
+    LRO.eval_schur_complement!(jtprod_buffer, Hy, model, w, y)
+    @test Hy ≈ H * y
+end
+
+function schur_test(model, κ)
+    w = rand(model.meta.nvar)
+    schur_test(model, LRO.VectorizedSolution(w, model.dim), κ)
+end
+
 @testset "ConvexSolver" begin
     model = maxcut(weights, LRO.Optimizer)
     set_attribute(model, "solver", ConvexSolver)
@@ -263,4 +278,7 @@ end
     @test err[4] ≈ 70/9
     @test err[5] ≈ 0.92
     @test err[6] ≈ 392.0
+    schur_test(b.model, 0)
+    #schur_test(b.model, 1)
+    #schur_test(b.model, 2)
 end
