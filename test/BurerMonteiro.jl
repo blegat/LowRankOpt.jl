@@ -253,4 +253,14 @@ end
     b.solver.stats.status = :unbounded
     @test termination_status(model) == MOI.INFEASIBLE
     @test primal_status(model) == MOI.INFEASIBLE_POINT
+    X = LRO.VectorizedSolution(collect(1:b.model.meta.nvar), b.model.dim)
+    y = collect(1:b.model.meta.ncon)
+    err = LRO.errors(b.solver.model, X; y, dual_slack = X, dual_err = X)
+    @test length(err) == 6
+    @test err[1] ≈ 4.155017729878046
+    @test err[2] ≈ 0.318237296391563
+    @test err[3] ≈ 70/9
+    @test err[4] ≈ 70/9
+    @test err[5] ≈ 0.92
+    @test err[6] ≈ 392.0
 end
