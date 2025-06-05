@@ -250,7 +250,11 @@ end
 
 function schur_test(model, κ)
     w = rand(model.meta.nvar)
-    schur_test(model, LRO.VectorizedSolution(w, model.dim), κ)
+    W = LRO.VectorizedSolution(w, model.dim)
+    for i in LRO.matrix_indices(model)
+        W[i] .= W[i] .+ W[i]'
+    end
+    schur_test(model, W, κ)
 end
 
 @testset "ConvexSolver" begin
@@ -279,6 +283,6 @@ end
     @test err[5] ≈ 0.92
     @test err[6] ≈ 392.0
     schur_test(b.model, 0)
-    #schur_test(b.model, 1)
-    #schur_test(b.model, 2)
+    schur_test(b.model, 1)
+    schur_test(b.model, 2)
 end

@@ -69,6 +69,7 @@ function schur_complement(buffer, model::Model, W, ::Type{MatrixIndex})
     return H
 end
 
+# /!\ W needs to be symmetric
 function schur_complement(
     buffer,
     model::Model,
