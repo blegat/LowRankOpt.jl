@@ -241,6 +241,7 @@ end
     b = unsafe_backend(model)
     optimize!(model)
     b.solver.stats.status = :first_order
+    @test MOI.get(model, LRO.ConvexTerminationStatus()) == MOI.OPTIMAL
     @test termination_status(model) == MOI.OPTIMAL
     @test MOI.get(model, LRO.Solution()) isa LRO.VectorizedSolution{Float64}
     b.solver.stats.status = :infeasible

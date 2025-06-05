@@ -302,11 +302,15 @@ function MOI.get(
     return status
 end
 
-function MOI.get(optimizer::Optimizer, ::MOI.TerminationStatus)
+function MOI.get(optimizer::Optimizer, attr::ConvexTerminationStatus)
     if isnothing(optimizer.solver)
         return MOI.OPTIMIZE_NOT_CALLED
     end
-    return MOI.get(optimizer.solver, ConvexTerminationStatus())
+    return MOI.get(optimizer.solver, attr)
+end
+
+function MOI.get(optimizer::Optimizer, ::MOI.TerminationStatus)
+    return MOI.get(optimizer, ConvexTerminationStatus())
 end
 
 function MOI.get(model::Optimizer, ::MOI.ResultCount)
