@@ -166,7 +166,7 @@ struct AsymmetricFactorization{
         end
         if length(scaling) != size(left, 2)
             error(
-                "Length `$(length(scaling))` of diagonal does not match number of columns `$(size(factor, 2))` of factor",
+                "Length `$(length(scaling))` of diagonal does not match number of columns `$(size(left, 2))` of factor",
             )
         end
         return new{T,F,S}(left, right, scaling)
@@ -176,6 +176,11 @@ struct AsymmetricFactorization{
         right::AbstractVector{T},
         scaling::AbstractArray{T,0},
     ) where {T,F<:AbstractVector{T},S<:AbstractArray{T,0}}
+        if length(left) != length(right)
+            error(
+                "Length `$(length(left))` of left factor does not match the length `$(length(right))` of right factor",
+            )
+        end
         return new{T,F,S}(left, right, scaling)
     end
 end

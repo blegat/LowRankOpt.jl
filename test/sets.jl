@@ -46,11 +46,25 @@ function test_inconsistent_length()
         "Length `1` of diagonal does not match number of columns `2` of factor",
     )
     @test_throws err LRO.Factorization(ones(1, 2), [1.0])
+    err = ErrorException(
+        "Size `(2, 1)` of left factor does not match size `(2, 2)` of right factor",
+    )
+    @test_throws err LRO.AsymmetricFactorization(ones(2, 1), ones(2, 2), [1.0])
+    err = ErrorException(
+        "Length `1` of diagonal does not match number of columns `2` of factor",
+    )
+    @test_throws err LRO.AsymmetricFactorization(ones(2, 2), ones(2, 2), [1.0])
+    err = ErrorException(
+        "Length `2` of left factor does not match the length `1` of right factor",
+    )
+    @test_throws err LRO.AsymmetricFactorization(ones(2), ones(1), ones(tuple()))
 end
 
 function test_factorizations()
     f = [1, 2]
+    g = [3, 4]
     _test_factorization(f * f', LRO.positive_semidefinite_factorization(f))
+    _test_factorization(5 * f * g', LRO.AsymmetricFactorization(f, g, 5 * ones(Int, tuple())))
     _test_factorization(2 * f * f', LRO.Factorization(f, 2))
     F = [1 2; 3 4; 5 6]
     d = [7, 8]
