@@ -254,7 +254,7 @@ function schur_test(model, κ)
     for i in LRO.matrix_indices(model)
         W[i] .= W[i] .+ W[i]'
     end
-    schur_test(model, W, κ)
+    return schur_test(model, W, κ)
 end
 
 @testset "ConvexSolver" begin

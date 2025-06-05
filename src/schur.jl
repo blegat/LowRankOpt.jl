@@ -123,8 +123,7 @@ function schur_complement(
                         # the rest of matrices is either zero or have only
                         # one entry
                         if !iszero(SparseArrays.nnz(Ajjj))
-                            iiijAj =
-                                jjjjAj = only(SparseArrays.rowvals(Ajjj))
+                            iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
                             vvvj = only(SparseArrays.nonzeros(Ajjj))
                             ttt =
                                 vvvi *
