@@ -3,6 +3,7 @@ using LinearAlgebra
 using JuMP
 import LowRankOpt as LRO
 using Dualization
+import SolverCore
 import Percival
 
 function test_vecprod(f, len, J; tol = 1e-6)
@@ -104,7 +105,12 @@ end
     @test dual(con_ref) ≈ 1
     @test objective_value(model) ≈ 1
     @test dual_objective_value(model) ≈ 1
-    @test abs(MOI.get(model, LRO.RawStatus(:solution))[1]) < 1e-6
+    raw_sol = MOI.get(model, LRO.RawStatus(:solution))
+    sol = MOI.get(model, LRO.Solution())
+    @test raw_sol isa Vector{Float64}
+    @test sol isa LRO.BurerMonteiro.Solution{Float64,Vector{Float64}}
+    @test sol == raw_sol
+    @test abs(sol[1]) < 1e-6
     diff_check(model)
 end;
 
@@ -138,7 +144,10 @@ end;
     end
     @test termination_status(model) == MOI.ITERATION_LIMIT
     diff_check(model)
-    @test MOI.get(backend(model), MOI.RawOptimizerAttribute("max_iter")) == 0
+    if !is_dual # See https://github.com/jump-dev/Dualization.jl/issues/195
+        @test MOI.supports(unsafe_backend(model), MOI.RawOptimizerAttribute("max_iter"))
+    end
+    @test MOI.get(unsafe_backend(model), MOI.RawOptimizerAttribute("max_iter")) == 0
 
     set_attribute(model, "max_iter", 10)
     optimize!(model)
@@ -160,11 +169,11 @@ end;
 end;
 
 include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
+weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
 @testset "Max-CUT $opt" for (is_dual, opt) in [
     (false, LRO.Optimizer),
     (true, dual_optimizer(LRO.Optimizer)),
 ]
-    weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     model = maxcut(weights, opt)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
@@ -183,6 +192,13 @@ include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
     diff_check(model)
 end;
 
+@testset "ResultCount" begin
+    model = LRO.Optimizer()
+    @test MOI.get(model, MOI.ResultCount()) == 0
+    @test MOI.get(model, MOI.PrimalStatus()) == MOI.NO_SOLUTION
+    @test MOI.get(model, MOI.DualStatus()) == MOI.NO_SOLUTION
+end
+
 @testset "MOI runtests" begin
     model = LRO.Optimizer()
     MOI.set(
@@ -198,3 +214,36 @@ end;
     config = MOI.Test.Config()
     MOI.Test.runtests(model, config; include = ["Silent"])
 end;
+
+struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
+    model::LRO.Model{T}
+    stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
+end
+
+function ConvexSolver(model::LRO.Model)
+    stats = SolverCore.GenericExecutionStats(model)
+    return ConvexSolver(model, stats)
+end
+
+function SolverCore.solve!(
+    ::ConvexSolver,
+    ::LRO.Model,
+)
+    return
+end
+
+@testset "ConvexSolver" begin
+    model = maxcut(weights, LRO.Optimizer)
+    set_attribute(model, "solver", ConvexSolver)
+    b = unsafe_backend(model)
+    optimize!(model)
+    b.solver.stats.status = :first_order
+    @test termination_status(model) == MOI.OPTIMAL
+    @test MOI.get(model, LRO.Solution()) isa LRO.VectorizedSolution{Float64}
+    b.solver.stats.status = :infeasible
+    @test termination_status(model) == MOI.DUAL_INFEASIBLE
+    @test dual_status(model) == MOI.INFEASIBLE_POINT
+    b.solver.stats.status = :unbounded
+    @test termination_status(model) == MOI.INFEASIBLE
+    @test primal_status(model) == MOI.INFEASIBLE_POINT
+end

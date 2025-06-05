@@ -287,18 +287,17 @@ MOI.is_set_by_optimize(::ConvexTerminationStatus) = true
 
 function MOI.get(
     solver::SolverCore.AbstractOptimizationSolver,
-    ::MOI.TerminationStatus,
+    ::ConvexTerminationStatus,
 )
-    if isnothing(solver.stats)
-        return MOI.OPTIMIZE_NOT_CALLED
-    end
     status = NLPModelsJuMP.TERMINATION_STATUS[solver.stats.status]
     if status == MOI.LOCALLY_SOLVED
         status = MOI.OPTIMAL
     elseif status == MOI.LOCALLY_INFEASIBLE
-        status = MOI.INFEASIBLE
-    elseif status == MOI.NORM_LIMIT
+        # Since we solve the dual, we need to dualize the status
         status = MOI.DUAL_INFEASIBLE
+    elseif status == MOI.NORM_LIMIT
+        # Since we solve the dual, we need to dualize the status
+        status = MOI.INFEASIBLE
     end
     return status
 end
@@ -324,7 +323,8 @@ function MOI.get(optimizer::Optimizer, attr::MOI.PrimalStatus)
     elseif MOI.get(optimizer, MOI.TerminationStatus()) in
            [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
-    elseif MOI.get(optimizer, MOI.TerminationStatus()) == MOI.INFEASIBLE
+    elseif MOI.get(optimizer, MOI.TerminationStatus()) in
+           [MOI.INFEASIBLE, MOI.LOCALLY_INFEASIBLE]
         return MOI.INFEASIBLE_POINT
     else
         # TODO
@@ -362,6 +362,8 @@ function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
     elseif MOI.get(optimizer, MOI.TerminationStatus()) in
            [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
+    elseif MOI.get(optimizer, MOI.TerminationStatus()) == MOI.DUAL_INFEASIBLE
+        return MOI.INFEASIBLE_POINT
     else
         # TODO
         return MOI.UNKNOWN_RESULT_STATUS
@@ -372,7 +374,7 @@ struct Solution <: MOI.AbstractModelAttribute end
 MOI.is_set_by_optimize(::Solution) = true
 
 function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::Solution)
-    return VectorizedSolution(solver.solver.stats.solution, solver.model.dim)
+    return VectorizedSolution(solver.stats.solution, solver.model.dim)
 end
 MOI.get(optimizer::Optimizer, attr::Solution) = MOI.get(optimizer.solver, attr)
 
