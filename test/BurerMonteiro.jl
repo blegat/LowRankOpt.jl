@@ -109,6 +109,9 @@ end
     sol = MOI.get(model, LRO.Solution())
     @test raw_sol isa Vector{Float64}
     @test sol isa LRO.BurerMonteiro.Solution{Float64,Vector{Float64}}
+    outer = LRO.BurerMonteiro._OuterProduct(sol, sol)
+    @test length(outer) == length(sol)
+    @test sprint(show, outer) == "_OuterProduct($sol, $sol)"
     @test sol == raw_sol
     @test abs(sol[1]) < 1e-6
     diff_check(model)

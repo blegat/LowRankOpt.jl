@@ -79,7 +79,8 @@ function Base.show(io::IO, s::_OuterProduct)
     print(io, s.x)
     print(io, ", ")
     print(io, s.v)
-    return print(io, ")")
+    print(io, ")")
+    return
 end
 
 function Base.getindex(s::Solution, ::Type{LRO.ScalarIndex})
@@ -217,11 +218,9 @@ function MOI.get(solver::Solver, attr::MOI.SolverName)
 end
 
 function MOI.get(solver::Solver, ::LRO.ConvexTerminationStatus)
-    if isnothing(solver.stats)
-        return MOI.OPTIMIZE_NOT_CALLED
-    end
     return NLPModelsJuMP.TERMINATION_STATUS[solver.stats.status]
     # TODO if the dual is feasible, we can still claim that we found the optimal
+    #      and turn `LOCALLY_SOLVED` into `OPTIMAL`
 end
 
 function MOI.get(solver::Solver, ::LRO.Solution)
