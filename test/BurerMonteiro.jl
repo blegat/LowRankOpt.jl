@@ -244,7 +244,7 @@ function schur_test(model, w, κ)
     n = model.meta.ncon
     y = rand(n)
     H = zeros(n, n)
-    H = LRO.schur_complement(schur_buffer, model, w, H)
+    H = LRO.schur_complement!(schur_buffer, model, w, H)
     Hy = similar(y)
     LRO.eval_schur_complement!(jtprod_buffer, Hy, model, w, y)
     @test Hy ≈ H * y
