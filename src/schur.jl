@@ -60,26 +60,24 @@ function buffer_for_schur_complement(model::Model, κ)
     return σ, last_dense
 end
 
-function schur_complement(buffer, model::Model, W, ::Type{MatrixIndex})
-    n = num_constraints(model)
-    H = zeros(eltype(eltype(W)), n, n)
+function add_schur_complement!(buffer, model::Model, W, ::Type{MatrixIndex}, H)
     for i in matrix_indices(model)
-        H += schur_complement(buffer, model, i, W[i])
+        add_schur_complement!(buffer, model, i, W[i], H)
     end
     return H
 end
 
 # /!\ W needs to be symmetric
-function schur_complement(
+function add_schur_complement!(
     buffer,
     model::Model,
     mat_idx::MatrixIndex,
     W::AbstractMatrix{T},
+    H,
 ) where {T}
     σ, last_dense = buffer
     ilmi = mat_idx.value
     n = model.meta.ncon
-    H = zeros(T, n, n)
     dim = side_dimension(model, mat_idx)
     @assert dim == LinearAlgebra.checksquare(W)
     tmp1 = Matrix{T}(undef, dim, dim)
@@ -144,24 +142,21 @@ function schur_complement(
     return H
 end
 
-function schur_complement(model::Model, w, ::Type{ScalarIndex})
-    return model.C_lin * SparseArrays.spdiagm(w) * model.C_lin'
+function add_schur_complement!(model::Model, w, ::Type{ScalarIndex}, H)
+    H .+= model.C_lin * SparseArrays.spdiagm(w) * model.C_lin'
+    return H
 end
 
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA_jW⟩
-function schur_complement(buffer, model::Model, W::AbstractVector)
-    H = MA.Zero()
+function schur_complement!(buffer, model::Model, W::AbstractVector, H)
+    fill!(H, zero(eltype(H)))
     if num_matrices(model) > 0
-        H = MA.add!!(H, schur_complement(buffer, model, W, MatrixIndex))
+        add_schur_complement!(buffer, model, W, MatrixIndex, H)
     end
     if num_scalars(model) > 0
-        H = MA.add!!(H, schur_complement(model, W[ScalarIndex], ScalarIndex))
-    end
-    if H isa MA.Zero
-        n = num_constraints(model)
-        H = zeros(eltype(W), n, n)
+        add_schur_complement!(model, W[ScalarIndex], ScalarIndex, H)
     end
     return LinearAlgebra.Hermitian(H, :L)
 end
