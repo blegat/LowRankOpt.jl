@@ -79,6 +79,18 @@ end
 function Base.size(s::ShapedSolution)
     return (length(s.scalars) + sum(length, s.matrices, init = 0),)
 end
+num_matrices(s::ShapedSolution) = length(s.matrices)
+
+function LinearAlgebra.norm2(s::ShapedSolution{T}) where {T}
+    # `LinearAlgebra.generic_norm2` starts by computing the ∞ norm and do a rescaling, we don't do that here
+    return √(LinearAlgebra.dot(s, s))
+end
+
+function LinearAlgebra.dot(a::ShapedSolution{T}, b::ShapedSolution{T}) where {T}
+    return LinearAlgebra.dot(a.scalars, b.scalars) + sum(eachindex(a.matrices); init = zero(T)) do i
+        LinearAlgebra.dot(a.matrices[i], b.matrices[i])
+    end
+end
 
 Base.view(s::ShapedSolution, ::Type{ScalarIndex}) = s.scalars
 Base.view(s::ShapedSolution, i::MatrixIndex) = s.matrices[i.value]
@@ -151,7 +163,7 @@ mutable struct Model{T,A<:AbstractMatrix{T}} <:
 end
 
 function NLPModels.unconstrained(model::Model)
-    return iszero(num_constraints(model))
+    return iszero(model.meta.ncon)
 end
 
 # TODO the scalar actually have lower bounds and the SDP variables too
@@ -159,13 +171,6 @@ end
 NLPModels.has_bounds(::Model) = false
 
 num_scalars(model::Model) = length(model.d_lin)
-
-function scalar_indices(model::Model)
-    return MOI.Utilities.LazyMap{ScalarIndex}(
-        ScalarIndex,
-        Base.OneTo(num_scalars(model)),
-    )
-end
 
 num_matrices(model::Model) = length(model.C)
 
@@ -178,24 +183,13 @@ end
 
 side_dimension(model::Model, i::MatrixIndex) = model.msizes[i.value]
 
-struct ConstraintIndex
-    value::Int64
-end
-num_constraints(model::Model) = length(model.b)
-function constraint_indices(model::Model)
-    return MOI.Utilities.LazyMap{ConstraintIndex}(
-        ConstraintIndex,
-        Base.OneTo(num_constraints(model)),
-    )
-end
-
 # Should be only used with `norm`
 NLPModels.jac(model::Model, ::Type{ScalarIndex}) = model.C_lin
-function NLPModels.jac(model::Model, i::ConstraintIndex, j::MatrixIndex)
-    return model.A[j.value, i.value]
+function NLPModels.jac(model::Model, j::Integer, i::MatrixIndex)
+    return model.A[i.value, j]
 end
-function NLPModels.jac(model::Model, i::ConstraintIndex, ::Type{ScalarIndex})
-    return model.C_lin[i.value, :]
+function NLPModels.jac(model::Model, j::Integer, ::Type{ScalarIndex})
+    return model.C_lin[j, :]
 end
 function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
     if isempty(model.A)
@@ -229,6 +223,7 @@ function NLPModels.grad!(model::Model, _::AbstractVector, g::AbstractVector)
     copyto!(g[ScalarIndex], model.d_lin)
     for i in matrix_indices(model)
         copyto!(g[i], model.C[i.value])
+    @show @__LINE__
     end
     return g
 end
@@ -247,12 +242,13 @@ function buffer_for_jtprod(model::Model)
 end
 
 function buffer_for_jtprod(model::Model, mat_idx::MatrixIndex)
-    if iszero(num_constraints(model))
+    if iszero(model.meta.ncon)
+    @show @__LINE__
         return
     end
     # FIXME: at some point, switch to dense
     return sum(
-        abs.(model.A[mat_idx.value, j]) for j in 1:num_constraints(model)
+        abs.(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon
     )
 end
 
@@ -279,9 +275,6 @@ end
 _zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
 
 function jtprod!(buffer, model::Model, mat_idx::MatrixIndex, y)
-    if iszero(num_constraints(model))
-        return MA.Zero()
-    end
     _zero!(buffer)
     for j in eachindex(y)
         _add_mul!(buffer, model.A[mat_idx.value, j], y[j])
@@ -320,7 +313,7 @@ function add_jprod!(
     V::AbstractMatrix,
     Jv::AbstractVector,
 )
-    for j in 1:num_constraints(model)
+    for j in 1:model.meta.ncon
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end
 end

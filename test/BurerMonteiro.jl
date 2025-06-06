@@ -1,5 +1,6 @@
 using Test
 using LinearAlgebra
+using SparseArrays
 using JuMP
 import LowRankOpt as LRO
 using Dualization
@@ -84,7 +85,7 @@ end
 
 @testset "Simple LP $opt" for opt in
                               [LRO.Optimizer, dual_optimizer(LRO.Optimizer)]
-    model = Model(dual_optimizer(LRO.Optimizer))
+    model = Model(opt)
     @variable(model, x)
     @constraint(model, con_ref, 1 - x in Nonnegatives())
     @objective(model, Max, x)
@@ -105,6 +106,10 @@ end
     @test dual(con_ref) ≈ 1
     @test objective_value(model) ≈ 1
     @test dual_objective_value(model) ≈ 1
+    b = unsafe_backend(model)
+    if !(b isa DualOptimizer)
+        @test isnothing(LRO.buffer_for_jtprod(b.model))
+    end
     raw_sol = MOI.get(model, LRO.RawStatus(:solution))
     sol = MOI.get(model, LRO.Solution())
     @test raw_sol isa Vector{Float64}
@@ -113,7 +118,9 @@ end
     @test length(outer) == length(sol)
     @test sprint(show, outer) == "_OuterProduct($sol, $sol)"
     @test sol == raw_sol
-    @test abs(sol[1]) < 1e-6
+    if b isa DualOptimizer
+        @test abs(sol[1]) < 1e-6
+    end
     diff_check(model)
 end;
 
@@ -224,6 +231,19 @@ end
     MOI.Test.runtests(model, config; include = ["Silent"])
 end;
 
+@testset "No constraints" begin
+    model = LRO.Model(
+        [spzeros(1, 1)],
+        [ones(1, 1) for _ in 1:1, _ in 1:0],
+        zeros(0),
+        sparsevec(Int[], Float64[], 0),
+        sparse(Int[], Int[], Float64[], 0, 0),
+        [1],
+    )
+    @test model.meta.ncon == 0
+    @test LRO.norm_jac(model, LRO.MatrixIndex(1)) == 0
+end;
+
 struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
     model::LRO.Model{T}
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
@@ -248,6 +268,11 @@ function schur_test(model, w, κ)
     Hy = similar(y)
     LRO.eval_schur_complement!(jtprod_buffer, Hy, model, w, y)
     @test Hy ≈ H * y
+    for i in LRO.matrix_indices(model)
+        ret = LRO.dual_cons!(jtprod_buffer, model, i, y)
+        @test ret isa SparseMatrixCSC
+    end
+    @test LRO.dual_cons(model, LRO.ScalarIndex, y) isa SparseArrays.SparseVector
 end
 
 function schur_test(model, κ)
@@ -274,16 +299,29 @@ end
     b.solver.stats.status = :unbounded
     @test termination_status(model) == MOI.INFEASIBLE
     @test primal_status(model) == MOI.INFEASIBLE_POINT
-    X = LRO.VectorizedSolution(collect(1:b.model.meta.nvar), b.model.dim)
+    x = LRO.VectorizedSolution(collect(1:b.model.meta.nvar), b.model.dim)
+    sim = similar(x)
+    @test sim isa typeof(x)
+    sim .= x
+    @test sim == x
+    X = LRO.ShapedSolution(
+        Vector(x[LRO.ScalarIndex]),
+        [Matrix(x[i]) for i in LRO.matrix_indices(b.model)],
+    )
     y = collect(1:b.model.meta.ncon)
-    err = LRO.errors(b.solver.model, X; y, dual_slack = X, dual_err = X)
-    @test length(err) == 6
-    @test err[1] ≈ 4.155017729878046
-    @test err[2] ≈ 0.318237296391563
-    @test err[3] ≈ 70/9
-    @test err[4] ≈ 70/9
-    @test err[5] ≈ 0.92
-    @test err[6] ≈ 392.0
+    @test NLPModels.jac(b.model, 1, LRO.MatrixIndex(1)) == sparse([1], [1], [-1], 4, 4)
+    @test NLPModels.jac(b.model, 1, LRO.ScalarIndex) == sparsevec([1, 2], [-1, 1], 8)
+    @test LRO.norm_jac(b.model, LRO.MatrixIndex(1)) == 4
+    for xx in [x, X]
+        err = LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx)
+        @test length(err) == 6
+        @test err[1] ≈ 4.155017729878046
+        @test err[2] ≈ 0.318237296391563
+        @test err[3] ≈ 70/9
+        @test err[4] ≈ 70/9
+        @test err[5] ≈ 0.92
+        @test err[6] ≈ 392.0
+    end
     schur_test(b.model, 0)
     schur_test(b.model, 1)
     schur_test(b.model, 2)

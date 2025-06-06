@@ -33,7 +33,7 @@ struct Model{T,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
     function Model(model::LRO.Model{T,AT}, ranks) where {T,AT}
         dim = Dimensions(model, ranks)
         n = length(dim)
-        ncon = LRO.num_constraints(model)
+        ncon = model.meta.ncon
         return new{T,AT}(
             model,
             dim,
@@ -160,7 +160,7 @@ function NLPModels.jtprod!(
         U = JtV[i].factor
         fill!(U, zero(eltype(U)))
         for j in eachindex(y)
-            A = NLPModels.jac(model.model, LRO.ConstraintIndex(j), i)
+            A = NLPModels.jac(model.model, j, i)
             U .+= A * X[i].factor .* (2y[j])
         end
     end
@@ -185,7 +185,7 @@ function NLPModels.hprod!(
         Hvi .+= C * Vi
         Hvi .*= 2obj_weight
         for j in 1:model.meta.ncon
-            A = NLPModels.jac(model.model, LRO.ConstraintIndex(j), i)
+            A = NLPModels.jac(model.model, j, i)
             Hvi .-= A * Vi .* (2y[j])
         end
     end

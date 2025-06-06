@@ -43,7 +43,7 @@ function _dot(
 end
 
 function buffer_for_schur_complement(model::Model, κ)
-    n = num_constraints(model)
+    n = model.meta.ncon
     σ = zeros(Int64, n, num_matrices(model))
     last_dense = zeros(Int64, num_matrices(model))
 
