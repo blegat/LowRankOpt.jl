@@ -94,9 +94,11 @@ function add_schur_complement!(
                 fill!(tmp2, zero(T))
                 add_jprod!(model, mat_idx, tmp, tmp2)
                 H[i, i] += tmp2[i]
-                indi = σ[(ii+1):end, ilmi]
-                H[indi, i] .+= tmp2[indi]
-                H[i, indi] .+= tmp2[indi]
+                for jj in (ii+1):n
+                    j = σ[jj,ilmi]
+                    H[j, i] += tmp2[j]
+                    H[i, j] += tmp2[j]
+                end
             else
                 if SparseArrays.nnz(Ai) > 1
                     @inbounds for jj in ii:n
