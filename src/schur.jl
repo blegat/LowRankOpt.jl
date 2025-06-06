@@ -93,9 +93,10 @@ function add_schur_complement!(
                 LinearAlgebra.mul!(tmp, tmp1, W)
                 fill!(tmp2, zero(T))
                 add_jprod!(model, mat_idx, tmp, tmp2)
-                indi = σ[ii:end, ilmi]
-                H[indi, i] .= tmp2[indi]
-                H[i, indi] .= tmp2[indi]
+                H[i, i] += tmp2[i]
+                indi = σ[(ii+1):end, ilmi]
+                H[indi, i] .+= tmp2[indi]
+                H[i, indi] .+= tmp2[indi]
             else
                 if SparseArrays.nnz(Ai) > 1
                     @inbounds for jj in ii:n
@@ -103,10 +104,9 @@ function add_schur_complement!(
                         Aj = model.A[ilmi, j]
                         if !iszero(SparseArrays.nnz(Aj))
                             ttt = _dot(Ai, Aj, W)
-                            if i >= j
-                                H[i, j] = ttt
-                            else
-                                H[j, i] = ttt
+                            H[i, j] += ttt
+                            if i != j
+                                H[j, i] += ttt
                             end
                         end
                     end
@@ -128,10 +128,9 @@ function add_schur_complement!(
                                 W[iiiiAi, iiijAj] *
                                 W[jjjiAi, jjjjAj] *
                                 vvvj
-                            if i >= j
-                                H[i, j] = ttt
-                            else
-                                H[j, i] = ttt
+                            H[i, j] += ttt
+                            if i != j
+                                H[j, i] += ttt
                             end
                         end
                     end
@@ -158,7 +157,7 @@ function schur_complement!(buffer, model::Model, W::AbstractVector, H)
     if num_scalars(model) > 0
         add_schur_complement!(model, W[ScalarIndex], ScalarIndex, H)
     end
-    return LinearAlgebra.Hermitian(H, :L)
+    return H
 end
 
 # [HKS24, (5b)]
