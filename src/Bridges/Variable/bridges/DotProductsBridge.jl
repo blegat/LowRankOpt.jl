@@ -63,7 +63,7 @@ function MOI.Bridges.map_function(
             bridge.set.set,
         )
     else
-        return scalars[i-length(bridge.set.vectors)]
+        return scalars[i.value-length(bridge.set.vectors)]
     end
 end
 

@@ -10,9 +10,16 @@ import KrylovKit
 import MathOptInterface as MOI
 
 include("sets.jl")
+include("factorization.jl")
 include("attributes.jl")
 include("distance_to_set.jl")
 include("Test/Test.jl")
 include("Bridges/Bridges.jl")
+
+include("model.jl")
+include("schur.jl")
+include("MOI_wrapper.jl")
+include("BurerMonteiro.jl")
+include("errors.jl")
 
 end # module LowRankOpt
