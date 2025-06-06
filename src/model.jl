@@ -87,8 +87,9 @@ function LinearAlgebra.norm2(s::ShapedSolution{T}) where {T}
 end
 
 function LinearAlgebra.dot(a::ShapedSolution{T}, b::ShapedSolution{T}) where {T}
-    return LinearAlgebra.dot(a.scalars, b.scalars) + sum(eachindex(a.matrices); init = zero(T)) do i
-        LinearAlgebra.dot(a.matrices[i], b.matrices[i])
+    return LinearAlgebra.dot(a.scalars, b.scalars) +
+           sum(eachindex(a.matrices); init = zero(T)) do i
+        return LinearAlgebra.dot(a.matrices[i], b.matrices[i])
     end
 end
 
@@ -245,9 +246,7 @@ function buffer_for_jtprod(model::Model, mat_idx::MatrixIndex)
         return
     end
     # FIXME: at some point, switch to dense
-    return sum(
-        abs.(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon
-    )
+    return sum(abs.(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon)
 end
 
 # Computes `A .+= B * α`
