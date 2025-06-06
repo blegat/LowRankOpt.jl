@@ -242,6 +242,7 @@ end;
     )
     @test model.meta.ncon == 0
     @test LRO.norm_jac(model, LRO.MatrixIndex(1)) == 0
+    @test isnothing(LRO.buffer_for_jtprod(model, LRO.MatrixIndex(1)))
 end;
 
 struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
@@ -312,6 +313,12 @@ end
     @test NLPModels.jac(b.model, 1, LRO.MatrixIndex(1)) == sparse([1], [1], [-1], 4, 4)
     @test NLPModels.jac(b.model, 1, LRO.ScalarIndex) == sparsevec([1, 2], [-1, 1], 8)
     @test LRO.norm_jac(b.model, LRO.MatrixIndex(1)) == 4
+    grad = similar(x)
+    NLPModels.grad!(b.model, X, grad)
+    @test Vector(grad) == [
+        Vector(NLPModels.grad(b.model, LRO.ScalarIndex));
+        NLPModels.grad(b.model, LRO.MatrixIndex(1))[:]
+    ]
     for xx in [x, X]
         err = LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx)
         @test length(err) == 6

@@ -223,7 +223,6 @@ function NLPModels.grad!(model::Model, _::AbstractVector, g::AbstractVector)
     copyto!(g[ScalarIndex], model.d_lin)
     for i in matrix_indices(model)
         copyto!(g[i], model.C[i.value])
-    @show @__LINE__
     end
     return g
 end
@@ -243,7 +242,6 @@ end
 
 function buffer_for_jtprod(model::Model, mat_idx::MatrixIndex)
     if iszero(model.meta.ncon)
-    @show @__LINE__
         return
     end
     # FIXME: at some point, switch to dense
