@@ -57,25 +57,25 @@ function buffer_for_schur_complement(model::Model, κ)
         last_dense[i] = something(findlast(Base.Fix1(isless, κ), sorted), 0)
     end
 
-    return σ, last_dense
+    return σ, last_dense, buffer_for_jprod(model)
 end
 
-function add_schur_complement!(buffer, model::Model, W, ::Type{MatrixIndex}, H)
+function add_schur_complement!(model::Model, W, ::Type{MatrixIndex}, H, buffer)
     for i in matrix_indices(model)
-        add_schur_complement!(buffer, model, i, W[i], H)
+        add_schur_complement!(model, i, W[i], H, buffer)
     end
     return H
 end
 
 # /!\ W needs to be symmetric
 function add_schur_complement!(
-    buffer,
     model::Model,
     mat_idx::MatrixIndex,
     W::AbstractMatrix{T},
     H,
+    buffer,
 ) where {T}
-    σ, last_dense = buffer
+    σ, last_dense, jprod_buffer = buffer
     ilmi = mat_idx.value
     n = model.meta.ncon
     dim = side_dimension(model, mat_idx)
@@ -92,7 +92,7 @@ function add_schur_complement!(
                 LinearAlgebra.mul!(tmp1, W, Ai)
                 LinearAlgebra.mul!(tmp, tmp1, W)
                 fill!(tmp2, zero(T))
-                add_jprod!(model, mat_idx, tmp, tmp2)
+                add_jprod!(model, mat_idx, tmp, tmp2, jprod_buffer)
                 H[i, i] += tmp2[i]
                 for jj in (ii+1):n
                     j = σ[jj, ilmi]
@@ -151,10 +151,10 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA_jW⟩
-function schur_complement!(buffer, model::Model, W::AbstractVector, H)
+function schur_complement!(model::Model, W::AbstractVector, H, buffer)
     fill!(H, zero(eltype(H)))
     if num_matrices(model) > 0
-        add_schur_complement!(buffer, model, W, MatrixIndex, H)
+        add_schur_complement!(model, W, MatrixIndex, H, buffer)
     end
     if num_scalars(model) > 0
         add_schur_complement!(model, W[ScalarIndex], ScalarIndex, H)
