@@ -304,6 +304,42 @@ function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     return cx
 end
 
+function buffer_for_add_jprod(
+    model::Model{T},
+    i::MatrixIndex,
+) where {T}
+    nnz = sum(1:model.meta.ncon; init = 0) do j
+        SparseArrays.nnz(model.A[i.value, j])
+    end
+    I = zeros(Int64, nnz)
+    J = zeros(Int64, nnz)
+    V = zeros(Float64, nnz)
+    offset = 0
+    for j = 1:model.meta.ncon
+        Ai, Av = findnz(Ai[i.value, j][:])
+        K = offset .+ eachindex(Ai)
+        iii[K] = Ai
+        jjj[K] .= j
+        vvv[K] = Av
+        offset += length(Ai)
+    end
+    A = sparse(I, J, K, side_dimension(model, i)^2, model.meta.ncon)
+    return (A, zeros(model.meta.ncon))
+end
+
+function add_jprod!(
+    model::Model,
+    i::MatrixIndex,
+    V::AbstractMatrix,
+    Jv::AbstractVector,
+    buffer,
+)
+    A, cache = buffer
+    LinearAlgebra.mul!(cache, A', reshape(V, length(v)))
+    Jv .+= cache
+    return Jv
+end
+
 function add_jprod!(
     model::Model,
     i::MatrixIndex,
