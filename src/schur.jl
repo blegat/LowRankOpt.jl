@@ -95,7 +95,7 @@ function add_schur_complement!(
                 add_jprod!(model, mat_idx, tmp, tmp2)
                 H[i, i] += tmp2[i]
                 for jj in (ii+1):n
-                    j = σ[jj,ilmi]
+                    j = σ[jj, ilmi]
                     H[j, i] += tmp2[j]
                     H[i, j] += tmp2[j]
                 end
