@@ -81,7 +81,6 @@ function add_schur_complement!(
     dim = side_dimension(model, mat_idx)
     @assert dim == LinearAlgebra.checksquare(W)
     tmp1 = Matrix{T}(undef, dim, dim)
-    tmp2 = Vector{T}(undef, n)
     tmp = zeros(T, dim, dim)
 
     for ii in axes(H, 1)
@@ -91,13 +90,12 @@ function add_schur_complement!(
             if ii <= last_dense[ilmi]
                 LinearAlgebra.mul!(tmp1, W, Ai)
                 LinearAlgebra.mul!(tmp, tmp1, W)
-                fill!(tmp2, zero(T))
-                add_jprod!(model, mat_idx, tmp, tmp2, jprod_buffer)
-                H[i, i] += tmp2[i]
+                buf = _buffer_getindex(jprod_buffer, mat_idx)
+                I = view(σ, ii:n, ilmi)
+                add_sub_jprod!(model, mat_idx, tmp, view(H, I, i), I, buf)
                 for jj in (ii+1):n
                     j = σ[jj, ilmi]
-                    H[j, i] += tmp2[j]
-                    H[i, j] += tmp2[j]
+                    H[i, j] = H[j, i]
                 end
             else
                 if SparseArrays.nnz(Ai) > 1

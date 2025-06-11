@@ -5,6 +5,7 @@ import LinearAlgebra
 import MutableArithmetics as MA
 import MathOptInterface as MOI
 import NLPModels
+import UnsafeArrays
 
 struct Dimensions
     num_scalars::Int64
@@ -22,6 +23,7 @@ end
 struct MatrixIndex
     value::Int64
 end
+Base.broadcastable(i::MatrixIndex) = Ref(i)
 
 abstract type AbstractSolution{T} <: AbstractVector{T} end
 
@@ -304,6 +306,13 @@ function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     return cx
 end
 
+# `SparseMatrixCSC` is stored with an offset by column.
+# This means that getting view `view(A, :, I)` can be handles efficently,
+# these give `SparseMatrixCSCView` (if `I` is a `UnitRange`) and
+# `SparseMatrixCSCColumnSubset` otherwise.
+# In `schur.jl`, we therefore get a `SparseMatrixCSCColumnSubset`.
+# Since we want to use subsets of constraint indices, we use the columns
+# of `A` for constraint indices and the rows of `A` for matrix indices.
 function buffer_for_jprod(
     model::Model{T},
     i::MatrixIndex,
@@ -324,24 +333,40 @@ function buffer_for_jprod(
         offset += length(Ai)
     end
     A = SparseArrays.sparse(I, J, V, side_dimension(model, i)^2, model.meta.ncon)
-    return (A, zeros(model.meta.ncon))
+    return A
 end
 
 function buffer_for_jprod(model::Model)
-    return [buffer_for_jprod(model, i) for i in matrix_indices(model)]
+    return ([buffer_for_jprod(model, i) for i in matrix_indices(model)], zeros(model.meta.ncon))
+end
+
+function _add_jprod!(V, Jv, A, cache)
+    LinearAlgebra.mul!(cache, A', UnsafeArrays.uview(V, :))
+    Jv .+= cache
+    return Jv
+end
+
+function add_sub_jprod!(
+    _::Model,
+    _::MatrixIndex,
+    V::AbstractMatrix,
+    Jv::AbstractVector,
+    I,
+    buffer,
+)
+    A, cache = buffer
+    # `view(cache, I)` would be terribly slow, only the number of elements of `I` matter here
+    return _add_jprod!(V, Jv, view(A, :, I), view(cache, eachindex(I)))
 end
 
 function add_jprod!(
-    model::Model,
-    i::MatrixIndex,
+    ::Model,
+    ::MatrixIndex,
     V::AbstractMatrix,
     Jv::AbstractVector,
     buffer,
 )
-    A, cache = buffer
-    LinearAlgebra.mul!(cache, A', reshape(V, length(v)))
-    Jv .+= cache
-    return Jv
+    return _add_jprod!(V, Jv, buffer...)
 end
 
 function add_jprod!(
@@ -355,6 +380,8 @@ function add_jprod!(
     end
 end
 
+_buffer_getindex(A_cache, i) = (A_cache[1][i.value], A_cache[2])
+
 function NLPModels.jprod!(
     model::Model,
     _::AbstractVector,
@@ -364,7 +391,7 @@ function NLPModels.jprod!(
 ) where {N}
     LinearAlgebra.mul!(Jv, model.C_lin, v[ScalarIndex])
     for i in matrix_indices(model)
-        add_jprod!(model, i, v[i], Jv, args...)
+        add_jprod!(model, i, v[i], Jv, _buffer_getindex.(args, i)...)
     end
     return Jv
 end
