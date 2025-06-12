@@ -42,6 +42,8 @@ function _dot(
     return result
 end
 
+# The `jprod!` buffer is guaranteed to be the first argument of the tuple.
+# This assumption is used by Loraine.
 function buffer_for_schur_complement(model::Model, κ)
     n = model.meta.ncon
     σ = zeros(Int64, n, num_matrices(model))
@@ -57,7 +59,7 @@ function buffer_for_schur_complement(model::Model, κ)
         last_dense[i] = something(findlast(Base.Fix1(isless, κ), sorted), 0)
     end
 
-    return σ, last_dense, buffer_for_jprod(model)
+    return buffer_for_jprod(model), σ, last_dense
 end
 
 function add_schur_complement!(model::Model, W, ::Type{MatrixIndex}, H, buffer)
@@ -75,7 +77,8 @@ function add_schur_complement!(
     H,
     buffer,
 ) where {T}
-    σ, last_dense, jprod_buffer = buffer
+    jprod_buffer, σ, last_dense = buffer
+    buf = jprod_buffer[mat_idx]
     ilmi = mat_idx.value
     n = model.meta.ncon
     dim = side_dimension(model, mat_idx)
@@ -90,7 +93,6 @@ function add_schur_complement!(
             if ii <= last_dense[ilmi]
                 LinearAlgebra.mul!(tmp1, W, Ai)
                 LinearAlgebra.mul!(tmp, tmp1, W)
-                buf = _buffer_getindex(jprod_buffer, mat_idx)
                 I = view(σ, ii:n, ilmi)
                 add_sub_jprod!(model, mat_idx, tmp, view(H, I, i), I, buf)
                 for jj in (ii+1):n

@@ -300,8 +300,8 @@ NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
 cons_constant(model::Model) = model.b
 
-function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
-    NLPModels.jprod!(model, x, x, cx)
+function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector, args::Vararg{Any,N}) where {N}
+    NLPModels.jprod!(model, x, x, cx, args...)
     cx .-= model.b
     return cx
 end
@@ -322,7 +322,7 @@ function buffer_for_jprod(
     end
     I = zeros(Int64, nnz)
     J = zeros(Int64, nnz)
-    V = zeros(Float64, nnz)
+    V = zeros(T, nnz)
     offset = 0
     for j = 1:model.meta.ncon
         Ai, Av = SparseArrays.findnz(model.A[i.value, j][:])
@@ -336,12 +336,24 @@ function buffer_for_jprod(
     return A
 end
 
-function buffer_for_jprod(model::Model)
-    return ([buffer_for_jprod(model, i) for i in matrix_indices(model)], zeros(model.meta.ncon))
+# We define a new type so that we can define a custom `getindex`
+struct JProdBuffer{T}
+    A::Vector{SparseArrays.SparseMatrixCSC{T,Int64}}
+    cache::Vector{T}
 end
 
+function buffer_for_jprod(model::Model)
+    return JProdBuffer([buffer_for_jprod(model, i) for i in matrix_indices(model)], zeros(model.meta.ncon))
+end
+
+Base.getindex(buf::JProdBuffer, i::MatrixIndex) = (buf.A[i.value], buf.cache)
+
+_vec(x::AbstractVector) = x
+_vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
+_vec(x::Base.ReshapedArray) = _vec(parent(x))
+
 function _add_jprod!(V, Jv, A, cache)
-    LinearAlgebra.mul!(cache, A', UnsafeArrays.uview(V, :))
+    LinearAlgebra.mul!(cache, A', _vec(V))
     Jv .+= cache
     return Jv
 end
@@ -379,8 +391,6 @@ function add_jprod!(
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end
 end
-
-_buffer_getindex(A_cache, i) = (A_cache[1][i.value], A_cache[2])
 
 function NLPModels.jprod!(
     model::Model,
