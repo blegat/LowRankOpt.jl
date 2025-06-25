@@ -44,7 +44,7 @@ end
 
 # The `jprod!` buffer is guaranteed to be the first argument of the tuple.
 # This assumption is used by Loraine.
-function buffer_for_schur_complement(model::Model, κ)
+function buffer_for_schur_complement(model::Model{T}, κ) where {T}
     n = model.meta.ncon
     σ = zeros(Int64, n, num_matrices(model))
     last_dense = zeros(Int64, num_matrices(model))
@@ -59,7 +59,13 @@ function buffer_for_schur_complement(model::Model, κ)
         last_dense[i] = something(findlast(Base.Fix1(isless, κ), sorted), 0)
     end
 
-    return buffer_for_jprod(model), σ, last_dense
+    AW = [
+        zeros(T, dim, dim) # /!\ it's the same zero everywhere, might be an issue with BigFloat
+        for dim in model.msizes
+    ]
+    WAW = copy.(AW)
+
+    return buffer_for_jprod(model), AW, WAW, σ, last_dense
 end
 
 function add_schur_complement!(model::Model, W, ::Type{MatrixIndex}, H, buffer)
@@ -77,24 +83,20 @@ function add_schur_complement!(
     H,
     buffer,
 ) where {T}
-    jprod_buffer, σ, last_dense = buffer
+    jprod_buffer, AW, WAW, σ, last_dense = buffer
     buf = jprod_buffer[mat_idx]
     ilmi = mat_idx.value
     n = model.meta.ncon
-    dim = side_dimension(model, mat_idx)
-    @assert dim == LinearAlgebra.checksquare(W)
-    tmp1 = Matrix{T}(undef, dim, dim)
-    tmp = zeros(T, dim, dim)
 
     for ii in axes(H, 1)
         i = σ[ii, ilmi]
         Ai = model.A[ilmi, i]
         if SparseArrays.nnz(Ai) > 0
             if ii <= last_dense[ilmi]
-                LinearAlgebra.mul!(tmp1, W, Ai)
-                LinearAlgebra.mul!(tmp, tmp1, W)
+                LinearAlgebra.mul!(AW[ilmi], W, Ai)
+                LinearAlgebra.mul!(WAW[ilmi], AW[ilmi], W)
                 I = view(σ, ii:n, ilmi)
-                add_sub_jprod!(model, mat_idx, tmp, view(H, I, i), I, buf)
+                add_sub_jprod!(model, mat_idx, WAW[ilmi], view(H, I, i), I, buf)
                 for jj in (ii+1):n
                     j = σ[jj, ilmi]
                     H[i, j] = H[j, i]

@@ -259,6 +259,11 @@ function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
     return
 end
 
+function _alloc_schur_complement(model, i, Wi, H, schur_buffer)
+    LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
+    @test 0 == @allocated LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
+end
+
 function schur_test(model, w, κ)
     schur_buffer = LRO.buffer_for_schur_complement(model, κ)
     jtprod_buffer = LRO.buffer_for_jtprod(model)
@@ -269,6 +274,10 @@ function schur_test(model, w, κ)
     Hy = similar(y)
     LRO.eval_schur_complement!(Hy, model, w, y, jtprod_buffer)
     @test Hy ≈ H * y
+    for i in LRO.matrix_indices(model)
+        Wi = @inferred w[i]
+        _alloc_schur_complement(model, i, Wi, H, schur_buffer)
+    end
     for i in LRO.matrix_indices(model)
         ret = LRO.dual_cons!(jtprod_buffer, model, i, y)
         @test ret isa SparseMatrixCSC
