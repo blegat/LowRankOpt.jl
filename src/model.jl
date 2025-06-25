@@ -300,7 +300,12 @@ NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
 cons_constant(model::Model) = model.b
 
-function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector, args::Vararg{Any,N}) where {N}
+function NLPModels.cons!(
+    model::Model,
+    x::AbstractVector,
+    cx::AbstractVector,
+    args::Vararg{Any,N},
+) where {N}
     NLPModels.jprod!(model, x, x, cx, args...)
     cx .-= model.b
     return cx
@@ -313,18 +318,15 @@ end
 # In `schur.jl`, we therefore get a `SparseMatrixCSCColumnSubset`.
 # Since we want to use subsets of constraint indices, we use the columns
 # of `A` for constraint indices and the rows of `A` for matrix indices.
-function buffer_for_jprod(
-    model::Model{T},
-    i::MatrixIndex,
-) where {T}
+function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
     nnz = sum(1:model.meta.ncon; init = 0) do j
-        SparseArrays.nnz(model.A[i.value, j])
+        return SparseArrays.nnz(model.A[i.value, j])
     end
     I = zeros(Int64, nnz)
     J = zeros(Int64, nnz)
     V = zeros(T, nnz)
     offset = 0
-    for j = 1:model.meta.ncon
+    for j in 1:model.meta.ncon
         Ai, Av = SparseArrays.findnz(model.A[i.value, j][:])
         K = offset .+ eachindex(Ai)
         I[K] = Ai
@@ -332,7 +334,13 @@ function buffer_for_jprod(
         V[K] = Av
         offset += length(Ai)
     end
-    A = SparseArrays.sparse(I, J, V, side_dimension(model, i)^2, model.meta.ncon)
+    A = SparseArrays.sparse(
+        I,
+        J,
+        V,
+        side_dimension(model, i)^2,
+        model.meta.ncon,
+    )
     return A
 end
 
@@ -343,7 +351,10 @@ struct JProdBuffer{T}
 end
 
 function buffer_for_jprod(model::Model)
-    return JProdBuffer([buffer_for_jprod(model, i) for i in matrix_indices(model)], zeros(model.meta.ncon))
+    return JProdBuffer(
+        [buffer_for_jprod(model, i) for i in matrix_indices(model)],
+        zeros(model.meta.ncon),
+    )
 end
 
 Base.getindex(buf::JProdBuffer, i::MatrixIndex) = (buf.A[i.value], buf.cache)
