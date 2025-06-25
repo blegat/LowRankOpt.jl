@@ -261,7 +261,8 @@ end
 
 function _alloc_schur_complement(model, i, Wi, H, schur_buffer)
     LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
-    @test 0 == @allocated LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
+    @test 0 ==
+          @allocated LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
 end
 
 function schur_test(model, w, κ)

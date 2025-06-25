@@ -59,10 +59,8 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
         last_dense[i] = something(findlast(Base.Fix1(isless, κ), sorted), 0)
     end
 
-    AW = [
-        zeros(T, dim, dim) # /!\ it's the same zero everywhere, might be an issue with BigFloat
-        for dim in model.msizes
-    ]
+    AW = [zeros(T, dim, dim) # /!\ it's the same zero everywhere, might be an issue with BigFloat
+          for dim in model.msizes]
     WAW = copy.(AW)
 
     return buffer_for_jprod(model), AW, WAW, σ, last_dense
