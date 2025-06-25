@@ -5,6 +5,7 @@ import LinearAlgebra
 import MutableArithmetics as MA
 import MathOptInterface as MOI
 import NLPModels
+import UnsafeArrays
 
 struct Dimensions
     num_scalars::Int64
@@ -22,6 +23,7 @@ end
 struct MatrixIndex
     value::Int64
 end
+Base.broadcastable(i::MatrixIndex) = Ref(i)
 
 abstract type AbstractSolution{T} <: AbstractVector{T} end
 
@@ -293,15 +295,115 @@ function dual_cons!(
     return model.C[i] - jtprod!(buffer[i], model, mat_idx, y)
 end
 
+function NLPModels.jtprod!(
+    model::Model,
+    _::AbstractVector,
+    y::AbstractVector,
+    vJ::AbstractVector,
+    buffer,
+)
+    vJ[ScalarIndex] .= jtprod(model, ScalarIndex, y)
+    for mat_idx in matrix_indices(model)
+        i = mat_idx.value
+        vJ[mat_idx] .= jtprod!(buffer[i], model, mat_idx, y)
+    end
+end
+
 NLPModels.grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
 NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
 cons_constant(model::Model) = model.b
 
-function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
-    NLPModels.jprod!(model, x, x, cx)
+function NLPModels.cons!(
+    model::Model,
+    x::AbstractVector,
+    cx::AbstractVector,
+    args::Vararg{Any,N},
+) where {N}
+    NLPModels.jprod!(model, x, x, cx, args...)
     cx .-= model.b
     return cx
+end
+
+# `SparseMatrixCSC` is stored with an offset by column.
+# This means that getting view `view(A, :, I)` can be handles efficently,
+# these give `SparseMatrixCSCView` (if `I` is a `UnitRange`) and
+# `SparseMatrixCSCColumnSubset` otherwise.
+# In `schur.jl`, we therefore get a `SparseMatrixCSCColumnSubset`.
+# Since we want to use subsets of constraint indices, we use the columns
+# of `A` for constraint indices and the rows of `A` for matrix indices.
+function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
+    nnz = sum(1:model.meta.ncon; init = 0) do j
+        return SparseArrays.nnz(model.A[i.value, j])
+    end
+    I = zeros(Int64, nnz)
+    J = zeros(Int64, nnz)
+    V = zeros(T, nnz)
+    offset = 0
+    for j in 1:model.meta.ncon
+        Ai, Av = SparseArrays.findnz(model.A[i.value, j][:])
+        K = offset .+ eachindex(Ai)
+        I[K] = Ai
+        J[K] .= j
+        V[K] = Av
+        offset += length(Ai)
+    end
+    A = SparseArrays.sparse(
+        I,
+        J,
+        V,
+        side_dimension(model, i)^2,
+        model.meta.ncon,
+    )
+    return A
+end
+
+# We define a new type so that we can define a custom `getindex`
+struct JProdBuffer{T}
+    A::Vector{SparseArrays.SparseMatrixCSC{T,Int64}}
+    cache::Vector{T}
+end
+
+function buffer_for_jprod(model::Model)
+    return JProdBuffer(
+        [buffer_for_jprod(model, i) for i in matrix_indices(model)],
+        zeros(model.meta.ncon),
+    )
+end
+
+Base.getindex(buf::JProdBuffer, i::MatrixIndex) = (buf.A[i.value], buf.cache)
+
+_vec(x::AbstractVector) = x
+_vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
+_vec(x::Base.ReshapedArray) = _vec(parent(x))
+
+function _add_jprod!(V, Jv, A, cache)
+    LinearAlgebra.mul!(cache, A', _vec(V))
+    Jv .+= cache
+    return Jv
+end
+
+function add_sub_jprod!(
+    _::Model,
+    _::MatrixIndex,
+    V::AbstractMatrix,
+    Jv::AbstractVector,
+    I,
+    buffer,
+)
+    A, cache = buffer
+    # `view(cache, I)` would be terribly slow, only the number of elements of `I` matter here
+    return _add_jprod!(V, Jv, view(A, :, I), view(cache, eachindex(I)))
+end
+
+function add_jprod!(
+    ::Model,
+    ::MatrixIndex,
+    V::AbstractMatrix,
+    Jv::AbstractVector,
+    buffer,
+)
+    return _add_jprod!(V, Jv, buffer...)
 end
 
 function add_jprod!(
@@ -320,10 +422,11 @@ function NLPModels.jprod!(
     _::AbstractVector,
     v::AbstractVector,
     Jv::AbstractVector,
-)
+    args::Vararg{Any,N}, # Optional buffer
+) where {N}
     LinearAlgebra.mul!(Jv, model.C_lin, v[ScalarIndex])
     for i in matrix_indices(model)
-        add_jprod!(model, i, v[i], Jv)
+        add_jprod!(model, i, v[i], Jv, getindex.(args, i)...)
     end
     return Jv
 end

@@ -127,6 +127,7 @@ function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     X = Solution(x, model.dim)
     # We don't call `cons!` as we don't want to include `-b` since the constraint
     # is encoded as `b <= c(x) <= b` and we just need to specify `c(x)` here.
+    # We don't use the version with buffers because that destroys the low-rank structure of `x`
     return NLPModels.jprod!(model.model, X, X, cx)
 end
 
