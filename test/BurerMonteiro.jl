@@ -260,6 +260,9 @@ function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
 end
 
 function _alloc_schur_complement(model, i, Wi, H, schur_buffer)
+    if VERSION < v"1.11"
+        return
+    end
     LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
     @test 0 ==
           @allocated LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
