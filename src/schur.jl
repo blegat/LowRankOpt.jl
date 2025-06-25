@@ -165,14 +165,15 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
-function eval_schur_complement!(result, model::Model, W, y, buffer)
+function eval_schur_complement!(result, model::Model, W, y, jprod_buffer, jtprod_buffer)
     fill!(result, zero(eltype(result)))
     for i in matrix_indices(model)
         add_jprod!(
             model,
             i,
-            W[i] * jtprod!(buffer[i.value], model, i, y) * W[i],
+            W[i] * jtprod!(jtprod_buffer[i.value], model, i, y) * W[i],
             result,
+            jprod_buffer[i],
         )
     end
     result .+= model.C_lin * (W[ScalarIndex] .* (model.C_lin' * y))

@@ -295,6 +295,20 @@ function dual_cons!(
     return model.C[i] - jtprod!(buffer[i], model, mat_idx, y)
 end
 
+function NLPModels.jtprod!(
+    model::Model,
+    _::AbstractVector,
+    y::AbstractVector,
+    vJ::AbstractVector,
+    buffer,
+)
+    vJ[ScalarIndex] .= jtprod(model, ScalarIndex, y)
+    for mat_idx in matrix_indices(model)
+        i = mat_idx.value
+        vJ[mat_idx] .= jtprod!(buffer[i], model, mat_idx, y)
+    end
+end
+
 NLPModels.grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
 NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
