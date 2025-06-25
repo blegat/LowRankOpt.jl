@@ -165,7 +165,7 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
-function eval_schur_complement!(buffer, result, model::Model, W, y)
+function eval_schur_complement!(result, model::Model, W, y, buffer)
     fill!(result, zero(eltype(result)))
     for i in matrix_indices(model)
         add_jprod!(

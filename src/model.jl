@@ -412,7 +412,7 @@ function NLPModels.jprod!(
 ) where {N}
     LinearAlgebra.mul!(Jv, model.C_lin, v[ScalarIndex])
     for i in matrix_indices(model)
-        add_jprod!(model, i, v[i], Jv, _buffer_getindex.(args, i)...)
+        add_jprod!(model, i, v[i], Jv, getindex.(args, i)...)
     end
     return Jv
 end

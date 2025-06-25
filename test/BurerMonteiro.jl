@@ -265,9 +265,9 @@ function schur_test(model, w, κ)
     n = model.meta.ncon
     y = rand(n)
     H = zeros(n, n)
-    H = LRO.schur_complement!(schur_buffer, model, w, H)
+    H = LRO.schur_complement!(model, w, H, schur_buffer)
     Hy = similar(y)
-    LRO.eval_schur_complement!(jtprod_buffer, Hy, model, w, y)
+    LRO.eval_schur_complement!(Hy, model, w, y, jtprod_buffer)
     @test Hy ≈ H * y
     for i in LRO.matrix_indices(model)
         ret = LRO.dual_cons!(jtprod_buffer, model, i, y)
