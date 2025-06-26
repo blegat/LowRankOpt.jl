@@ -8,7 +8,7 @@ function e_i(T, i, n)
 end
 
 function maxcut_objective(weights)
-    L = Diagonal(dropdims(sum(weights, dims=2), dims=2)) - weights
+    L = Diagonal(dropdims(sum(weights, dims = 2), dims = 2)) - weights
     return L / 4
 end
 
