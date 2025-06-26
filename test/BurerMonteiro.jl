@@ -268,11 +268,11 @@ function _alloc_schur_complement(model, i, Wi, H, schur_buffer)
           @allocated LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
 end
 
-function schur_test(model, w, κ)
+function schur_test(model::LRO.Model{T}, w, κ) where {T}
     schur_buffer = LRO.buffer_for_schur_complement(model, κ)
     jtprod_buffer = LRO.buffer_for_jtprod(model)
     n = model.meta.ncon
-    y = rand(n)
+    y = rand(T, n)
 
     Jv = similar(y)
     vJ = similar(w)
@@ -296,8 +296,8 @@ function schur_test(model, w, κ)
     @test LRO.dual_cons(model, LRO.ScalarIndex, y) isa SparseArrays.SparseVector
 end
 
-function schur_test(model, κ)
-    w = rand(model.meta.nvar)
+function schur_test(model::LRO.Model{T}, κ) where {T}
+    w = rand(T, model.meta.nvar)
     W = LRO.VectorizedSolution(w, model.dim)
     for i in LRO.matrix_indices(model)
         W[i] .= W[i] .+ W[i]'
@@ -305,15 +305,19 @@ function schur_test(model, κ)
     return schur_test(model, W, κ)
 end
 
-@testset "ConvexSolver" begin
-    model = maxcut(weights, LRO.Optimizer)
+@testset "Fallback" begin
+    @test LRO.Optimizer() isa LRO.Optimizer{Float64}
+end
+
+@testset "ConvexSolver $T" for T in [Float32, Float64]
+    model = maxcut(T.(weights), LRO.Optimizer{T})
     set_attribute(model, "solver", ConvexSolver)
     b = unsafe_backend(model)
     optimize!(model)
     b.solver.stats.status = :first_order
     @test MOI.get(model, LRO.ConvexTerminationStatus()) == MOI.OPTIMAL
     @test termination_status(model) == MOI.OPTIMAL
-    @test MOI.get(model, LRO.Solution()) isa LRO.VectorizedSolution{Float64}
+    @test MOI.get(model, LRO.Solution()) isa LRO.VectorizedSolution{T}
     b.solver.stats.status = :infeasible
     @test termination_status(model) == MOI.DUAL_INFEASIBLE
     @test dual_status(model) == MOI.INFEASIBLE_POINT

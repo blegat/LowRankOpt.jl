@@ -364,10 +364,10 @@ struct JProdBuffer{T}
     cache::Vector{T}
 end
 
-function buffer_for_jprod(model::Model)
+function buffer_for_jprod(model::Model{T}) where {T}
     return JProdBuffer(
         [buffer_for_jprod(model, i) for i in matrix_indices(model)],
-        zeros(model.meta.ncon),
+        zeros(T, model.meta.ncon),
     )
 end
 
