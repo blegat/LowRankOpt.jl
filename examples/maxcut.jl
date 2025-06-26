@@ -1,25 +1,25 @@
 using LinearAlgebra, JuMP, LowRankOpt
 import LowRankOpt as LRO
 
-function e_i(i, n)
-    ei = zeros(n)
+function e_i(T, i, n)
+    ei = zeros(T, n)
     ei[i] = 1
     return ei
 end
 
 function maxcut_objective(weights)
-    N = LinearAlgebra.checksquare(weights)
-    L = Diagonal(weights * ones(N)) - weights
+    L = Diagonal(dropdims(sum(weights, dims = 2), dims = 2)) - weights
     return L / 4
 end
 
 function maxcut(weights, solver)
+    T = float(eltype(weights))
     N = LinearAlgebra.checksquare(weights)
-    model = Model(solver)
-    LRO.Bridges.add_all_bridges(backend(model).optimizer, Float64)
+    model = GenericModel{T}(solver)
+    LRO.Bridges.add_all_bridges(backend(model).optimizer, T)
     cone = MOI.PositiveSemidefiniteConeTriangle(N)
     factors = LRO.TriangleVectorization.(
-        LRO.positive_semidefinite_factorization.(e_i.(1:N, N)),
+        LRO.positive_semidefinite_factorization.(e_i.(T, 1:N, N)),
     )
     set = LRO.SetDotProducts{LRO.WITH_SET}(cone, factors)
     @variable(
