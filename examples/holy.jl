@@ -97,7 +97,11 @@ function lowrank(A)
         end
     end
     # Impose a penalty on distance between the paired nodes
-    @objective(model, Min, sum(A[i, j] * Δ[i, j] for i in 1:(n-1), j in (i+1):n))
+    @objective(
+        model,
+        Min,
+        sum(A[i, j] * Δ[i, j] for i in 1:(n-1), j in (i+1):n)
+    )
     # Link successive nodes together, with an edge length of 1
     @constraint(model, [i = 1:(n-1)], Δ[i, i+1] == 1)
     # Avoid self-intersections
