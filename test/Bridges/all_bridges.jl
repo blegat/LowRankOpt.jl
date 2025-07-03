@@ -139,6 +139,34 @@ function test_FactDotProdWithSet(T)
     ) <: LRO.Bridges.Variable.AppendSetBridge{T}
 end
 
+# Like Hypatia
+struct FactDotRankOnePSDModel{T,W} <: TestModel{T} end
+
+const _SetDotProdRankOnePSD{T,W,F<:AbstractVector{T}} =
+    LRO.SetDotProducts{
+        W,
+        MOI.PositiveSemidefiniteConeTriangle,
+        LRO.TriangleVectorization{T,LRO.Factorization{T,F,LRO.One{T}}},
+    }
+
+function MOI.supports_add_constrained_variables(
+    ::FactDotRankOnePSDModel{T,W},
+    ::Type{<:_SetDotProdRankOnePSD{T,W}},
+) where {T,W}
+    return true
+end
+
+function test_FactDotRankOnePSDModel(T)
+    model = MOI.instantiate(FactDotRankOnePSDModel{T,LRO.WITHOUT_SET}, with_bridge_type = T)
+    LRO.Bridges.add_all_bridges(model, T)
+    S = set_type(LRO.WITHOUT_SET, T, N; primal = true, psd = true)
+    @test MOI.supports_add_constrained_variables(model, S)
+    @show MOI.Bridges.bridge_type(
+        model,
+        set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = true),
+    )
+end
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$(name)", "test_")

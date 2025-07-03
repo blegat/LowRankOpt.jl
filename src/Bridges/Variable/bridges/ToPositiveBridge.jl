@@ -22,6 +22,8 @@ function MOI.Bridges.Variable.supports_constrained_variable(
     ::Type{<:ToPositiveBridge{T}},
     ::Type{<:LRO.SetDotProducts{W,S,_TriFact{T,F,D}}},
 ) where {T,W,S,F<:AbstractVector{T},D<:AbstractArray{T,0}}
+    @show @__LINE__
+    @show D !== LRO.One{T}
     return D !== LRO.One{T}
 end
 
