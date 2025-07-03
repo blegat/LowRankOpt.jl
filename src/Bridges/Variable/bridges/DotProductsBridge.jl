@@ -27,6 +27,12 @@ function MOI.Bridges.Variable.concrete_bridge_type(
     return DotProductsBridge{T,S,V}
 end
 
+function MOI.Bridges.bridging_cost(
+    ::Type{<:DotProductsBridge},
+)
+    return 10.0
+end
+
 function MOI.Bridges.Variable.bridge_constrained_variable(
     BT::Type{DotProductsBridge{T,S,V}},
     model::MOI.ModelLike,
