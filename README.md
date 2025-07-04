@@ -30,12 +30,12 @@ to see if the solver receives the low-rank constraint or if it is transformed to
 The solvers that support `LRO.SetDotProducts` are:
 
 * [DSDP.jl](https://github.com/jump-dev/DSDP.jl) : [⚠ WIP](https://github.com/jump-dev/DSDP.jl/pull/37)
-* [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl) : [⚠ WIP](https://github.com/jump-dev/Hypatia.jl/pull/844)
+* [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl) since [v0.9](https://github.com/jump-dev/Hypatia.jl/releases/tag/v0.9.0)
 * [SDPLR.jl](https://github.com/jump-dev/SDPLR.jl) since [v0.2](https://github.com/jump-dev/SDPLR.jl/releases/tag/v0.2.0)
 
 The solvers that support `LRO.LinearCombinationInSet` are:
 
-* [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl) : [⚠ WIP](https://github.com/jump-dev/Hypatia.jl/pull/844)
+* [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl) since [v0.9](https://github.com/jump-dev/Hypatia.jl/releases/tag/v0.9.0)
 
 If you use `LRO.LinearCombinationInSet` while the solvers supports `LRO.SetDotProducts` or vice versa, simply [use a `Dualization.jl` layer](https://jump.dev/JuMP.jl/stable/tutorials/conic/dualization/).
 
