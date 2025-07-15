@@ -26,8 +26,6 @@ function MOI.Bridges.Variable.supports_constrained_variable(
         },
     },
 ) where {T,W,S,F<:AbstractMatrix{T},D<:AbstractVector{T}}
-    @show @__LINE__
-    @show D !== LRO.One{T}
     return true
 end
 

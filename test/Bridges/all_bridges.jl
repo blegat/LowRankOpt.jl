@@ -150,21 +150,35 @@ const _SetDotProdRankOnePSD{T,W,F<:AbstractVector{T}} =
     }
 
 function MOI.supports_add_constrained_variables(
+    ::FactDotRankOnePSDModel,
+    ::Type{MOI.PositiveSemidefiniteConeTriangle},
+)
+    return true
+end
+
+function MOI.supports_add_constrained_variables(
     ::FactDotRankOnePSDModel{T,W},
     ::Type{<:_SetDotProdRankOnePSD{T,W}},
 ) where {T,W}
     return true
 end
 
-function test_FactDotRankOnePSDModel(T)
-    model = MOI.instantiate(FactDotRankOnePSDModel{T,LRO.WITHOUT_SET}, with_bridge_type = T)
+function _test_FactDotRankOnePSDModel(T, W)
+    model = MOI.instantiate(FactDotRankOnePSDModel{T,W}, with_bridge_type = T)
     LRO.Bridges.add_all_bridges(model, T)
-    S = set_type(LRO.WITHOUT_SET, T, N; primal = true, psd = true)
+    S = set_type(W, T, 2; primal = true, psd = true)
     @test MOI.supports_add_constrained_variables(model, S)
-    @show MOI.Bridges.bridge_type(
-        model,
-        set_type(LRO.WITHOUT_SET, T, 1; primal = true, psd = true),
-    )
+    @test MOI.Bridges.bridge_type(model, S) <: LRO.Bridges.Variable.ToRankOneBridge{T,W}
+    @test MOI.Bridges.bridging_cost(model, S) == 1
+    S = set_type(W, T, 2; primal = true, psd = false)
+    @test MOI.supports_add_constrained_variables(model, S)
+    @test MOI.Bridges.bridge_type(model, S) <: LRO.Bridges.Variable.ToRankOneBridge{T,W}
+    @test MOI.Bridges.bridging_cost(model, S) == 2
+end
+
+function test_FactDotRankOnePSDModel(T)
+    _test_FactDotRankOnePSDModel(T, LRO.WITHOUT_SET)
+    _test_FactDotRankOnePSDModel(T, LRO.WITH_SET)
 end
 
 function runtests()
