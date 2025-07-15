@@ -142,12 +142,11 @@ end
 # Like Hypatia
 struct FactDotRankOnePSDModel{T,W} <: TestModel{T} end
 
-const _SetDotProdRankOnePSD{T,W,F<:AbstractVector{T}} =
-    LRO.SetDotProducts{
-        W,
-        MOI.PositiveSemidefiniteConeTriangle,
-        LRO.TriangleVectorization{T,LRO.Factorization{T,F,LRO.One{T}}},
-    }
+const _SetDotProdRankOnePSD{T,W,F<:AbstractVector{T}} = LRO.SetDotProducts{
+    W,
+    MOI.PositiveSemidefiniteConeTriangle,
+    LRO.TriangleVectorization{T,LRO.Factorization{T,F,LRO.One{T}}},
+}
 
 function MOI.supports_add_constrained_variables(
     ::FactDotRankOnePSDModel,
@@ -168,17 +167,19 @@ function _test_FactDotRankOnePSDModel(T, W)
     LRO.Bridges.add_all_bridges(model, T)
     S = set_type(W, T, 2; primal = true, psd = true)
     @test MOI.supports_add_constrained_variables(model, S)
-    @test MOI.Bridges.bridge_type(model, S) <: LRO.Bridges.Variable.ToRankOneBridge{T,W}
+    @test MOI.Bridges.bridge_type(model, S) <:
+          LRO.Bridges.Variable.ToRankOneBridge{T,W}
     @test MOI.Bridges.bridging_cost(model, S) == 1
     S = set_type(W, T, 2; primal = true, psd = false)
     @test MOI.supports_add_constrained_variables(model, S)
-    @test MOI.Bridges.bridge_type(model, S) <: LRO.Bridges.Variable.ToRankOneBridge{T,W}
+    @test MOI.Bridges.bridge_type(model, S) <:
+          LRO.Bridges.Variable.ToRankOneBridge{T,W}
     @test MOI.Bridges.bridging_cost(model, S) == 2
 end
 
 function test_FactDotRankOnePSDModel(T)
     _test_FactDotRankOnePSDModel(T, LRO.WITHOUT_SET)
-    _test_FactDotRankOnePSDModel(T, LRO.WITH_SET)
+    return _test_FactDotRankOnePSDModel(T, LRO.WITH_SET)
 end
 
 function runtests()
