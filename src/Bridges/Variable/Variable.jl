@@ -33,6 +33,8 @@ const ConversionBridge{W,T} = SetConversionBridge{
 function add_all_bridges(model, ::Type{T}) where {T}
     MOI.Bridges.add_bridge(model, ConversionBridge{LRO.WITHOUT_SET,T})
     MOI.Bridges.add_bridge(model, ConversionBridge{LRO.WITH_SET,T})
+    MOI.Bridges.add_bridge(model, ToRankOneBridge{T})
+    MOI.Bridges.add_bridge(model, ToPositiveBridge{T})
     MOI.Bridges.add_bridge(model, DotProductsBridge{T})
     MOI.Bridges.add_bridge(model, AppendSetBridge{T})
     return

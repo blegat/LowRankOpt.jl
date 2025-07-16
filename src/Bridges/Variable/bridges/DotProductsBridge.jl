@@ -27,6 +27,14 @@ function MOI.Bridges.Variable.concrete_bridge_type(
     return DotProductsBridge{T,S,V}
 end
 
+function MOI.Bridges.bridging_cost(::Type{<:DotProductsBridge})
+    # We use a larger cost to make sure that `DotProducts` is used only if it is not possible
+    # to keep the set `SetDotProducts`.
+    # For instance, we prefer combining the bridges `ToRankOneBridge` and `ToPositiveBridge`
+    # rather than using `DotProductsBridge`.
+    return 10.0
+end
+
 function MOI.Bridges.Variable.bridge_constrained_variable(
     BT::Type{DotProductsBridge{T,S,V}},
     model::MOI.ModelLike,
