@@ -345,6 +345,8 @@ end
         Vector(NLPModels.grad(b.model, LRO.ScalarIndex));
         NLPModels.grad(b.model, LRO.MatrixIndex(1))[:]
     ]
+    v = rand(length(x))
+    @test dot(Vector(grad), v) ≈ LRO.BurerMonteiro.gprod(b.model, X, v)
     for xx in [x, X]
         err = LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx)
         @test length(err) == 6
