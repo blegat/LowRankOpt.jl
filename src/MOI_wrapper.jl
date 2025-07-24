@@ -2,47 +2,32 @@ import SolverCore
 import NLPModelsJuMP
 
 const VAF{T} = MOI.VectorAffineFunction{T}
-const PSD = MOI.PositiveSemidefiniteConeTriangle
 const NNG = MOI.Nonnegatives
+const PSD = MOI.PositiveSemidefiniteConeTriangle
+const LOW{W} = LinearCombinationInSet{W,PSD}
 
 MOI.Utilities.@product_of_sets(NNGCones, NNG)
-
-MOI.Utilities.@product_of_sets(PSDCones, PSD)
-
-MOI.Utilities.@struct_of_constraints_by_set_types(PSDOrNot, PSD, NNG)
 
 const OptimizerCache{T} = MOI.Utilities.GenericModel{
     T,
     MOI.Utilities.ObjectiveContainer{T},
     MOI.Utilities.VariablesContainer{T},
-    PSDOrNot{T}{
-        MOI.Utilities.MatrixOfConstraints{
+    MOI.Utilities.MatrixOfConstraints{
+        T,
+        MOI.Utilities.MutableSparseMatrixCSC{
             T,
-            MOI.Utilities.MutableSparseMatrixCSC{
-                T,
-                Int64,
-                MOI.Utilities.OneBasedIndexing,
-            },
-            Vector{T},
-            PSDCones{T},
+            Int64,
+            MOI.Utilities.OneBasedIndexing,
         },
-        MOI.Utilities.MatrixOfConstraints{
-            T,
-            MOI.Utilities.MutableSparseMatrixCSC{
-                T,
-                Int64,
-                MOI.Utilities.OneBasedIndexing,
-            },
-            Vector{T},
-            NNGCones{T},
-        },
-    },
+        Vector{T},
+        NNGCones{T},
+    }
 }
 
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
-    lmi_id::Dict{MOI.ConstraintIndex{VAF{T},PSD},Int64}
+    lmi_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
     lin_cones::Union{Nothing,NNGCones{T}}
     max_sense::Bool
     objective_constant::T
@@ -53,7 +38,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
         return new{T}(
             nothing,
             nothing,
-            Dict{MOI.ConstraintIndex{VAF{T},PSD},Int64}(),
+            Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
             nothing,
             false,
             0.0,
@@ -134,7 +119,7 @@ function MOI.supports(
     return true
 end
 
-const SUPPORTED_CONES = Union{NNG,PSD}
+const SUPPORTED_CONES = Union{NNG,PSD,LOW}
 
 function MOI.supports_constraint(
     ::Optimizer{T},
@@ -158,65 +143,84 @@ function MOI.optimize!(model::Optimizer)
     return
 end
 
-function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
+function __add(A, lmi_id, k, i, j, v)
+    I, J, V, _, _ = A[lmi_id, k]
+    push!(I, i)
+    push!(J, j)
+    push!(V, v)
+    return
+end
+
+function _add(A, lmi_id, k, i, j, coef)
+    __add(A, lmi_id, k, i, j, coef)
+    if i != j
+        __add(A, lmi_id, k, j, i, coef)
+    end
+    return
+end
+
+function _add_constraints(::Optimizer{T}, _, _, _, ::Type{VAF{T}}, ::Type{NNG}) where {T}
+    return
+end
+
+function _add_constraints(dest::Optimizer{T}, src, A, msizes, ::Type{VAF{T}}, ::Type{S}) where {T,S}
+    for ci in MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},S}())
+        # No need to map with `index_map` since we have the same indices thanks to
+        # the `MatrixOfConstraints`
+        func = MOI.get(src, MOI.CanonicalConstraintFunction(), ci)
+        set = MOI.get(src, MOI.ConstraintSet(), ci)
+        d = MOI.side_dimension(set)
+        push!(msizes, d)
+        lmi_id = length(msizes)
+        dest.lmi_id[ci] = lmi_id
+        for k in axes(A, 2)
+            A[lmi_id, k] = (Int64[], Int64[], T[], d, d)
+        end
+        row = 0
+        for j in 1:d
+            for i in 1:j
+                row += 1
+                _add(A, lmi_id, 1, i, j, func.constants[row])
+            end
+        end
+        for term in func.terms
+            i, j = MOI.Utilities.inverse_trimap(term.output_index)
+            scalar = term.scalar_term
+            col = 1 + scalar.variable.value
+            _add(A, lmi_id, col, i, j, -scalar.coefficient)
+        end
+    end
+    return
+end
+
+function _nlmi(src, ::Type{F}, ::Type{S}) where {F,S}
+    if S == NNG
+        return 0
+    else
+        return MOI.get(src, MOI.NumberOfConstraints{F,S}())
+    end
+end
+
+function MOI.copy_to(dest::Optimizer{T}, src::MOI.Utilities.UniversalFallback{OptimizerCache{T}}) where {T}
     MOI.empty!(dest)
-    psd_AC = MOI.Utilities.constraints(src.constraints, VAF{T}, PSD)
-    Cd_lin = MOI.Utilities.constraints(src.constraints, VAF{T}, NNG)
+    Cd_lin = src.model.constraints
     SM = SparseArrays.SparseMatrixCSC{T,Int64}
-    psd_A = convert(SM, psd_AC.coefficients)
     C_lin = convert(SM, Cd_lin.coefficients)
     C_lin = -convert(SM, C_lin')
     n = MOI.get(src, MOI.NumberOfVariables())
-    nlmi = MOI.get(src, MOI.NumberOfConstraints{VAF{T},PSD}())
+    constraint_types = MOI.get(src, MOI.ListOfConstraintTypesPresent())
+    nlmi = sum(constraint_types) do (F, S)
+        _nlmi(src, F, S)
+    end
     A = Matrix{Tuple{Vector{Int64},Vector{Int64},Vector{T},Int64,Int64}}(
         undef,
         nlmi,
         n + 1,
     )
-    back = Vector{Tuple{Int64,Int64,Int64}}(undef, size(psd_A, 1))
     empty!(dest.lmi_id)
-    row = 0
     msizes = Int64[]
-    for (lmi_id, ci) in
-        enumerate(MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},PSD}()))
-        dest.lmi_id[ci] = lmi_id
-        set = MOI.get(src, MOI.ConstraintSet(), ci)
-        d = set.side_dimension
-        push!(msizes, d)
-        for k in 1:(n+1)
-            A[lmi_id, k] = (Int64[], Int64[], T[], d, d)
-        end
-        for j in 1:d
-            for i in 1:j
-                row += 1
-                back[row] = (lmi_id, i, j)
-            end
-        end
-    end
-    function __add(lmi_id, k, i, j, v)
-        I, J, V, _, _ = A[lmi_id, k]
-        push!(I, i)
-        push!(J, j)
-        push!(V, v)
-        return
-    end
-    function _add(lmi_id, k, i, j, coef)
-        __add(lmi_id, k, i, j, coef)
-        if i != j
-            __add(lmi_id, k, j, i, coef)
-        end
-        return
-    end
-    for row in eachindex(back)
-        lmi_id, i, j = back[row]
-        _add(lmi_id, 1, i, j, psd_AC.constants[row])
-    end
-    for var in 1:n
-        for k in SparseArrays.nzrange(psd_A, var)
-            lmi_id, i, j = back[SparseArrays.rowvals(psd_A)[k]]
-            col = 1 + var
-            _add(lmi_id, col, i, j, -SparseArrays.nonzeros(psd_A)[k])
-        end
+    for (F, S) in constraint_types
+        _add_constraints(dest, src, A, msizes, F, S)
     end
     dest.max_sense = MOI.get(src, MOI.ObjectiveSense()) == MOI.MAX_SENSE
     obj = MOI.get(src, MOI.ObjectiveFunction{MOI.ScalarAffineFunction{T}}())
@@ -226,7 +230,6 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
         b0[term.variable.value] += term.coefficient
     end
     b = dest.max_sense ? b0 : -b0
-    # b = max_sense ? -b0 : b0
 
     AA = SparseArrays.SparseMatrixCSC{T,Int}[
         SparseArrays.sparse(IJV...) for IJV in A
@@ -254,7 +257,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::OptimizerCache{T}) where {T}
 end
 
 function MOI.copy_to(dest::Optimizer{T}, src::MOI.ModelLike) where {T}
-    cache = OptimizerCache{T}()
+    cache = MOI.Utilities.UniversalFallback(OptimizerCache{T}())
     index_map = MOI.copy_to(cache, src)
     MOI.copy_to(dest, cache)
     return index_map
