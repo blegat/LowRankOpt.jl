@@ -21,7 +21,7 @@ const OptimizerCache{T} = MOI.Utilities.GenericModel{
         },
         Vector{T},
         NNGCones{T},
-    }
+    },
 }
 
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
@@ -159,11 +159,25 @@ function _add(A, lmi_id, k, i, j, coef)
     return
 end
 
-function _add_constraints(::Optimizer{T}, _, _, _, ::Type{VAF{T}}, ::Type{NNG}) where {T}
+function _add_constraints(
+    ::Optimizer{T},
+    _,
+    _,
+    _,
+    ::Type{VAF{T}},
+    ::Type{NNG},
+) where {T}
     return
 end
 
-function _add_constraints(dest::Optimizer{T}, src, A, msizes, ::Type{VAF{T}}, ::Type{S}) where {T,S}
+function _add_constraints(
+    dest::Optimizer{T},
+    src,
+    A,
+    msizes,
+    ::Type{VAF{T}},
+    ::Type{S},
+) where {T,S}
     for ci in MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},S}())
         # No need to map with `index_map` since we have the same indices thanks to
         # the `MatrixOfConstraints`
@@ -201,7 +215,10 @@ function _nlmi(src, ::Type{F}, ::Type{S}) where {F,S}
     end
 end
 
-function MOI.copy_to(dest::Optimizer{T}, src::MOI.Utilities.UniversalFallback{OptimizerCache{T}}) where {T}
+function MOI.copy_to(
+    dest::Optimizer{T},
+    src::MOI.Utilities.UniversalFallback{OptimizerCache{T}},
+) where {T}
     MOI.empty!(dest)
     Cd_lin = src.model.constraints
     SM = SparseArrays.SparseMatrixCSC{T,Int64}
@@ -210,7 +227,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::MOI.Utilities.UniversalFallback{Op
     n = MOI.get(src, MOI.NumberOfVariables())
     constraint_types = MOI.get(src, MOI.ListOfConstraintTypesPresent())
     nlmi = sum(constraint_types) do (F, S)
-        _nlmi(src, F, S)
+        return _nlmi(src, F, S)
     end
     A = Matrix{Tuple{Vector{Int64},Vector{Int64},Vector{T},Int64,Int64}}(
         undef,
