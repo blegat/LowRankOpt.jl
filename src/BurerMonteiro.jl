@@ -25,9 +25,9 @@ end
 
 Base.length(d::Dimensions) = d.offsets[end]
 
-function set_rank!(d::Dimensions, rank, i)
-    d.ranks[i] = rank
-    for j in (i+1):length(d.offsets)
+function set_rank!(d::Dimensions, i::LRO.MatrixIndex, rank)
+    d.ranks[i.value] = rank
+    for j in (i.value+1):length(d.offsets)
         d.offsets[j] = d.offsets[j-1] + d.side_dimensions[j - 1] * d.ranks[j - 1]
     end
     return
@@ -68,8 +68,9 @@ function meta(dim, con::AbstractVector{T}) where {T}
     )
 end
 
-function set_rank!(model::Model, r, i)
-    set_rank!(model.dim, r, i)
+function set_rank!(model::Model, i::LRO.MatrixIndex, r)
+    set_rank!(model.dim, i, r)
+    # `nvar` has changed so we need to reset `model.meta`
     model.meta = meta(model.dim, model.meta.lcon)
     return
 end
