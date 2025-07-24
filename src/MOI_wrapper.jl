@@ -169,7 +169,12 @@ end
 
 function _instantiate(A::Array{_MatrixBuilder{T}}) where {T}
     if isempty(A)
-        return Array{FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}}(undef, size(A))
+        return Array{
+            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
+        }(
+            undef,
+            size(A),
+        )
     else
         return _instantiate.(A)
     end
@@ -203,7 +208,12 @@ function _add!(A::_MatrixBuilder, row, coef, ::PSD)
     return _add!(A, MOI.Utilities.inverse_trimap(row)..., coef)
 end
 
-function _add!(A::_MatrixBuilder, row, coef, set::LinearCombinationInSet{W}) where {W}
+function _add!(
+    A::_MatrixBuilder,
+    row,
+    coef,
+    set::LinearCombinationInSet{W},
+) where {W}
     if row > length(set.vectors)
         @assert W == WITH_SET
         _add!(A, row - length(set.vectors), coef, set.set)
@@ -286,11 +296,7 @@ function MOI.copy_to(
     nlmi = sum(constraint_types) do (F, S)
         return _nlmi(src, F, S)
     end
-    A = Matrix{_MatrixBuilder{T}}(
-        undef,
-        nlmi,
-        n + 1,
-    )
+    A = Matrix{_MatrixBuilder{T}}(undef, nlmi, n + 1)
     empty!(dest.lmi_id)
     msizes = Int64[]
     for (F, S) in constraint_types

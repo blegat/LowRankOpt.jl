@@ -211,10 +211,12 @@ weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
         diff_check(model)
         T = Float64
         if is_dual
-            lro_model = unsafe_backend(model).dual_problem.dual_model.model.optimizer.model
+            lro_model =
+                unsafe_backend(model).dual_problem.dual_model.model.optimizer.model
             @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
             V = sparse ? SparseVector{T,Int} : Vector{T}
-            @test lro_model.A isa Matrix{LowRankOpt.Factorization{Float64,V,LRO.One{Float64}}}
+            @test lro_model.A isa
+                  Matrix{LowRankOpt.Factorization{Float64,V,LRO.One{Float64}}}
         else
             lro_model = unsafe_backend(model).model
             @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
