@@ -26,6 +26,8 @@ function grad_check(model, x; tol = 1e-6)
     f(x) = NLPModels.obj(model, x)
     g = FiniteDiff.finite_difference_gradient(f, x)
     @test NLPModels.grad(model, x) ≈ g rtol = tol atol = tol
+    v = rand(length(x))
+    @test dot(g, v) ≈ LRO.BurerMonteiro.gprod(model, x, v) rtol = tol atol = tol
 end
 
 function jac_check(model, x; kws...)

@@ -123,6 +123,17 @@ function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     return g
 end
 
+# This is used by `SDPLRPlus.jl` in its linesearch.
+# It could just take the dot product with the gradient that it already has but
+# SDPLRPlus does not treat the objective and constraints differently.
+# So since it needs Jacobian-vector product, we also need to implement
+# gradient-vector product.
+function gprod(model::Model, x::AbstractVector, v::AbstractVector)
+    X = Solution(x, model.dim)
+    V = Solution(v, model.dim)
+    return NLPModels.obj(model.model, _OuterProduct(X, V))
+end
+
 function NLPModels.cons!(model::Model, x::AbstractVector, cx::AbstractVector)
     X = Solution(x, model.dim)
     # We don't call `cons!` as we don't want to include `-b` since the constraint
