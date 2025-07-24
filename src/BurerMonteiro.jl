@@ -128,11 +128,7 @@ end
 # SDPLRPlus does not treat the objective and constraints differently.
 # So since it needs Jacobian-vector product, we also need to implement
 # gradient-vector product.
-function gprod(
-    model::Model,
-    x::AbstractVector,
-    v::AbstractVector,
-)
+function gprod(model::Model, x::AbstractVector, v::AbstractVector)
     X = Solution(x, model.dim)
     V = Solution(v, model.dim)
     return NLPModels.obj(model.model, _OuterProduct(X, V))
