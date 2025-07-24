@@ -25,35 +25,54 @@ end
 
 Base.length(d::Dimensions) = d.offsets[end]
 
-struct Model{T,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
+function set_rank!(d::Dimensions, i::LRO.MatrixIndex, rank)
+    d.ranks[i.value] = rank
+    for j in (i.value+1):length(d.offsets)
+        d.offsets[j] = d.offsets[j-1] + d.side_dimensions[j-1] * d.ranks[j-1]
+    end
+    return
+end
+
+mutable struct Model{T,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
     model::LRO.Model{T,AT}
     dim::Dimensions
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     counters::NLPModels.Counters
     function Model(model::LRO.Model{T,AT}, ranks) where {T,AT}
         dim = Dimensions(model, ranks)
-        n = length(dim)
-        ncon = model.meta.ncon
         return new{T,AT}(
             model,
             dim,
-            NLPModels.NLPModelMeta(
-                n,     #nvar
-                ncon = ncon,
-                x0 = rand(n),
-                y0 = rand(ncon),
-                lvar = [
-                    fill(zero(T), dim.num_scalars);
-                    fill(typemin(T), n - dim.num_scalars)
-                ],
-                uvar = fill(typemax(T), n),
-                lcon = LRO.cons_constant(model),
-                ucon = LRO.cons_constant(model),
-                minimize = true,
-            ),
+            meta(dim, LRO.cons_constant(model)),
             NLPModels.Counters(),
         )
     end
+end
+
+function meta(dim, con::AbstractVector{T}) where {T}
+    n = length(dim)
+    ncon = length(con)
+    return NLPModels.NLPModelMeta(
+        n;     #nvar
+        ncon,
+        x0 = rand(n),
+        y0 = rand(ncon),
+        lvar = [
+            fill(zero(T), dim.num_scalars);
+            fill(typemin(T), n - dim.num_scalars)
+        ],
+        uvar = fill(typemax(T), n),
+        lcon = con,
+        ucon = con,
+        minimize = true,
+    )
+end
+
+function set_rank!(model::Model, i::LRO.MatrixIndex, r)
+    set_rank!(model.dim, i, r)
+    # `nvar` has changed so we need to reset `model.meta`
+    model.meta = meta(model.dim, model.meta.lcon)
+    return
 end
 
 struct Solution{T,VT<:AbstractVector{T}} <: AbstractVector{T}

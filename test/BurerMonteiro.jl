@@ -208,6 +208,14 @@ weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     @test termination_status(model) == MOI.LOCALLY_SOLVED
     @test objective_value(model) ≈ 18 rtol = 1e-6
     diff_check(model)
+    if !is_dual
+        solver = unsafe_backend(model).solver
+        LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
+        @test solver.model.dim.ranks == [4]
+        @test solver.model.dim.offsets == [8, 24]
+        @test length(solver.model.dim) == 24
+        @test length(solver.model.meta.x0) == 24
+    end
 end;
 
 @testset "ResultCount" begin
