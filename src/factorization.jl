@@ -122,6 +122,10 @@ function MOI.Bridges.Constraint.conversion_cost(
     return Inf
 end
 
+function _add_by_cat(a::Factorization, b::Factorization)
+    return Factorization([a.factor b.factor], [a.scaling; b.scaling])
+end
+
 # Solvers are recommented to use this constant instead of hardcoding this
 # `FillArrays` type so that the solver does not have to explicitly `import`
 # `FillArrays` nor explicitly add it to its dependency so that it remains

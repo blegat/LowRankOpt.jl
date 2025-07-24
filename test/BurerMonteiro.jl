@@ -192,29 +192,40 @@ weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     (false, LRO.Optimizer),
     (true, dual_optimizer(LRO.Optimizer)),
 ]
-    model = maxcut(weights, opt)
-    set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
-    set_attribute(model, "sub_solver", Percival.PercivalSolver)
-    set_attribute(model, "ranks", [is_dual ? 2 : 3])
-    set_attribute(model, "verbose", 2)
+    @testset "Sparse ? $sparse" for sparse in [false, true]
+        model = maxcut(weights, opt; sparse)
+        set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
+        set_attribute(model, "sub_solver", Percival.PercivalSolver)
+        set_attribute(model, "ranks", [is_dual ? 2 : 3])
+        set_attribute(model, "verbose", 2)
 
-    set_attribute(model, "max_iter", 0)
-    optimize!(model)
-    @test termination_status(model) == MOI.ITERATION_LIMIT
-    diff_check(model)
+        set_attribute(model, "max_iter", 0)
+        optimize!(model)
+        @test termination_status(model) == MOI.ITERATION_LIMIT
+        diff_check(model)
 
-    set_attribute(model, "max_iter", 20)
-    optimize!(model)
-    @test termination_status(model) == MOI.LOCALLY_SOLVED
-    @test objective_value(model) ≈ 18 rtol = 1e-6
-    diff_check(model)
-    if !is_dual
-        solver = unsafe_backend(model).solver
-        LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
-        @test solver.model.dim.ranks == [4]
-        @test solver.model.dim.offsets == [8, 24]
-        @test length(solver.model.dim) == 24
-        @test length(solver.model.meta.x0) == 24
+        set_attribute(model, "max_iter", 20)
+        optimize!(model)
+        @test termination_status(model) == MOI.LOCALLY_SOLVED
+        @test objective_value(model) ≈ 18 rtol = 1e-6
+        diff_check(model)
+        T = Float64
+        if is_dual
+            lro_model = unsafe_backend(model).dual_problem.dual_model.model.optimizer.model
+            @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
+            V = sparse ? SparseVector{T,Int} : Vector{T}
+            @test lro_model.A isa Matrix{LowRankOpt.Factorization{Float64,V,LRO.One{Float64}}}
+        else
+            lro_model = unsafe_backend(model).model
+            @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
+            @test lro_model.A isa Matrix{SparseMatrixCSC{T,Int64}}
+            solver = unsafe_backend(model).solver
+            LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
+            @test solver.model.dim.ranks == [4]
+            @test solver.model.dim.offsets == [8, 24]
+            @test length(solver.model.dim) == 24
+            @test length(solver.model.meta.x0) == 24
+        end
     end
 end;
 

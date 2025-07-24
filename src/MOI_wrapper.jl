@@ -143,20 +143,82 @@ function MOI.optimize!(model::Optimizer)
     return
 end
 
-function __add(A, lmi_id, k, i, j, v)
-    I, J, V, _, _ = A[lmi_id, k]
-    push!(I, i)
-    push!(J, j)
-    push!(V, v)
+mutable struct _MatrixBuilder{T}
+    I::Vector{Int64}
+    J::Vector{Int64}
+    V::Vector{T}
+    d::Int64
+    # TODO If both sparse and dense are added, we should keep them separate from each other
+    fact::Union{Nothing,Factorization{T}}
+    function _MatrixBuilder{T}(d) where {T}
+        return new{T}(Int64[], Int64[], T[], d, nothing)
+    end
+end
+
+function _instantiate(A::_MatrixBuilder{T}) where {T}
+    if isnothing(A.fact)
+        if isempty(A.I)
+            return FillArrays.Zeros{T}(d, d)
+        end
+        return SparseArrays.sparse(A.I, A.J, A.V, A.d, A.d)
+    else
+        @assert isempty(A.I) # error("Sum of sparse and low-rank is not supported yet")
+        return A.fact
+    end
+end
+
+function _instantiate(A::Array{_MatrixBuilder{T}}) where {T}
+    if isempty(A)
+        return Array{FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}}(undef, size(A))
+    else
+        return _instantiate.(A)
+    end
+end
+
+function __add!(A::_MatrixBuilder, i, j, v)
+    push!(A.I, i)
+    push!(A.J, j)
+    push!(A.V, v)
     return
 end
 
-function _add(A, lmi_id, k, i, j, coef)
-    __add(A, lmi_id, k, i, j, coef)
+function _add!(A::_MatrixBuilder, i, j, v)
+    __add!(A, i, j, v)
     if i != j
-        __add(A, lmi_id, k, j, i, coef)
+        __add!(A, j, i, v)
     end
     return
+end
+
+function _add!(A::_MatrixBuilder, f::Factorization)
+    if isnothing(A.fact)
+        A.fact = f
+    else
+        A.fact = _add_by_cat(A.fact, f)
+    end
+    return
+end
+
+function _add!(A::_MatrixBuilder, row, coef, ::PSD)
+    return _add!(A, MOI.Utilities.inverse_trimap(row)..., coef)
+end
+
+function _add!(A::_MatrixBuilder, row, coef, set::LinearCombinationInSet{W}) where {W}
+    if row > length(set.vectors)
+        @assert W == WITH_SET
+        _add!(A, row - length(set.vectors), coef, set.set)
+    else
+        if iszero(coef)
+            return
+        end
+        vectorized = set.vectors[row]::TriangleVectorization
+        matrix = vectorized.matrix
+        if !isone(coef)
+            # TODO not working yet, needs to be tested
+            matrix *= coef
+        end
+        _add!(A, matrix)
+    end
 end
 
 function _add_constraints(
@@ -188,20 +250,15 @@ function _add_constraints(
         lmi_id = length(msizes)
         dest.lmi_id[ci] = lmi_id
         for k in axes(A, 2)
-            A[lmi_id, k] = (Int64[], Int64[], T[], d, d)
+            A[lmi_id, k] = _MatrixBuilder{T}(d)
         end
-        row = 0
-        for j in 1:d
-            for i in 1:j
-                row += 1
-                _add(A, lmi_id, 1, i, j, func.constants[row])
-            end
+        for row in eachindex(func.constants)
+            _add!(A[lmi_id, 1], row, func.constants[row], set)
         end
         for term in func.terms
-            i, j = MOI.Utilities.inverse_trimap(term.output_index)
             scalar = term.scalar_term
             col = 1 + scalar.variable.value
-            _add(A, lmi_id, col, i, j, -scalar.coefficient)
+            _add!(A[lmi_id, col], term.output_index, -scalar.coefficient, set)
         end
     end
     return
@@ -229,7 +286,7 @@ function MOI.copy_to(
     nlmi = sum(constraint_types) do (F, S)
         return _nlmi(src, F, S)
     end
-    A = Matrix{Tuple{Vector{Int64},Vector{Int64},Vector{T},Int64,Int64}}(
+    A = Matrix{_MatrixBuilder{T}}(
         undef,
         nlmi,
         n + 1,
@@ -248,12 +305,9 @@ function MOI.copy_to(
     end
     b = dest.max_sense ? b0 : -b0
 
-    AA = SparseArrays.SparseMatrixCSC{T,Int}[
-        SparseArrays.sparse(IJV...) for IJV in A
-    ]
     dest.model = Model(
-        AA[:, 1],
-        AA[:, 2:end],
+        _instantiate(A[:, 1]),
+        _instantiate(A[:, 2:end]),
         b,
         convert(
             SparseArrays.SparseVector{T,Int64},

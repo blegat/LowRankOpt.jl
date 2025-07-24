@@ -128,11 +128,11 @@ The fields of the `struct` as related to the arrays of the above formulation as 
 * The matrix ``C_i`` is given by `C[i]`.
 * The matrix ``A_{i,j}`` is given by `A[i,j]`.
 """
-mutable struct Model{T,A<:AbstractMatrix{T}} <:
+mutable struct Model{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T}} <:
                NLPModels.AbstractNLPModel{T,Vector{T}}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     dim::Dimensions
-    C::Vector{SparseArrays.SparseMatrixCSC{T,Int}}
+    C::Vector{C}
     A::Matrix{A}
     b::Vector{T}
     d_lin::SparseArrays.SparseVector{T,Int64}
@@ -140,14 +140,14 @@ mutable struct Model{T,A<:AbstractMatrix{T}} <:
     msizes::Vector{Int64}
 
     function Model(
-        C::Vector{SparseArrays.SparseMatrixCSC{T,Int}},
+        C::Vector{CT},
         A::Matrix{AT},
         b::Vector{T},
         d_lin::SparseArrays.SparseVector{T,Int64},
         C_lin::SparseArrays.SparseMatrixCSC{T,Int64},
         msizes::Vector{Int64},
-    ) where {T,AT<:AbstractMatrix{T}}
-        model = new{T,AT}()
+    ) where {T,CT<:AbstractMatrix{T},AT<:AbstractMatrix{T}}
+        model = new{T,CT,AT}()
         model.C = C
         model.A = A
         model.b = b
