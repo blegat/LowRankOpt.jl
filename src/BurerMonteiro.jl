@@ -28,7 +28,7 @@ Base.length(d::Dimensions) = d.offsets[end]
 function set_rank!(d::Dimensions, i::LRO.MatrixIndex, rank)
     d.ranks[i.value] = rank
     for j in (i.value+1):length(d.offsets)
-        d.offsets[j] = d.offsets[j-1] + d.side_dimensions[j - 1] * d.ranks[j - 1]
+        d.offsets[j] = d.offsets[j-1] + d.side_dimensions[j-1] * d.ranks[j-1]
     end
     return
 end
