@@ -26,6 +26,8 @@ function grad_check(model, x; tol = 1e-6)
     f(x) = NLPModels.obj(model, x)
     g = FiniteDiff.finite_difference_gradient(f, x)
     @test NLPModels.grad(model, x) ≈ g rtol = tol atol = tol
+    v = rand(length(x))
+    @test dot(g, v) ≈ LRO.BurerMonteiro.gprod(model, x, v) rtol = tol atol = tol
 end
 
 function jac_check(model, x; kws...)
@@ -345,8 +347,6 @@ end
         Vector(NLPModels.grad(b.model, LRO.ScalarIndex));
         NLPModels.grad(b.model, LRO.MatrixIndex(1))[:]
     ]
-    v = rand(length(x))
-    @test dot(Vector(grad), v) ≈ LRO.BurerMonteiro.gprod(b.model, X, v)
     for xx in [x, X]
         err = LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx)
         @test length(err) == 6
