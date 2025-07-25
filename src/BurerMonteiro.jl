@@ -130,14 +130,24 @@ function NLPModels.obj(model::Model, x::AbstractVector)
     return NLPModels.obj(model.model, Solution(x, model.dim))
 end
 
+function NLPModels.grad!(
+    model::Model,
+    X::LRO.Factorization,
+    G::LRO.Factorization,
+    i::LRO.MatrixIndex,
+)
+    C = NLPModels.grad(model.model, i)
+    LinearAlgebra.mul!(G.factor, C, X.factor)
+    G.factor .*= 2
+    return
+end
+
 function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     X = Solution(x, model.dim)
     G = Solution(g, model.dim)
     copyto!(G[LRO.ScalarIndex], NLPModels.grad(model.model, LRO.ScalarIndex))
     for i in LRO.matrix_indices(model.model)
-        C = NLPModels.grad(model.model, i)
-        LinearAlgebra.mul!(G[i].factor, C, X[i].factor)
-        G[i].factor .*= 2
+        NLPModels.grad!(model, X[i], G[i], i)
     end
     return g
 end
@@ -174,6 +184,30 @@ function NLPModels.jprod!(
     return NLPModels.jprod!(model.model, X, _OuterProduct(X, V), Jv)
 end
 
+function add_jtprod!(
+    model::Model,
+    X::LRO.Factorization,
+    y::AbstractVector,
+    JtV::LRO.Factorization,
+    i::LRO.MatrixIndex,
+)
+    for j in eachindex(y)
+        A = NLPModels.jac(model.model, j, i)
+        JtV.factor .+= A * X.factor .* (2y[j])
+    end
+end
+
+function NLPModels.jtprod!(
+    model::Model,
+    X,
+    y::AbstractVector,
+    JtV::LRO.Factorization{T},
+    i::LRO.MatrixIndex,
+) where {T}
+    fill!(JtV.factor, zero(T))
+    return add_jtprod!(model, X, y, JtV, i)
+end
+
 function NLPModels.jtprod!(
     model::Model,
     x::AbstractVector,
@@ -188,12 +222,7 @@ function NLPModels.jtprod!(
         y,
     )
     for i in LRO.matrix_indices(model.model)
-        U = JtV[i].factor
-        fill!(U, zero(eltype(U)))
-        for j in eachindex(y)
-            A = NLPModels.jac(model.model, j, i)
-            U .+= A * X[i].factor .* (2y[j])
-        end
+        NLPModels.jtprod!(model, X[i], y, JtV[i], i)
     end
     return Jtv
 end
