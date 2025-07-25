@@ -1,0 +1,10 @@
+[deps]
+Dualization = "191a621a-6537-11e9-281d-650236a99e60"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LowRankOpt = "607ca3ad-272e-43c8-bcbe-fc71b56c935c"
+Percival = "01435c0c-c90d-11e9-3788-63660f8fbccc"
+SCS = "c946c3f1-0d1f-5ce8-9dea-7daa1f7e2d13"
+SDPLR = "56161740-ea4e-4253-9d15-43c62ff94d95"
+SDPLRPlus = "9040bce9-cc75-4a86-9224-0257f72befc6"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"

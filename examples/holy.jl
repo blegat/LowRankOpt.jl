@@ -49,6 +49,7 @@ cl = classic(A)
 
 # Let's start with SCS:
 
+import SCS
 set_optimizer(cl, SCS.Optimizer)
 optimize!(cl)
 objective_value(cl)
@@ -149,6 +150,23 @@ solve_time(lr)
 
 # It is slower! This is because SDPLR does not support sparse factors so it
 # desified our factors of 2 entries!
+
+# Let's try with SDPLRPlus:
+
+import SDPLRPlus
+set_optimizer(cl, dual_optimizer(LRO.Optimizer))
+set_attribute(cl, "solver", LRO.BurerMonteiro.Solver)
+set_attribute(cl, "sub_solver", SDPLRPlus.Solver)
+set_attribute(cl, "ranks", [15])
+set_attribute(cl, "maxmajoriter", 100)
+optimize!(cl)
+
+set_optimizer(lr, dual_optimizer(LRO.Optimizer))
+set_attribute(lr, "solver", LRO.BurerMonteiro.Solver)
+set_attribute(lr, "sub_solver", SDPLRPlus.Solver)
+set_attribute(lr, "ranks", [15])
+set_attribute(lr, "maxmajoriter", 5)
+optimize!(lr)
 
 # Let's try with Percival:
 

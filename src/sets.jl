@@ -139,3 +139,7 @@ function MOI.Utilities.dot_coefficients(
     c[(n+1):end] = MOI.Utilities.dot_coefficients(x[(n+1):end], set.set)
     return c
 end
+
+function MOI.side_dimension(set::Union{SetDotProducts,LinearCombinationInSet})
+    return MOI.side_dimension(set.set)
+end

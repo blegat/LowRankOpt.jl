@@ -192,30 +192,76 @@ weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     (false, LRO.Optimizer),
     (true, dual_optimizer(LRO.Optimizer)),
 ]
-    model = maxcut(weights, opt)
+    @testset "Sparse ? $sparse" for sparse in [false, true]
+        model = maxcut(weights, opt; sparse)
+        set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
+        set_attribute(model, "sub_solver", Percival.PercivalSolver)
+        set_attribute(model, "ranks", [is_dual ? 2 : 3])
+        set_attribute(model, "verbose", 2)
+
+        set_attribute(model, "max_iter", 0)
+        optimize!(model)
+        @test termination_status(model) == MOI.ITERATION_LIMIT
+        diff_check(model)
+
+        set_attribute(model, "max_iter", 20)
+        optimize!(model)
+        @test termination_status(model) == MOI.LOCALLY_SOLVED
+        @test objective_value(model) ≈ 18 rtol = 1e-6
+        diff_check(model)
+        T = Float64
+        if is_dual
+            lro_model =
+                unsafe_backend(model).dual_problem.dual_model.model.optimizer.model
+            @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
+            V = sparse ? SparseVector{T,Int} : Vector{T}
+            @test lro_model.A isa
+                  Matrix{LowRankOpt.Factorization{Float64,V,LRO.One{Float64}}}
+        else
+            lro_model = unsafe_backend(model).model
+            @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
+            @test lro_model.A isa Matrix{SparseMatrixCSC{T,Int64}}
+            solver = unsafe_backend(model).solver
+            LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
+            @test solver.model.dim.ranks == [4]
+            @test solver.model.dim.offsets == [8, 24]
+            @test length(solver.model.dim) == 24
+            @test length(solver.model.meta.x0) == 24
+        end
+    end
+end;
+
+@testset "Trace" begin
+    T = Float64
+    model = Model(LRO.Optimizer)
+    cone = MOI.PositiveSemidefiniteConeTriangle(2)
+    factors = LRO.TriangleVectorization.(
+        LRO.positive_semidefinite_factorization.([T[1, 0], T[0, 1]]),
+    )
+    set = LRO.LinearCombinationInSet{LRO.WITH_SET}(cone, factors)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
-    set_attribute(model, "ranks", [is_dual ? 2 : 3])
-    set_attribute(model, "verbose", 2)
+    set_attribute(model, "ranks", [2])
+    @variable(model, x)
+    @variable(model, y)
+    @constraint(model, [-x, -x, 3, 1, 4] in set)
+    @constraint(model, x >= y)
 
     set_attribute(model, "max_iter", 0)
     optimize!(model)
     @test termination_status(model) == MOI.ITERATION_LIMIT
-    diff_check(model)
-
-    set_attribute(model, "max_iter", 20)
-    optimize!(model)
-    @test termination_status(model) == MOI.LOCALLY_SOLVED
-    @test objective_value(model) ≈ 18 rtol = 1e-6
-    diff_check(model)
-    if !is_dual
-        solver = unsafe_backend(model).solver
-        LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
-        @test solver.model.dim.ranks == [4]
-        @test solver.model.dim.offsets == [8, 24]
-        @test length(solver.model.dim) == 24
-        @test length(solver.model.meta.x0) == 24
-    end
+    nlp = unsafe_backend(model).model;
+    @test nlp.C isa Vector{SparseMatrixCSC{T,Int}}
+    @test nlp.C[1] == [3 1; 1 4]
+    @test nlp.A isa Matrix{
+        Union{
+            LRO.FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
+            LRO.Factorization{T,Matrix{T},Vector{T}},
+        },
+    }
+    @test nlp.A[1].factor == Matrix(I, 2, 2)
+    @test nlp.A[1].scaling == [1, 1]
+    @test nlp.A[2] === LRO.FillArrays.Zeros{T}(2, 2)
 end;
 
 @testset "ResultCount" begin
