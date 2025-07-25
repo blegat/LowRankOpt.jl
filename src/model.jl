@@ -374,7 +374,7 @@ _vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
 _vec(x::Base.ReshapedArray) = _vec(parent(x))
 
 function _add_jprod!(V, Jv::AbstractArray{T}, A) where {T}
-    return LinearAlgebra.mul!(Jv, A', _vec(V), one(T), one(T))
+    return LinearAlgebra.mul!(Jv, A', _vec(V), true, true)
 end
 
 function add_sub_jprod!(
