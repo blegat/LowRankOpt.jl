@@ -130,7 +130,12 @@ function NLPModels.obj(model::Model, x::AbstractVector)
     return NLPModels.obj(model.model, Solution(x, model.dim))
 end
 
-function NLPModels.grad!(model::Model, X::LRO.Factorization, G::LRO.Factorization, i::LRO.MatrixIndex)
+function NLPModels.grad!(
+    model::Model,
+    X::LRO.Factorization,
+    G::LRO.Factorization,
+    i::LRO.MatrixIndex,
+)
     C = NLPModels.grad(model.model, i)
     LinearAlgebra.mul!(G.factor, C, X.factor)
     G.factor .*= 2
@@ -200,7 +205,7 @@ function NLPModels.jtprod!(
     i::LRO.MatrixIndex,
 ) where {T}
     fill!(JtV.factor, zero(T))
-    add_jtprod!(model, X, y, JtV, i)
+    return add_jtprod!(model, X, y, JtV, i)
 end
 
 function NLPModels.jtprod!(
