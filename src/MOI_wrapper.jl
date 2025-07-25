@@ -158,7 +158,7 @@ end
 function _instantiate(A::_MatrixBuilder{T}) where {T}
     if isnothing(A.fact)
         if isempty(A.I)
-            return FillArrays.Zeros{T}(d, d)
+            return FillArrays.Zeros{T}(A.d, A.d)
         end
         return SparseArrays.sparse(A.I, A.J, A.V, A.d, A.d)
     else
@@ -176,7 +176,15 @@ function _instantiate(A::Array{_MatrixBuilder{T}}) where {T}
             size(A),
         )
     else
-        return _instantiate.(A)
+        I = _instantiate.(A)
+        if !isconcretetype(eltype(I))
+            # If we have for instance FillArrays.Zeros but also low-rank,
+            # the eltype is `AbstractMatrix` which is going to cause dynamic dispatch
+            # every time it is accessed. Instead, we want a small `Union` as Julia
+            # handles it much more efficiently, see https://julialang.org/blog/2018/08/union-splitting/
+            I = convert(Array{Union{unique(typeof.(I))...}}, I)
+        end
+        return I
     end
 end
 
