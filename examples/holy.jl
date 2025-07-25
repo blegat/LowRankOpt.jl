@@ -168,7 +168,6 @@ set_attribute(lr, "ranks", [15])
 set_attribute(lr, "maxmajoriter", 5)
 optimize!(lr)
 
-
 # Let's try with Percival:
 
 import Percival
