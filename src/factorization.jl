@@ -270,3 +270,100 @@ end
 function Base.getindex(v::TriangleVectorization, k::Int)
     return getindex(v.matrix, MOI.Utilities.inverse_trimap(k)...)
 end
+
+######## Dot product ########
+
+# We don't want the fallback as it would be terribly slow,
+# we prefer an error so that we can as a specialized method for this case
+function _dot_error(a, b)
+    error("`dot` is not implemented yet between `$(typeof(a))` and `$(typeof(b))`")
+end
+
+LinearAlgebra.dot(a::AbstractFactorization, b::AbstractFactorization) = _dot_error(a, b)
+LinearAlgebra.dot(a::AbstractFactorization, b::AbstractMatrix) = _dot_error(a, b)
+
+_abs2!!(a) = abs2(a)
+
+function _abs2!!(a::AbstractMatrix)
+    for i in eachindex(a)
+        a[i] = abs2(a[i])
+    end
+    return a
+end
+
+_lmul_diag!!(::FillArrays.Ones, VtU) = VtU
+_rmul_diag!!(VtU, ::FillArrays.Ones) = VtU
+
+function _rmul_diag!!(VtU, s::FillArrays.Fill)
+    return LinearAlgebra.rmul!(VtU, s.value)
+end
+
+function LinearAlgebra.dot(a::Factorization, b::Factorization)
+    # `⟨UΣU', VΛV'⟩ = ⟨ΣU'VΛ, U'V⟩`
+    VtU = a.factor' * b.factor
+    VtU = _abs2!!(VtU)
+    VtU = _lmul_diag!!(a.scaling, VtU)
+    VtU = _rmul_diag!!(VtU, b.scaling)
+    return sum(VtU)
+end
+
+function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
+    # `⟨XΛX', UΣV'⟩ = ⟨ΛX'V, X'UΣ⟩`
+    XtV = a.factor' * right_factor(b)
+    XtU = a.factor' * left_factor(b)
+    @. XtV *= XtU
+    XtV = _lmul_diag!!(a.scaling, XtV)
+    XtV = _rmul_diag!!(XtV, b.scaling)
+    return sum(XtV)
+end
+
+function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization)
+    return sum(_rmul_diag!!(left_factor(b)' * a * right_factor(b), b.scaling))
+end
+
+######## Matrix multiplication ########
+
+# `mul!(::Vector, ::SparseVector, ::Number, ::Number, ::Number)` does not have any specialized method
+# I cannot add one since it would be type piracy
+function _mul!(res::AbstractMatrix, x::SparseArrays.SparseVector, C::AbstractMatrix, α, β)
+    @assert isone(β)
+    @assert axes(res, 2) == axes(C, 2)
+    @assert axes(C, 1) == Base.OneTo(1)
+    for (row, γ) in zip(x.nzind, x.nzval)
+        for j in axes(res, 2)
+            res[row, j] += γ * C[1, j] * α
+        end
+    end
+end
+
+function _mul!(res::AbstractVector, x::SparseArrays.SparseVector, C::Number, α, β)
+    @assert isone(β)
+    @assert axes(res, 1) == axes(x, 1)
+    cst = C * α
+    for (row, γ) in zip(x.nzind, x.nzval)
+        res[row] += γ * cst
+    end
+end
+
+function _mul!(res::AbstractVecOrMat, A::AbstractFactorization, B::AbstractVecOrMat, α::Number, β::Number)
+    # TODO if `scaling` is `FillArrays.Fill`, we could just update `α`
+    C = _lmul_diag!!(A.scaling, right_factor(A)' * B)
+    lA = left_factor(A)
+    return _mul!(res, lA, C, α, β)
+end
+
+function LinearAlgebra.mul!(res::AbstractMatrix, A::AbstractFactorization, B::AbstractMatrix, α::Number, β::Number)
+    _mul!(res, A, B, α, β)
+end
+
+function LinearAlgebra.mul!(res::AbstractVector, A::AbstractFactorization, B::AbstractVector, α::Number, β::Number)
+    _mul!(res, A, B, α, β)
+end
+
+function LinearAlgebra.mul!(res::AbstractMatrix, B::AbstractMatrix, A::AbstractFactorization, α::Number, β::Number)
+    @show @__LINE__
+    # TODO if `scaling` is `FillArrays.Fill`, we could just update `α`
+    C = _rmul_diag!!(B * right_factor(A), A.scaling)
+    rA = right_factor(A)'
+    return _my_mul!(res', rA, C', α, β)
+end
