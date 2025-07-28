@@ -131,10 +131,10 @@ function MOI.Utilities.set_dot(
     # structure.
     return LinearAlgebra.dot(view(x, 1:n), view(y, 1:n)) +
            MOI.Utilities.set_dot(
-            view(x, (n+1):length(x)),
-            view(y, (n+1):length(y)),
-            set.set,
-        )
+        view(x, (n+1):length(x)),
+        view(y, (n+1):length(y)),
+        set.set,
+    )
 end
 
 function MOI.Utilities.dot_coefficients(
