@@ -10,6 +10,17 @@ using LinearAlgebra
 import LowRankOpt as LRO
 using FillArrays
 
+struct DummyFactorization <: LRO.AbstractFactorization{Float64,Matrix{Float64}} end
+
+function test_dot_error()
+    F = DummyFactorization()
+    err = ErrorException("`dot` is not implemented yet between `Main.TestSets.DummyFactorization` and `Main.TestSets.DummyFactorization`")
+    @test_throws err dot(F, F)
+    err = ErrorException("`dot` is not implemented yet between `Main.TestSets.DummyFactorization` and `Matrix{Float64}`")
+    @test_throws err dot(F, ones(2, 2))
+    return
+end
+
 function _test_dot(A, B)
     exp = dot(Matrix(A), Matrix(B))
     if !(A isa LRO.AsymmetricFactorization)
