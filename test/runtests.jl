@@ -6,6 +6,7 @@
 using Test
 
 include("sets.jl")
+include("factorization.jl")
 include("BurerMonteiro.jl")
 include("Bridges/runtests.jl")
 include("Test/runtests.jl")
