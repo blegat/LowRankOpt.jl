@@ -6,6 +6,7 @@
 module LowRankOpt
 
 import LinearAlgebra
+import SparseArrays
 import KrylovKit
 import MathOptInterface as MOI
 
