@@ -344,5 +344,7 @@ function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
 end
 
 function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization)
-    return LinearAlgebra.tr(_rmul_diag!!(left_factor(b)' * a * right_factor(b), b.scaling))
+    return LinearAlgebra.tr(
+        _rmul_diag!!(left_factor(b)' * a * right_factor(b), b.scaling),
+    )
 end
