@@ -343,18 +343,28 @@ function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
     return sum(XtV)
 end
 
-function _dot_mat_fact(a::AbstractMatrix, b::AbstractFactorization{T,<:AbstractVector}) where {T}
+function _dot_mat_fact(
+    a::AbstractMatrix,
+    b::AbstractFactorization{T,<:AbstractVector},
+) where {T}
     return b.scaling[] * LinearAlgebra.dot(left_factor(b), a, right_factor(b))
 end
 
-function _dot_mat_fact(a::AbstractMatrix{T}, b::AbstractFactorization{U,<:AbstractMatrix}) where {T,U}
+function _dot_mat_fact(
+    a::AbstractMatrix{T},
+    b::AbstractFactorization{U,<:AbstractMatrix},
+) where {T,U}
     res = zero(MA.promote_sum_mul(T, U))
     for i in axes(left_factor(b), 2)
-        res += b.scaling[i] * LinearAlgebra.dot(left_factor(b)[:, i], a, right_factor(b)[:, i])
+        res +=
+            b.scaling[i] *
+            LinearAlgebra.dot(left_factor(b)[:, i], a, right_factor(b)[:, i])
     end
     return res
 end
 
 # Need to redirect to `dot_mat_fact` before adding the two methods to avoid ambiguity
 # with `dot(::AbstractFactorization, ::AbstractFactorization)`
-LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization) = _dot_mat_fact(a, b)
+function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization)
+    return _dot_mat_fact(a, b)
+end
