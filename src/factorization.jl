@@ -343,8 +343,14 @@ function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
     return sum(XtV)
 end
 
-function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization)
-    return LinearAlgebra.tr(
-        _rmul_diag!!(left_factor(b)' * a * right_factor(b), b.scaling),
-    )
+function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization{T,<:AbstractVector}) where {T}
+    return b.scaling[] * LinearAlgebra.dot(left_factor(b), a, right_factor(b))
+end
+
+function LinearAlgebra.dot(a::AbstractMatrix{T}, b::AbstractFactorization{U,<:AbstractMatrix})
+    res = zero(MA.promote_sum_mul(T, U))
+    for i in axes(left_factor(b), 2)
+        res += b.scaling[i] * LinearAlgebra.dot(left_factor(b)[:, i], a, right_factor(b)[:, i])
+    end
+    return res
 end
