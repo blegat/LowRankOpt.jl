@@ -270,3 +270,59 @@ end
 function Base.getindex(v::TriangleVectorization, k::Int)
     return getindex(v.matrix, MOI.Utilities.inverse_trimap(k)...)
 end
+
+######## Dot product ########
+
+# We don't want the fallback as it would be terribly slow,
+# we prefer an error so that we can as a specialized method for this case
+function _dot_error(a, b)
+    return error(
+        "`dot` is not implemented yet between `$(typeof(a))` and `$(typeof(b))`",
+    )
+end
+
+function LinearAlgebra.dot(a::AbstractFactorization, b::AbstractFactorization)
+    return _dot_error(a, b)
+end
+function LinearAlgebra.dot(a::AbstractFactorization, b::AbstractMatrix)
+    return _dot_error(a, b)
+end
+
+_abs2!!(a) = abs2(a)
+
+function _abs2!!(a::AbstractMatrix)
+    for i in eachindex(a)
+        a[i] = abs2(a[i])
+    end
+    return a
+end
+
+_lmul_diag!!(::FillArrays.Ones, VtU) = VtU
+_rmul_diag!!(VtU, ::FillArrays.Ones) = VtU
+
+function _rmul_diag!!(VtU, s::FillArrays.Fill)
+    return LinearAlgebra.rmul!(VtU, s.value)
+end
+
+function LinearAlgebra.dot(a::Factorization, b::Factorization)
+    # `⟨UΣU', VΛV'⟩ = ⟨ΣU'VΛ, U'V⟩`
+    VtU = a.factor' * b.factor
+    VtU = _abs2!!(VtU)
+    VtU = _lmul_diag!!(a.scaling, VtU)
+    VtU = _rmul_diag!!(VtU, b.scaling)
+    return sum(VtU)
+end
+
+function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
+    # `⟨XΛX', UΣV'⟩ = ⟨ΛX'V, X'UΣ⟩`
+    XtV = a.factor' * right_factor(b)
+    XtU = a.factor' * left_factor(b)
+    @. XtV *= XtU
+    XtV = _lmul_diag!!(a.scaling, XtV)
+    XtV = _rmul_diag!!(XtV, b.scaling)
+    return sum(XtV)
+end
+
+function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization)
+    return sum(_rmul_diag!!(left_factor(b)' * a * right_factor(b), b.scaling))
+end
