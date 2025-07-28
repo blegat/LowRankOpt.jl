@@ -212,7 +212,8 @@ function test_maxcut(; is_dual, sparse, vector)
     diff_check(model)
     T = Float64
     if is_dual
-        unsafe_model = unsafe_backend(model).dual_problem.dual_model.model.optimizer
+        unsafe_model =
+            unsafe_backend(model).dual_problem.dual_model.model.optimizer
         lro_model = unsafe_model.model
         solver = unsafe_model.solver
         @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
@@ -230,8 +231,7 @@ function test_maxcut(; is_dual, sparse, vector)
             end
         end
         D = vector ? LRO.One{Float64} : LRO.Ones{Float64}
-        @test lro_model.A isa
-                Matrix{LowRankOpt.Factorization{Float64,F,D}}
+        @test lro_model.A isa Matrix{LowRankOpt.Factorization{Float64,F,D}}
     else
         lro_model = unsafe_backend(model).model
         @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}

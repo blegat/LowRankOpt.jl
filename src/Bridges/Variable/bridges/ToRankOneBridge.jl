@@ -29,7 +29,11 @@ function MOI.Bridges.Variable.supports_constrained_variable(
     return true
 end
 
-lower_dimensional_type(::Type{SparseArrays.SparseMatrixCSC{T,I}}) where {T,I} = SparseArrays.SparseVector{T,I}
+function lower_dimensional_type(
+    ::Type{SparseArrays.SparseMatrixCSC{T,I}},
+) where {T,I}
+    return SparseArrays.SparseVector{T,I}
+end
 lower_dimensional_type(::Type{Array{T,N}}) where {T,N} = Array{T,N-1}
 function lower_dimensional_type(::Type{LRO.Ones{T}}) where {T}
     return LRO.One{T}

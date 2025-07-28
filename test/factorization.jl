@@ -31,7 +31,9 @@ end
 
 function test_mul_error()
     F = LRO.positive_semidefinite_factorization(DummySparse())
-    err = ErrorException("Missing `_mul!` between `Vector{Float64}`, `Main.TestSets.DummySparse` and `Float64`")
+    err = ErrorException(
+        "Missing `_mul!` between `Vector{Float64}`, `Main.TestSets.DummySparse` and `Float64`",
+    )
     @test_throws err LinearAlgebra.mul!(rand(2), F, rand(2), true, true)
     return
 end
@@ -49,14 +51,17 @@ function _sample_matrices()
     x = collect(1:3)
     y = collect(4:6)
     for x in [collect(1:3), sparsevec([1, 3], [4, 5])]
-        append!(matrices, [
-            LRO.positive_semidefinite_factorization(x),
-            LRO.Factorization(x, FillArrays.Fill(5, tuple())),
-            LRO.positive_semidefinite_factorization([x y]),
-            LRO.Factorization([x y], FillArrays.Fill(-3, 2)),
-            LRO.Factorization([x y], [-2, 3]),
-            LRO.AsymmetricFactorization(x, y, FillArrays.Fill(-3, tuple())),
-        ])
+        append!(
+            matrices,
+            [
+                LRO.positive_semidefinite_factorization(x),
+                LRO.Factorization(x, FillArrays.Fill(5, tuple())),
+                LRO.positive_semidefinite_factorization([x y]),
+                LRO.Factorization([x y], FillArrays.Fill(-3, 2)),
+                LRO.Factorization([x y], [-2, 3]),
+                LRO.AsymmetricFactorization(x, y, FillArrays.Fill(-3, tuple())),
+            ],
+        )
     end
     return matrices
 end

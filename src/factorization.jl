@@ -459,13 +459,7 @@ function _mul!(
     end
 end
 
-function _mul!(
-    res::AbstractVecOrMat,
-    A::AbstractVecOrMat,
-    B,
-    α,
-    β,
-)
+function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, α, β)
     return LinearAlgebra.mul!(res, A, B, α, β)
 end
 
