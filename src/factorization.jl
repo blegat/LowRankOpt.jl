@@ -375,8 +375,16 @@ end
 # I cannot add one since it would be type piracy so we define our own `_mul!`
 # For this reason, I don't trust default fallbacks if `A` is sparse so I prefer erroring than
 # silent performance issues.
-function _mul!(res::AbstractVecOrMat, A::SparseArrays.AbstractSparseArray, B::AbstractVecOrMat, _, _)
-    error("Missing `_mul!` between `$(typeof(res))`, `$(typeof(A))` and `$(typeof(B))`")
+function _mul!(
+    res::AbstractVecOrMat,
+    A::SparseArrays.AbstractSparseArray,
+    B::AbstractVecOrMat,
+    _,
+    _,
+)
+    return error(
+        "Missing `_mul!` between `$(typeof(res))`, `$(typeof(A))` and `$(typeof(B))`",
+    )
 end
 
 function _mul!(
@@ -451,7 +459,13 @@ function _mul!(
     end
 end
 
-function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B::AbstractVecOrMat, α, β)
+function _mul!(
+    res::AbstractVecOrMat,
+    A::AbstractVecOrMat,
+    B::AbstractVecOrMat,
+    α,
+    β,
+)
     return LinearAlgebra.mul!(res, A, B, α, β)
 end
 
