@@ -242,11 +242,11 @@ function NLPModels.hprod!(
         Vi = V[i].factor
         C = NLPModels.grad(model.model, i)
         Hvi = HV[i].factor
-        Hvi .+= C * Vi
-        Hvi .*= 2obj_weight
+        LinearAlgebra.mul!(Hvi, C, Vi, true, true)
+        LinearAlgebra.rmul!(Hvi, 2obj_weight)
         for j in 1:model.meta.ncon
             A = NLPModels.jac(model.model, j, i)
-            Hvi .-= A * Vi .* (2y[j])
+            LinearAlgebra.mul!(Hvi, A, Vi, -2y[j], true)
         end
     end
     return Hv

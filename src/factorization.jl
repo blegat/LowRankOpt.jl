@@ -373,6 +373,12 @@ end
 
 # `mul!(::Vector, ::SparseVector, ::Number, ::Number, ::Number)` does not have any specialized method
 # I cannot add one since it would be type piracy so we define our own `_mul!`
+# For this reason, I don't trust default fallbacks if `A` is sparse so I prefer erroring than
+# silent performance issues.
+function _mul!(res::AbstractVecOrMat, A::SparseArrays.AbstractSparseArray, B::AbstractVecOrMat, _, _)
+    error("Missing `_mul!` between `$(typeof(res))`, `$(typeof(A))` and `$(typeof(B))`")
+end
+
 function _mul!(
     res::AbstractVector,
     x::SparseArrays.SparseVector,
@@ -445,7 +451,11 @@ function _mul!(
     end
 end
 
-function _mul!(
+function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B::AbstractVecOrMat, α, β)
+    return LinearAlgebra.mul!(res, A, B, α, β)
+end
+
+function _fact_mul!(
     res::AbstractVecOrMat,
     A::AbstractFactorization,
     B::AbstractVecOrMat,
@@ -459,7 +469,7 @@ function _mul!(
 end
 
 # We want the same implementation for the two following ones but we can't use
-# `AbstractVecOrMat` as it would give ambiguity so we redirect to `_mul!`
+# `AbstractVecOrMat` as it would give ambiguity so we redirect to `_fact_mul!`
 function LinearAlgebra.mul!(
     res::AbstractMatrix,
     A::AbstractFactorization,
@@ -467,7 +477,7 @@ function LinearAlgebra.mul!(
     α::Number,
     β::Number,
 )
-    return _mul!(res, A, B, α, β)
+    return _fact_mul!(res, A, B, α, β)
 end
 
 function LinearAlgebra.mul!(
@@ -477,5 +487,5 @@ function LinearAlgebra.mul!(
     α::Number,
     β::Number,
 )
-    return _mul!(res, A, B, α, β)
+    return _fact_mul!(res, A, B, α, β)
 end

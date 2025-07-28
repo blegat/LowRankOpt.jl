@@ -33,10 +33,10 @@ function _test_dot(A, B)
     end
 end
 
-function test_dot()
+function _sample_matrices()
     x = collect(1:3)
     y = collect(4:6)
-    matrices = [
+    return [
         LRO.positive_semidefinite_factorization(x),
         LRO.Factorization(x, FillArrays.Fill(5, tuple())),
         LRO.positive_semidefinite_factorization([x y]),
@@ -44,10 +44,32 @@ function test_dot()
         LRO.Factorization([x y], [-2, 3]),
         LRO.AsymmetricFactorization(x, y, FillArrays.Fill(-3, tuple())),
     ]
+end
+
+function test_dot()
+    matrices = _sample_matrices()
     for A in matrices
         for B in matrices
             _test_dot(A, B)
         end
+    end
+end
+
+function _test_mul(A, B)
+    res = ones(size(A, 1), size(B, 2))
+    LinearAlgebra.mul!(res, A, B)
+    expected = ones(size(res))
+    LinearAlgebra.mul!(expected, Array(A), Array(B))
+    @test res ≈ expected
+end
+
+function test_mul()
+    matrices = _sample_matrices()
+    for A in matrices
+        x = reverse(collect(axes(A, 2)))
+        _test_mul(A, x)
+        X = reshape(reverse(1:2size(A, 2)), size(A, 2), 2)
+        _test_mul(A, X)
     end
 end
 
