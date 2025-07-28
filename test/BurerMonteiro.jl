@@ -188,8 +188,9 @@ end;
 
 include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
 
+weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
+
 function test_maxcut(; is_dual, sparse, vector)
-    weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
     opt = LRO.Optimizer
     if is_dual
         opt = dual_optimizer(opt)
