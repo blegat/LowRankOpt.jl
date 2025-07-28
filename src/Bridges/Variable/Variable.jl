@@ -5,6 +5,7 @@
 
 module Variable
 
+import SparseArrays
 import MutableArithmetics as MA
 import MathOptInterface as MOI
 import LowRankOpt as LRO

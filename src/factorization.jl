@@ -378,7 +378,7 @@ end
 function _mul!(
     res::AbstractVecOrMat,
     A::SparseArrays.AbstractSparseArray,
-    B::AbstractVecOrMat,
+    B,
     _,
     _,
 )
@@ -462,7 +462,7 @@ end
 function _mul!(
     res::AbstractVecOrMat,
     A::AbstractVecOrMat,
-    B::AbstractVecOrMat,
+    B,
     α,
     β,
 )

@@ -7,10 +7,14 @@ module TestSets
 
 using Test
 using LinearAlgebra
+using SparseArrays
 import LowRankOpt as LRO
 using FillArrays
 
 struct DummyFactorization <: LRO.AbstractFactorization{Float64,Matrix{Float64}} end
+struct DummySparse <: SparseArrays.AbstractSparseVector{Float64,Int} end
+Base.size(::DummySparse) = (2,)
+Base.getindex(::DummySparse, ::Integer) = 1.0
 
 function test_dot_error()
     F = DummyFactorization()
@@ -25,6 +29,13 @@ function test_dot_error()
     return
 end
 
+function test_mul_error()
+    F = LRO.positive_semidefinite_factorization(DummySparse())
+    err = ErrorException("Missing `_mul!` between `Vector{Float64}`, `Main.TestSets.DummySparse` and `Float64`")
+    @test_throws err LinearAlgebra.mul!(rand(2), F, rand(2), true, true)
+    return
+end
+
 function _test_dot(A, B)
     exp = dot(Matrix(A), Matrix(B))
     if !(A isa LRO.AsymmetricFactorization)
@@ -34,16 +45,20 @@ function _test_dot(A, B)
 end
 
 function _sample_matrices()
+    matrices = Any[]
     x = collect(1:3)
     y = collect(4:6)
-    return [
-        LRO.positive_semidefinite_factorization(x),
-        LRO.Factorization(x, FillArrays.Fill(5, tuple())),
-        LRO.positive_semidefinite_factorization([x y]),
-        LRO.Factorization([x y], FillArrays.Fill(-3, 2)),
-        LRO.Factorization([x y], [-2, 3]),
-        LRO.AsymmetricFactorization(x, y, FillArrays.Fill(-3, tuple())),
-    ]
+    for x in [collect(1:3), sparsevec([1, 3], [4, 5])]
+        append!(matrices, [
+            LRO.positive_semidefinite_factorization(x),
+            LRO.Factorization(x, FillArrays.Fill(5, tuple())),
+            LRO.positive_semidefinite_factorization([x y]),
+            LRO.Factorization([x y], FillArrays.Fill(-3, 2)),
+            LRO.Factorization([x y], [-2, 3]),
+            LRO.AsymmetricFactorization(x, y, FillArrays.Fill(-3, tuple())),
+        ])
+    end
+    return matrices
 end
 
 function test_dot()
@@ -56,10 +71,14 @@ function test_dot()
 end
 
 function _test_mul(A, B)
-    res = ones(size(A, 1), size(B, 2))
-    LinearAlgebra.mul!(res, A, B)
+    if B isa AbstractVector
+        res = ones(length(B))
+    else
+        res = ones(size(A, 1), size(B, 2))
+    end
+    LinearAlgebra.mul!(res, A, B, 2.0, true)
     expected = ones(size(res))
-    LinearAlgebra.mul!(expected, Array(A), Array(B))
+    LinearAlgebra.mul!(expected, Array(A), Array(B), 2.0, true)
     @test res ≈ expected
 end
 
