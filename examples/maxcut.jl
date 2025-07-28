@@ -1,11 +1,19 @@
 using LinearAlgebra, SparseArrays, JuMP, LowRankOpt
 import LowRankOpt as LRO
 
-function e_i(T, i, n; sparse)
+function e_i(T, i, n; sparse, vector)
     if sparse
-        return sparsevec([i], [one(T)], n)
+        if vector
+            return sparsevec([i], [one(T)], n)
+        else
+            return SparseArrays.sparse([i], [1], [one(T)], n, 1)
+        end
     else
-        ei = zeros(T, n)
+        if vector
+            ei = zeros(T, n)
+        else
+            ei = zeros(T, n, 1)
+        end
         ei[i] = 1
         return ei
     end
@@ -16,20 +24,22 @@ function maxcut_objective(weights)
     return L / 4
 end
 
-function maxcut_set(N; sparse = true, T = Float64)
+function maxcut_set(N; sparse = true, T = Float64, vector = true)
     cone = MOI.PositiveSemidefiniteConeTriangle(N)
     factors = LRO.TriangleVectorization.(
-        LRO.positive_semidefinite_factorization.(e_i.(T, 1:N, N; sparse)),
+        LRO.positive_semidefinite_factorization.(
+            e_i.(T, 1:N, N; sparse, vector),
+        ),
     )
     return LRO.SetDotProducts{LRO.WITH_SET}(cone, factors)
 end
 
-function maxcut(weights, solver; sparse = true)
+function maxcut(weights, solver; sparse = true, vector = true)
     T = float(eltype(weights))
     N = LinearAlgebra.checksquare(weights)
     model = GenericModel{T}(solver)
     LRO.Bridges.add_all_bridges(backend(model).optimizer, T)
-    set = maxcut_set(N; sparse, T)
+    set = maxcut_set(N; sparse, T, vector)
     @variable(model, dot_prod_set[1:MOI.dimension(set)] in set)
     dot_prod = dot_prod_set[1:length(set.vectors)]
     X = reshape_vector(

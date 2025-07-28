@@ -1,7 +1,5 @@
 # Adapted from Loraine.jl
 
-import SparseArrays
-import LinearAlgebra
 import MutableArithmetics as MA
 import MathOptInterface as MOI
 import NLPModels
