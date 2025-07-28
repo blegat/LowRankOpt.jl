@@ -290,7 +290,7 @@ end
 
 _abs2!!(a) = abs2(a)
 
-function _abs2!!(a::AbstractMatrix)
+function _abs2!!(a::AbstractArray)
     for i in eachindex(a)
         a[i] = abs2(a[i])
     end
@@ -300,8 +300,28 @@ end
 _lmul_diag!!(::FillArrays.Ones, VtU) = VtU
 _rmul_diag!!(VtU, ::FillArrays.Ones) = VtU
 
+function _lmul_diag!!(s::FillArrays.Fill, VtU::Number)
+    return s.value * VtU
+end
+
+function _lmul_diag!!(s::FillArrays.Fill, VtU)
+    return LinearAlgebra.lmul!(s.value, VtU)
+end
+
+function _lmul_diag!!(s::AbstractVector, VtU)
+    return LinearAlgebra.lmul!(LinearAlgebra.Diagonal(s), VtU)
+end
+
+function _rmul_diag!!(VtU::Number, s::FillArrays.Fill)
+    return VtU * s.value
+end
+
 function _rmul_diag!!(VtU, s::FillArrays.Fill)
     return LinearAlgebra.rmul!(VtU, s.value)
+end
+
+function _rmul_diag!!(VtU, s::AbstractVector)
+    return LinearAlgebra.rmul!(VtU, LinearAlgebra.Diagonal(s))
 end
 
 function LinearAlgebra.dot(a::Factorization, b::Factorization)
@@ -317,12 +337,12 @@ function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
     # `⟨XΛX', UΣV'⟩ = ⟨ΛX'V, X'UΣ⟩`
     XtV = a.factor' * right_factor(b)
     XtU = a.factor' * left_factor(b)
-    @. XtV *= XtU
+    XtV = MA.broadcast!!(*, XtV, XtU)
     XtV = _lmul_diag!!(a.scaling, XtV)
     XtV = _rmul_diag!!(XtV, b.scaling)
     return sum(XtV)
 end
 
 function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization)
-    return sum(_rmul_diag!!(left_factor(b)' * a * right_factor(b), b.scaling))
+    return LinearAlgebra.tr(_rmul_diag!!(left_factor(b)' * a * right_factor(b), b.scaling))
 end
