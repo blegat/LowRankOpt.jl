@@ -193,7 +193,7 @@ function add_jtprod!(
 )
     for j in eachindex(y)
         A = NLPModels.jac(model.model, j, i)
-        JtV.factor .+= A * X.factor .* (2y[j])
+        LinearAlgebra.mul!(JtV.factor, A, X.factor, 2y[j], true)
     end
 end
 
