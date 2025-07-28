@@ -126,8 +126,15 @@ function MOI.Utilities.set_dot(
     set::Union{SetDotProducts{WITH_SET},LinearCombinationInSet{WITH_SET}},
 )
     n = length(set.vectors)
-    return LinearAlgebra.dot(x[1:n], y[1:n]) +
-           MOI.Utilities.set_dot(x[(n+1):end], y[(n+1):end], set.set)
+    # MOI defines a custom `view(::CanonicalVector, ::AbstractUnitRange)`
+    # so we should use `view` in order to keep the `CanonicalVector`
+    # structure.
+    return LinearAlgebra.dot(view(x, 1:n), view(y, 1:n)) +
+           MOI.Utilities.set_dot(
+        view(x, (n+1):length(x)),
+        view(y, (n+1):length(y)),
+        set.set,
+    )
 end
 
 function MOI.Utilities.dot_coefficients(
