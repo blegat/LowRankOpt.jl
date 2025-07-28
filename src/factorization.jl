@@ -368,3 +368,132 @@ end
 function LinearAlgebra.dot(a::AbstractMatrix, b::AbstractFactorization)
     return _dot_mat_fact(a, b)
 end
+
+######## Matrix multiplication ########
+
+# `mul!(::Vector, ::SparseVector, ::Number, ::Number, ::Number)` does not have any specialized method
+# I cannot add one since it would be type piracy so we define our own `_mul!`
+# For this reason, I don't trust default fallbacks if `A` is sparse so I prefer erroring than
+# silent performance issues.
+function _mul!(
+    res::AbstractVecOrMat,
+    A::SparseArrays.AbstractSparseArray,
+    B,
+    _,
+    _,
+)
+    return error(
+        "Missing `_mul!` between `$(typeof(res))`, `$(typeof(A))` and `$(typeof(B))`",
+    )
+end
+
+function _mul!(
+    res::AbstractVector,
+    x::SparseArrays.SparseVector,
+    C::Number,
+    α,
+    β,
+)
+    @assert isone(β)
+    @assert axes(res, 1) == axes(x, 1)
+    cst = C * α
+    for (row, γ) in zip(x.nzind, x.nzval)
+        res[row] += γ * cst
+    end
+end
+
+function _mul!(
+    res::AbstractMatrix,
+    x::SparseArrays.SparseVector,
+    C::LinearAlgebra.AdjOrTrans,
+    α,
+    β,
+)
+    @assert isone(β)
+    @assert axes(res, 2) == axes(C, 2)
+    for (row, γ) in zip(x.nzind, x.nzval)
+        cst = γ * α
+        for j in axes(res, 2)
+            res[row, j] += cst * C[j]
+        end
+    end
+end
+
+function _mul!(
+    res::AbstractVector,
+    F::SparseArrays.SparseMatrixCSC,
+    C::AbstractVector,
+    α,
+    β,
+)
+    @assert isone(β)
+    @assert axes(C, 1) == axes(F, 2)
+    @assert axes(res, 1) == axes(F, 1)
+    for col in axes(F, 2)
+        for i in SparseArrays.nzrange(F, col)
+            row = SparseArrays.rowvals(F)[i]
+            res[row] += SparseArrays.nonzeros(F)[i] * C[col] * α
+        end
+    end
+end
+
+function _mul!(
+    res::AbstractMatrix,
+    F::SparseArrays.SparseMatrixCSC,
+    C::AbstractMatrix,
+    α,
+    β,
+)
+    @assert isone(β)
+    @assert axes(res, 2) == axes(C, 2)
+    @assert axes(C, 1) == axes(F, 2)
+    @assert axes(res, 1) == axes(F, 1)
+    for col in axes(F, 2)
+        for i in SparseArrays.nzrange(F, col)
+            row = SparseArrays.rowvals(F)[i]
+            γ = SparseArrays.nonzeros(F)[i] * α
+            for j in axes(res, 2)
+                res[row, j] += γ * C[col, j]
+            end
+        end
+    end
+end
+
+function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, α, β)
+    return LinearAlgebra.mul!(res, A, B, α, β)
+end
+
+function _fact_mul!(
+    res::AbstractVecOrMat,
+    A::AbstractFactorization,
+    B::AbstractVecOrMat,
+    α::Number,
+    β::Number,
+)
+    # TODO if `scaling` is `FillArrays.Fill`, we could just update `α`
+    C = _lmul_diag!!(A.scaling, right_factor(A)' * B)
+    lA = left_factor(A)
+    return _mul!(res, lA, C, α, β)
+end
+
+# We want the same implementation for the two following ones but we can't use
+# `AbstractVecOrMat` as it would give ambiguity so we redirect to `_fact_mul!`
+function LinearAlgebra.mul!(
+    res::AbstractMatrix,
+    A::AbstractFactorization,
+    B::AbstractMatrix,
+    α::Number,
+    β::Number,
+)
+    return _fact_mul!(res, A, B, α, β)
+end
+
+function LinearAlgebra.mul!(
+    res::AbstractVector,
+    A::AbstractFactorization,
+    B::AbstractVector,
+    α::Number,
+    β::Number,
+)
+    return _fact_mul!(res, A, B, α, β)
+end
