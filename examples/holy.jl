@@ -3,13 +3,12 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
-using LinearAlgebra, SparseArrays
-using JuMP, Dualization
-import LowRankOpt as LRO
+using Dualization
+include("holy_model.jl")
 
 n = 30
 A = data(n)
-cl = classic(A)
+cl = holy_classic(A)
 
 # Let's start with SCS:
 
@@ -38,7 +37,7 @@ solve_time(cl)
 # as rank-1 with sparse factors of 2 entries instead of generic sparse
 # matrices of 4 entries ?
 
-lr = lowrank(A)
+lr = holy_lowrank(A)
 
 # If we try with SCS, we see no difference.
 # Since SCS does not support it, it is simply reformulated into the exact same problem.
