@@ -334,13 +334,13 @@ function LinearAlgebra.dot(a::Factorization, b::Factorization)
 end
 
 function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
-    # `⟨XΛX', UΣV'⟩ = ⟨ΛX'V, X'UΣ⟩`
-    XtV = right_factor(b)' * a.factor
-    XtU = left_factor(b)' * a.factor
-    XtV = MA.broadcast!!(*, XtV, XtU)
-    XtV = _lmul_diag!!(a.scaling, XtV)
-    XtV = _rmul_diag!!(XtV, b.scaling)
-    return sum(XtV)
+    # `⟨XΛX', UΣV'⟩ = ⟨U'XΛ, ΣV'X⟩`
+    UtX = left_factor(b)' * a.factor
+    VtX = right_factor(b)' * a.factor
+    UtX = MA.broadcast!!(*, UtX, VtX)
+    UtX = _rmul_diag!!(XtV, a.scaling)
+    UtX = _lmul_diag!!(b.scaling, XtV)
+    return sum(UtX)
 end
 
 function _dot_mat_fact(
