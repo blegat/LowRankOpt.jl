@@ -128,7 +128,8 @@ end
 
 function Base.getindex(s::_OuterProduct{true}, ::Type{LRO.ScalarIndex})
     # TODO Lazy
-    return 2 .* LRO.left_factor(s.x, LRO.ScalarIndex) .* LRO.left_factor(s.v, LRO.ScalarIndex)
+    return 2 .* LRO.left_factor(s.x, LRO.ScalarIndex) .*
+           LRO.left_factor(s.v, LRO.ScalarIndex)
 end
 
 function Base.getindex(s::Solution, mi::LRO.MatrixIndex)
@@ -151,22 +152,14 @@ function NLPModels.obj(model::Model, x::AbstractVector)
     return NLPModels.obj(model.model, Solution(x, model.dim))
 end
 
-function NLPModels.grad!(
-    model::Model{false},
-    _,
-    g,
-    ::Type{LRO.ScalarIndex},
-)
-    copyto!(g, NLPModels.grad(model.model, LRO.ScalarIndex))
+function NLPModels.grad!(model::Model{false}, _, g, ::Type{LRO.ScalarIndex})
+    return copyto!(g, NLPModels.grad(model.model, LRO.ScalarIndex))
 end
 
-function NLPModels.grad!(
-    model::Model{true},
-    x,
-    g,
-    ::Type{LRO.ScalarIndex},
-)
-    g .= 2 .* NLPModels.grad(model.model, LRO.ScalarIndex) .* LRO.left_factor(x, LRO.ScalarIndex)
+function NLPModels.grad!(model::Model{true}, x, g, ::Type{LRO.ScalarIndex})
+    g .=
+        2 .* NLPModels.grad(model.model, LRO.ScalarIndex) .*
+        LRO.left_factor(x, LRO.ScalarIndex)
     return g
 end
 
@@ -185,7 +178,12 @@ end
 function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     X = Solution(x, model.dim)
     G = Solution(g, model.dim)
-    NLPModels.grad!(model, X, LRO.left_factor(G, LRO.ScalarIndex), LRO.ScalarIndex)
+    NLPModels.grad!(
+        model,
+        X,
+        LRO.left_factor(G, LRO.ScalarIndex),
+        LRO.ScalarIndex,
+    )
     for i in LRO.matrix_indices(model.model)
         NLPModels.grad!(model, X[i], G[i], i)
     end
@@ -245,11 +243,7 @@ function NLPModels.jtprod!(
     JtV::AbstractVector,
     ::Type{LRO.ScalarIndex},
 )
-    LinearAlgebra.mul!(
-        JtV,
-        NLPModels.jac(model.model, LRO.ScalarIndex)',
-        y,
-    )
+    LinearAlgebra.mul!(JtV, NLPModels.jac(model.model, LRO.ScalarIndex)', y)
     JtV .*= 2 .* LRO.left_factor(X, LRO.ScalarIndex)
     return JtV
 end
@@ -286,7 +280,13 @@ function NLPModels.jtprod!(
 )
     X = Solution(x, model.dim)
     JtV = Solution(Jtv, model.dim)
-    NLPModels.jtprod!(model, X, y, LRO.left_factor(JtV, LRO.ScalarIndex), LRO.ScalarIndex)
+    NLPModels.jtprod!(
+        model,
+        X,
+        y,
+        LRO.left_factor(JtV, LRO.ScalarIndex),
+        LRO.ScalarIndex,
+    )
     for i in LRO.matrix_indices(model.model)
         NLPModels.jtprod!(model, X[i], y, JtV[i], i)
     end
@@ -302,7 +302,7 @@ function NLPModels.hprod!(
     ::Type{LRO.ScalarIndex};
     obj_weight,
 ) where {T}
-    fill!(Hv, zero(T))
+    return fill!(Hv, zero(T))
 end
 
 function NLPModels.hprod!(
@@ -318,7 +318,13 @@ function NLPModels.hprod!(
     @show NLPModels.grad(model.model, LRO.ScalarIndex)
     Hv .= 2obj_weight .* NLPModels.grad(model.model, LRO.ScalarIndex)
     @show size(NLPModels.jac(model.model, LRO.ScalarIndex))
-    LinearAlgebra.mul!(Hv, NLPModels.jac(model.model, LRO.ScalarIndex)', y, 2, true)
+    return LinearAlgebra.mul!(
+        Hv,
+        NLPModels.jac(model.model, LRO.ScalarIndex)',
+        y,
+        2,
+        true,
+    )
 end
 
 function NLPModels.hprod!(
@@ -331,7 +337,15 @@ function NLPModels.hprod!(
 ) where {S,T}
     V = Solution(v, model.dim)
     HV = Solution(Hv, model.dim)
-    NLPModels.hprod!(model, x, y, v, LRO.left_factor(HV, LRO.ScalarIndex), LRO.ScalarIndex; obj_weight)
+    NLPModels.hprod!(
+        model,
+        x,
+        y,
+        v,
+        LRO.left_factor(HV, LRO.ScalarIndex),
+        LRO.ScalarIndex;
+        obj_weight,
+    )
     for i in LRO.matrix_indices(model.model)
         Vi = V[i].factor
         C = NLPModels.grad(model.model, i)
@@ -351,7 +365,13 @@ struct Solver{S,T,CT,AT,ST} <: SolverCore.AbstractOptimizationSolver
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
 end
 
-function Solver(src::LRO.Model; sub_solver, ranks, square_scalars = false, kws...)
+function Solver(
+    src::LRO.Model;
+    sub_solver,
+    ranks,
+    square_scalars = false,
+    kws...,
+)
     model = Model{square_scalars}(src, ranks)
     solver = sub_solver(model; kws...)
     stats = SolverCore.GenericExecutionStats(model)
