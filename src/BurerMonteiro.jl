@@ -314,17 +314,16 @@ function NLPModels.hprod!(
     ::Type{LRO.ScalarIndex};
     obj_weight,
 ) where {T}
-    @show size(Hv)
-    @show NLPModels.grad(model.model, LRO.ScalarIndex)
-    Hv .= 2obj_weight .* NLPModels.grad(model.model, LRO.ScalarIndex)
-    @show size(NLPModels.jac(model.model, LRO.ScalarIndex))
-    return LinearAlgebra.mul!(
+    Hv .= obj_weight .* NLPModels.grad(model.model, LRO.ScalarIndex)
+    LinearAlgebra.mul!(
         Hv,
         NLPModels.jac(model.model, LRO.ScalarIndex)',
         y,
-        2,
+        true,
         true,
     )
+    Hv .*= -2 .* LRO.left_factor(v, LRO.ScalarIndex)
+    return Hv
 end
 
 function NLPModels.hprod!(
@@ -341,7 +340,7 @@ function NLPModels.hprod!(
         model,
         x,
         y,
-        v,
+        V,
         LRO.left_factor(HV, LRO.ScalarIndex),
         LRO.ScalarIndex;
         obj_weight,
