@@ -338,7 +338,7 @@ function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
     UtX = left_factor(b)' * a.factor
     VtX = right_factor(b)' * a.factor
     UtX = MA.broadcast!!(*, UtX, VtX)
-    UtX = _rmul_diag!!(XtV, a.scaling)
+    UtX = _rmul_diag!!(UtX, a.scaling)
     UtX = _lmul_diag!!(b.scaling, XtV)
     return sum(UtX)
 end
