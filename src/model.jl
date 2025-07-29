@@ -396,7 +396,7 @@ function add_jprod!(
     Jv::AbstractVector,
     buffer,
 )
-    return _add_jprod!(V, Jv, buffer...)
+    return _add_jprod!(V, Jv, buffer)
 end
 
 function add_jprod!(
