@@ -45,7 +45,8 @@ function test_holy(; is_dual, low_rank, square_scalars, n = 10)
 end
 
 @testset "Holy low-rank ? $low_rank" for low_rank in [false, true]
-    @testset "Square scalars ? $square_scalars" for square_scalars in [false, true]
+    @testset "Square scalars ? $square_scalars" for square_scalars in
+                                                    [false, true]
         test_holy(; is_dual = true, low_rank, square_scalars)
     end
 end;
