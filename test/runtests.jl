@@ -5,8 +5,15 @@
 
 using Test
 
-include("sets.jl")
-include("factorization.jl")
-include("BurerMonteiro.jl")
-include("Bridges/runtests.jl")
-include("Test/runtests.jl")
+files_to_exclude = ["runtests.jl"]
+for file in readdir(@__DIR__)
+    if isdir(joinpath(@__DIR__, file))
+        include(joinpath(@__DIR__, file, "runtests.jl"))
+    end
+    if !endswith(file, ".jl") || any(isequal(file), files_to_exclude)
+        continue
+    end
+    @testset "$(file)" begin
+        include(joinpath(@__DIR__, file))
+    end
+end

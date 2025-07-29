@@ -375,58 +375,69 @@ end
 # I cannot add one since it would be type piracy so we define our own `_mul!`
 # For this reason, I don't trust default fallbacks if `A` is sparse so I prefer erroring than
 # silent performance issues.
-function _mul!(
+function _add_mul!(
     res::AbstractVecOrMat,
     A::SparseArrays.AbstractSparseArray,
     B,
     _,
-    _,
 )
     return error(
-        "Missing `_mul!` between `$(typeof(res))`, `$(typeof(A))` and `$(typeof(B))`",
+        "Missing `_add_mul!` between `$(typeof(res))`, `$(typeof(A))` and `$(typeof(B))`",
     )
 end
 
 function _mul!(
+    res::AbstractVecOrMat{T},
+    A::SparseArrays.AbstractSparseArray,
+    B,
+    α,
+    β,
+) where {T}
+    if iszero(β)
+        # Since `A` is sparse, there may be some entries of `res` that we won't touch so
+        # we cannot use `LinearAlgebra.MulAddMul(α, β)` as it won't set them to zero.
+        # It's better to just set them to zero now and then use `_add_mul!`.
+        fill!(res, zero(T))
+    else
+        @assert isone(β)
+    end
+    return _add_mul!(res, A, B, α)
+end
+
+function _add_mul!(
     res::AbstractVector,
     x::SparseArrays.SparseVector,
     C::Number,
     α,
-    β,
 )
-    @assert isone(β)
     @assert axes(res, 1) == axes(x, 1)
-    cst = C * α
-    for (row, γ) in zip(x.nzind, x.nzval)
-        res[row] += γ * cst
+    γ = C * α
+    for (row, val) in zip(x.nzind, x.nzval)
+        res[row] += val * γ
     end
 end
 
-function _mul!(
+function _add_mul!(
     res::AbstractMatrix,
     x::SparseArrays.SparseVector,
     C::LinearAlgebra.AdjOrTrans,
     α,
-    β,
 )
-    @assert isone(β)
     @assert axes(res, 2) == axes(C, 2)
-    for (row, γ) in zip(x.nzind, x.nzval)
-        cst = γ * α
+    for (row, val) in zip(x.nzind, x.nzval)
+        γ = val * α
         for j in axes(res, 2)
-            res[row, j] += cst * C[j]
+            res[row, j] += γ * C[j]
         end
     end
 end
 
-function _mul!(
+function _add_mul!(
     res::AbstractVector,
     F::SparseArrays.SparseMatrixCSC,
     C::AbstractVector,
     α,
-    β,
 )
-    @assert isone(β)
     @assert axes(C, 1) == axes(F, 2)
     @assert axes(res, 1) == axes(F, 1)
     for col in axes(F, 2)
@@ -437,14 +448,12 @@ function _mul!(
     end
 end
 
-function _mul!(
+function _add_mul!(
     res::AbstractMatrix,
     F::SparseArrays.SparseMatrixCSC,
     C::AbstractMatrix,
     α,
-    β,
 )
-    @assert isone(β)
     @assert axes(res, 2) == axes(C, 2)
     @assert axes(C, 1) == axes(F, 2)
     @assert axes(res, 1) == axes(F, 1)
