@@ -42,6 +42,9 @@ function _dot(
     return result
 end
 
+_nnz(::FillArrays.Zeros) = 0
+_nnz(A::SparseArrays.SparseMatrixCSC) = SparseArrays.nnz(A)
+
 # The `jprod!` buffer is guaranteed to be the first argument of the tuple.
 # This assumption is used by Loraine.
 function buffer_for_schur_complement(model::Model{T}, κ) where {T}
@@ -51,7 +54,7 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
 
     for mat_idx in matrix_indices(model)
         i = mat_idx.value
-        nzA = [SparseArrays.nnz(model.A[i, j]) for j in 1:n]
+        nzA = [_nnz(model.A[i, j]) for j in 1:n]
         σ[:, i] = sortperm(nzA, rev = true)
         sorted = nzA[σ[:, i]]
 
@@ -89,7 +92,7 @@ function add_schur_complement!(
     for ii in axes(H, 1)
         i = σ[ii, ilmi]
         Ai = model.A[ilmi, i]
-        if SparseArrays.nnz(Ai) > 0
+        if _nnz(Ai) > 0
             if ii <= last_dense[ilmi]
                 LinearAlgebra.mul!(AW[ilmi], W, Ai)
                 LinearAlgebra.mul!(WAW[ilmi], AW[ilmi], W)
@@ -100,11 +103,11 @@ function add_schur_complement!(
                     H[i, j] = H[j, i]
                 end
             else
-                if SparseArrays.nnz(Ai) > 1
+                if _nnz(Ai) > 1
                     @inbounds for jj in ii:n
                         j = σ[jj, ilmi]
                         Aj = model.A[ilmi, j]
-                        if !iszero(SparseArrays.nnz(Aj))
+                        if !iszero(_nnz(Aj))
                             ttt = _dot(Ai, Aj, W)
                             H[i, j] += ttt
                             if i != j
@@ -112,7 +115,7 @@ function add_schur_complement!(
                             end
                         end
                     end
-                elseif SparseArrays.nnz(Ai) == 1
+                elseif _nnz(Ai) == 1
                     # A is symmetric
                     iiiiAi = jjjiAi = only(SparseArrays.rowvals(Ai))
                     vvvi = only(SparseArrays.nonzeros(Ai))
@@ -122,7 +125,7 @@ function add_schur_complement!(
                         # As we sort the matrices in decreasing `nnz` order,
                         # the rest of matrices is either zero or have only
                         # one entry
-                        if !iszero(SparseArrays.nnz(Ajjj))
+                        if !iszero(_nnz(Ajjj))
                             iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
                             vvvj = only(SparseArrays.nonzeros(Ajjj))
                             ttt =

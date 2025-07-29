@@ -241,15 +241,26 @@ function buffer_for_jtprod(model::Model)
     return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
 end
 
+_merge_sparsity(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC) = abs.(A) + abs.(B)
+_merge_sparsity(::FillArrays.Zeros, B::SparseArrays.SparseMatrixCSC) = B
+
 function buffer_for_jtprod(model::Model, mat_idx::MatrixIndex)
     if iszero(model.meta.ncon)
         return
     end
     # FIXME: at some point, switch to dense
-    return sum(abs.(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon)
+    return reduce(_merge_sparsity, model.A[mat_idx.value, j] for j in 1:model.meta.ncon)
 end
 
 # Computes `A .+= B * α`
+function _add_mul!(
+    A::SparseArrays.SparseMatrixCSC,
+    ::FillArrays.Zeros,
+    _,
+)
+    return A
+end
+
 function _add_mul!(
     A::SparseArrays.SparseMatrixCSC,
     B::SparseArrays.SparseMatrixCSC,
@@ -323,6 +334,19 @@ function NLPModels.cons!(
     return cx
 end
 
+function _add_vec!(_, _, _, _, offset, ::FillArrays.Zeros)
+    return offset
+end
+
+function _add_vec!(I, J, V, j, offset, A::SparseArrays.SparseMatrixCSC)
+    Ai, Av = SparseArrays.findnz(A[:])
+    K = offset .+ eachindex(Ai)
+    I[K] = Ai
+    J[K] .= j
+    V[K] = Av
+    return offset + length(Ai)
+end
+
 # `SparseMatrixCSC` is stored with an offset by column.
 # This means that getting view `view(A, :, I)` can be handles efficently,
 # these give `SparseMatrixCSCView` (if `I` is a `UnitRange`) and
@@ -332,19 +356,14 @@ end
 # of `A` for constraint indices and the rows of `A` for matrix indices.
 function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
     nnz = sum(1:model.meta.ncon; init = 0) do j
-        return SparseArrays.nnz(model.A[i.value, j])
+        return _nnz(model.A[i.value, j])
     end
     I = zeros(Int64, nnz)
     J = zeros(Int64, nnz)
     V = zeros(T, nnz)
     offset = 0
     for j in 1:model.meta.ncon
-        Ai, Av = SparseArrays.findnz(model.A[i.value, j][:])
-        K = offset .+ eachindex(Ai)
-        I[K] = Ai
-        J[K] .= j
-        V[K] = Av
-        offset += length(Ai)
+        offset = _add_vec!(I, J, V, j, offset, model.A[i.value, j])
     end
     A = SparseArrays.sparse(
         I,
