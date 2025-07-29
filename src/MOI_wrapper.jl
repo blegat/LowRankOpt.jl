@@ -129,7 +129,7 @@ function MOI.supports_constraint(
     return true
 end
 
-SOLVER_OPTIONS = ["solver", "sub_solver", "ranks"]
+const SOLVER_OPTIONS = ["solver", "sub_solver", "ranks", "square_scalars"]
 
 function MOI.optimize!(model::Optimizer)
     options = Dict{Symbol,Any}(

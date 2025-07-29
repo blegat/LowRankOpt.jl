@@ -5,9 +5,12 @@
 
 include("diff_check.jl")
 include(joinpath(dirname(@__DIR__), "examples", "holy_model.jl"))
-import Random
 
-function test_holy(; is_dual, low_rank, n = 10)
+import Random
+using Dualization
+import Percival
+
+function test_holy(; is_dual, low_rank, square_scalars, n = 10)
     opt = LRO.Optimizer
     if is_dual
         opt = dual_optimizer(opt)
@@ -24,6 +27,7 @@ function test_holy(; is_dual, low_rank, n = 10)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
     set_attribute(model, "ranks", [is_dual ? 2 : 3])
     set_attribute(model, "verbose", 2)
+    set_attribute(model, "square_scalars", square_scalars)
 
     set_attribute(model, "max_iter", 0)
     optimize!(model)
@@ -41,5 +45,7 @@ function test_holy(; is_dual, low_rank, n = 10)
 end
 
 @testset "Holy low-rank ? $low_rank" for low_rank in [false, true]
-    test_holy(; is_dual = true, low_rank)
+    @testset "Square scalars ? $square_scalars" for square_scalars in [false]
+        test_holy(; is_dual = true, low_rank, square_scalars)
+    end
 end

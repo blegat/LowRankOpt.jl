@@ -3,6 +3,8 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
+using Test
+
 function test_vecprod(f, len, J; tol = 1e-6)
     v = ones(len)
     @test f(v) ≈ J * v rtol = tol atol = tol

@@ -44,7 +44,7 @@ include("diff_check.jl")
     raw_sol = MOI.get(model, LRO.RawStatus(:solution))
     sol = MOI.get(model, LRO.Solution())
     @test raw_sol isa Vector{Float64}
-    @test sol isa LRO.BurerMonteiro.Solution{Float64,Vector{Float64}}
+    @test sol isa LRO.BurerMonteiro.Solution{false,Float64,Vector{Float64}}
     outer = LRO.BurerMonteiro._OuterProduct(sol, sol)
     @test length(outer) == length(sol)
     @test sprint(show, outer) == "_OuterProduct($sol, $sol)"
