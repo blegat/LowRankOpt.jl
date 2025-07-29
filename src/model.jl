@@ -362,9 +362,9 @@ struct JProdBuffer{T}
 end
 
 function buffer_for_jprod(model::Model{T}) where {T}
-    return JProdBuffer(
-        [buffer_for_jprod(model, i) for i in matrix_indices(model)],
-    )
+    return JProdBuffer([
+        buffer_for_jprod(model, i) for i in matrix_indices(model)
+    ],)
 end
 
 Base.getindex(buf::JProdBuffer, i::MatrixIndex) = buf.A[i.value]
