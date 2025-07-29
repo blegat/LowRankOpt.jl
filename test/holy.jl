@@ -48,4 +48,4 @@ end
     @testset "Square scalars ? $square_scalars" for square_scalars in [false]
         test_holy(; is_dual = true, low_rank, square_scalars)
     end
-end
+end;

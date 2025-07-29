@@ -331,6 +331,7 @@ function NLPModels.hprod!(
 ) where {S,T}
     V = Solution(v, model.dim)
     HV = Solution(Hv, model.dim)
+    NLPModels.hprod!(model, x, y, v, LRO.left_factor(HV, LRO.ScalarIndex), LRO.ScalarIndex; obj_weight)
     for i in LRO.matrix_indices(model.model)
         Vi = V[i].factor
         C = NLPModels.grad(model.model, i)
