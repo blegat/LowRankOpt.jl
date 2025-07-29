@@ -335,8 +335,8 @@ end
 
 function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
     # `⟨XΛX', UΣV'⟩ = ⟨ΛX'V, X'UΣ⟩`
-    XtV = a.factor' * right_factor(b)
-    XtU = a.factor' * left_factor(b)
+    XtV = right_factor(b)' * a.factor
+    XtU = left_factor(b)' * a.factor
     XtV = MA.broadcast!!(*, XtV, XtU)
     XtV = _lmul_diag!!(a.scaling, XtV)
     XtV = _rmul_diag!!(XtV, b.scaling)
