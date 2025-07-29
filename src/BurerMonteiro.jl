@@ -8,19 +8,21 @@ import MathOptInterface as MOI
 import NLPModelsJuMP
 import LowRankOpt as LRO
 
-struct Dimensions
+# `Dimensions{false}` means that nonnegative scalars have a zero lower bound
+# `Dimensions{true}` means that nonnegative scalars are the square of a free variable
+struct Dimensions{S}
     num_scalars::Int64
     side_dimensions::Vector{Int64}
     ranks::Vector{Int64}
     offsets::Vector{Int64}
 end
 
-function Dimensions(model::LRO.Model, ranks)
+function Dimensions{S}(model::LRO.Model, ranks) where {S}
     side_dimensions =
         [LRO.side_dimension(model, i) for i in LRO.matrix_indices(model)]
     num_scalars = LRO.num_scalars(model)
     offsets = num_scalars .+ [0; cumsum(side_dimensions .* ranks)]
-    return Dimensions(num_scalars, side_dimensions, ranks, offsets)
+    return Dimensions{S}(num_scalars, side_dimensions, ranks, offsets)
 end
 
 Base.length(d::Dimensions) = d.offsets[end]
@@ -33,14 +35,14 @@ function set_rank!(d::Dimensions, i::LRO.MatrixIndex, rank)
     return
 end
 
-mutable struct Model{T,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
-    model::LRO.Model{T,AT}
-    dim::Dimensions
+mutable struct Model{S,T,CT,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
+    model::LRO.Model{T,CT,AT}
+    dim::Dimensions{S}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     counters::NLPModels.Counters
-    function Model(model::LRO.Model{T,AT}, ranks) where {T,AT}
-        dim = Dimensions(model, ranks)
-        return new{T,AT}(
+    function Model{S}(model::LRO.Model{T,CT,AT}, ranks) where {S,T,CT,AT}
+        dim = Dimensions{S}(model, ranks)
+        return new{S,T,CT,AT}(
             model,
             dim,
             meta(dim, LRO.cons_constant(model)),
@@ -49,18 +51,23 @@ mutable struct Model{T,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
     end
 end
 
-function meta(dim, con::AbstractVector{T}) where {T}
+function meta(dim::Dimensions{S}, con::AbstractVector{T}) where {S,T}
     n = length(dim)
     ncon = length(con)
+    if S
+        lvar = fill(typemin(T), n)
+    else
+        lvar = [
+            fill(zero(T), dim.num_scalars);
+            fill(typemin(T), n - dim.num_scalars)
+        ]
+    end
     return NLPModels.NLPModelMeta(
         n;     #nvar
         ncon,
         x0 = rand(n),
         y0 = rand(ncon),
-        lvar = [
-            fill(zero(T), dim.num_scalars);
-            fill(typemin(T), n - dim.num_scalars)
-        ],
+        lvar,
         uvar = fill(typemax(T), n),
         lcon = con,
         ucon = con,
@@ -75,18 +82,18 @@ function set_rank!(model::Model, i::LRO.MatrixIndex, r)
     return
 end
 
-struct Solution{T,VT<:AbstractVector{T}} <: AbstractVector{T}
+struct Solution{S,T,VT<:AbstractVector{T}} <: AbstractVector{T}
     x::VT
-    dim::Dimensions
+    dim::Dimensions{S}
 end
 
-struct _OuterProduct{T,UT<:AbstractVector{T},VT<:AbstractVector{T}} <:
+struct _OuterProduct{S,T,UT<:AbstractVector{T},VT<:AbstractVector{T}} <:
        AbstractVector{T}
-    x::Solution{T,VT}
-    v::Solution{T,UT}
+    x::Solution{S,T,VT}
+    v::Solution{S,T,UT}
 end
 
-Base.eltype(::Type{<:Union{Solution{T},_OuterProduct{T}}}) where {T} = T
+Base.eltype(::Type{<:Union{Solution{S,T},_OuterProduct{S,T}}}) where {S,T} = T
 Base.eltype(x::Union{Solution,_OuterProduct}) = eltype(typeof(x))
 
 Base.size(s::Solution) = size(s.x)
@@ -102,12 +109,27 @@ function Base.show(io::IO, s::_OuterProduct)
     return
 end
 
-function Base.getindex(s::Solution, ::Type{LRO.ScalarIndex})
+function LRO.left_factor(s::Solution, ::Type{LRO.ScalarIndex})
     return view(s.x, Base.OneTo(s.dim.num_scalars))
 end
 
-function Base.getindex(s::_OuterProduct, ::Type{LRO.ScalarIndex})
+function Base.getindex(s::Solution{false}, ::Type{LRO.ScalarIndex})
+    return LRO.left_factor(s::Solution, LRO.ScalarIndex)
+end
+
+function Base.getindex(s::Solution{true,T}, ::Type{LRO.ScalarIndex}) where {T}
+    s = LRO.left_factor(s::Solution, LRO.ScalarIndex)
+    return MOI.Utilities.VectorLazyMap{T}(abs2, s)
+end
+
+function Base.getindex(s::_OuterProduct{false}, ::Type{LRO.ScalarIndex})
     return getindex(s.v, LRO.ScalarIndex)
+end
+
+function Base.getindex(s::_OuterProduct{true}, ::Type{LRO.ScalarIndex})
+    # TODO Lazy
+    return 2 .* LRO.left_factor(s.x, LRO.ScalarIndex) .*
+           LRO.left_factor(s.v, LRO.ScalarIndex)
 end
 
 function Base.getindex(s::Solution, mi::LRO.MatrixIndex)
@@ -120,7 +142,7 @@ function Base.getindex(s::Solution, mi::LRO.MatrixIndex)
     return LRO.positive_semidefinite_factorization(U)
 end
 
-function Base.getindex(s::_OuterProduct{T}, i::LRO.MatrixIndex) where {T}
+function Base.getindex(s::_OuterProduct{S,T}, i::LRO.MatrixIndex) where {S,T}
     U = s.x[i].factor
     V = s.v[i].factor
     return LRO.AsymmetricFactorization(U, V, FillArrays.Fill(T(2), size(U, 2)))
@@ -128,6 +150,17 @@ end
 
 function NLPModels.obj(model::Model, x::AbstractVector)
     return NLPModels.obj(model.model, Solution(x, model.dim))
+end
+
+function NLPModels.grad!(model::Model{false}, _, g, ::Type{LRO.ScalarIndex})
+    return copyto!(g, NLPModels.grad(model.model, LRO.ScalarIndex))
+end
+
+function NLPModels.grad!(model::Model{true}, x, g, ::Type{LRO.ScalarIndex})
+    g .=
+        2 .* NLPModels.grad(model.model, LRO.ScalarIndex) .*
+        LRO.left_factor(x, LRO.ScalarIndex)
+    return g
 end
 
 function NLPModels.grad!(
@@ -145,7 +178,12 @@ end
 function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     X = Solution(x, model.dim)
     G = Solution(g, model.dim)
-    copyto!(G[LRO.ScalarIndex], NLPModels.grad(model.model, LRO.ScalarIndex))
+    NLPModels.grad!(
+        model,
+        X,
+        LRO.left_factor(G, LRO.ScalarIndex),
+        LRO.ScalarIndex,
+    )
     for i in LRO.matrix_indices(model.model)
         NLPModels.grad!(model, X[i], G[i], i)
     end
@@ -184,6 +222,32 @@ function NLPModels.jprod!(
     return NLPModels.jprod!(model.model, X, _OuterProduct(X, V), Jv)
 end
 
+function NLPModels.jtprod!(
+    model::Model{false},
+    _,
+    y::AbstractVector,
+    JtV::AbstractVector,
+    ::Type{LRO.ScalarIndex},
+)
+    return LinearAlgebra.mul!(
+        JtV,
+        NLPModels.jac(model.model, LRO.ScalarIndex)',
+        y,
+    )
+end
+
+function NLPModels.jtprod!(
+    model::Model{true},
+    X,
+    y::AbstractVector,
+    JtV::AbstractVector,
+    ::Type{LRO.ScalarIndex},
+)
+    LinearAlgebra.mul!(JtV, NLPModels.jac(model.model, LRO.ScalarIndex)', y)
+    JtV .*= 2 .* LRO.left_factor(X, LRO.ScalarIndex)
+    return JtV
+end
+
 function add_jtprod!(
     model::Model,
     X::LRO.Factorization,
@@ -216,10 +280,12 @@ function NLPModels.jtprod!(
 )
     X = Solution(x, model.dim)
     JtV = Solution(Jtv, model.dim)
-    LinearAlgebra.mul!(
-        JtV[LRO.ScalarIndex],
-        NLPModels.jac(model.model, LRO.ScalarIndex)',
+    NLPModels.jtprod!(
+        model,
+        X,
         y,
+        LRO.left_factor(JtV, LRO.ScalarIndex),
+        LRO.ScalarIndex,
     )
     for i in LRO.matrix_indices(model.model)
         NLPModels.jtprod!(model, X[i], y, JtV[i], i)
@@ -228,22 +294,62 @@ function NLPModels.jtprod!(
 end
 
 function NLPModels.hprod!(
-    model::Model{T},
+    ::Model{false},
     ::AbstractVector,
+    y,
+    ::AbstractVector,
+    Hv::AbstractVector{T},
+    ::Type{LRO.ScalarIndex};
+    obj_weight,
+) where {T}
+    return fill!(Hv, zero(T))
+end
+
+function NLPModels.hprod!(
+    model::Model{true},
+    ::AbstractVector,
+    y,
+    v::AbstractVector,
+    Hv::AbstractVector{T},
+    ::Type{LRO.ScalarIndex};
+    obj_weight,
+) where {T}
+    Hv .= obj_weight .* NLPModels.grad(model.model, LRO.ScalarIndex)
+    LinearAlgebra.mul!(
+        Hv,
+        NLPModels.jac(model.model, LRO.ScalarIndex)',
+        y,
+        true,
+        true,
+    )
+    Hv .*= -2 .* LRO.left_factor(v, LRO.ScalarIndex)
+    return Hv
+end
+
+function NLPModels.hprod!(
+    model::Model{S,T},
+    x::AbstractVector,
     y,
     v::AbstractVector,
     Hv::AbstractVector;
     obj_weight = one(T),
-) where {T}
+) where {S,T}
     V = Solution(v, model.dim)
     HV = Solution(Hv, model.dim)
-    fill!(Hv, zero(eltype(Hv)))
+    NLPModels.hprod!(
+        model,
+        x,
+        y,
+        V,
+        LRO.left_factor(HV, LRO.ScalarIndex),
+        LRO.ScalarIndex;
+        obj_weight,
+    )
     for i in LRO.matrix_indices(model.model)
         Vi = V[i].factor
         C = NLPModels.grad(model.model, i)
         Hvi = HV[i].factor
-        LinearAlgebra.mul!(Hvi, C, Vi, true, true)
-        LinearAlgebra.rmul!(Hvi, 2obj_weight)
+        LinearAlgebra.mul!(Hvi, C, Vi, 2obj_weight, false)
         for j in 1:model.meta.ncon
             A = NLPModels.jac(model.model, j, i)
             LinearAlgebra.mul!(Hvi, A, Vi, -2y[j], true)
@@ -252,14 +358,20 @@ function NLPModels.hprod!(
     return Hv
 end
 
-struct Solver{T,ST} <: SolverCore.AbstractOptimizationSolver
-    model::Model{T}
+struct Solver{S,T,CT,AT,ST} <: SolverCore.AbstractOptimizationSolver
+    model::Model{S,T,CT,AT}
     solver::ST
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
 end
 
-function Solver(src::LRO.Model; sub_solver, ranks, kws...)
-    model = Model(src, ranks)
+function Solver(
+    src::LRO.Model;
+    sub_solver,
+    ranks,
+    square_scalars = false,
+    kws...,
+)
+    model = Model{square_scalars}(src, ranks)
     solver = sub_solver(model; kws...)
     stats = SolverCore.GenericExecutionStats(model)
     return Solver(model, solver, stats)

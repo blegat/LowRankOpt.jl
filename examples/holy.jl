@@ -79,23 +79,6 @@ solve_time(lr)
 # It is slower! This is because SDPLR does not support sparse factors so it
 # desified our factors of 2 entries!
 
-# Let's try with SDPLRPlus:
-
-import SDPLRPlus
-set_optimizer(cl, dual_optimizer(LRO.Optimizer))
-set_attribute(cl, "solver", LRO.BurerMonteiro.Solver)
-set_attribute(cl, "sub_solver", SDPLRPlus.Solver)
-set_attribute(cl, "ranks", [15])
-set_attribute(cl, "maxmajoriter", 5)
-optimize!(cl)
-
-set_optimizer(lr, dual_optimizer(LRO.Optimizer))
-set_attribute(lr, "solver", LRO.BurerMonteiro.Solver)
-set_attribute(lr, "sub_solver", SDPLRPlus.Solver)
-set_attribute(lr, "ranks", [15])
-set_attribute(lr, "maxmajoriter", 5)
-optimize!(lr)
-
 # Let's try with Percival:
 
 import Percival
@@ -110,4 +93,55 @@ objective_value(cl)
 solve_time(cl)
 
 # We would like to try now with `LowRankOpt` with sparse low-rank factors.
-# The feature is coming soon...
+
+set_optimizer(lr, dual_optimizer(LRO.Optimizer))
+set_attribute(lr, "solver", LRO.BurerMonteiro.Solver)
+set_attribute(lr, "sub_solver", Percival.PercivalSolver)
+set_attribute(lr, "ranks", [15])
+set_attribute(lr, "verbose", 2)
+@time optimize!(lr)
+objective_value(lr)
+solve_time(lr)
+
+# The nonnegative scalar variables are constrained to be nonnegative with a bound.
+# This is different than what SDPLR is doing which is reformulating them as the square
+# of a free variable. We can do the same with the `square_scalars` option.
+
+set_optimizer(lr, dual_optimizer(LRO.Optimizer))
+set_attribute(lr, "solver", LRO.BurerMonteiro.Solver)
+set_attribute(lr, "sub_solver", Percival.PercivalSolver)
+set_attribute(lr, "ranks", [15])
+set_attribute(lr, "verbose", 2)
+set_attribute(lr, "square_scalars", true)
+@time optimize!(lr)
+objective_value(lr)
+solve_time(lr)
+
+# We can use SDPLRPlus. The advantage is that it automatically adapts the rank
+# and exploit the fact that the lagrangian is a degree-4 polynomial to streamline
+# the linesearch.
+# We need to use `square_scalars` as SDPLRPlus only supports free variables.
+
+import SDPLRPlus
+set_optimizer(cl, dual_optimizer(LRO.Optimizer))
+set_attribute(cl, "solver", LRO.BurerMonteiro.Solver)
+set_attribute(cl, "sub_solver", SDPLRPlus.Solver)
+set_attribute(cl, "ranks", [15])
+set_attribute(cl, "maxmajoriter", 5)
+set_attribute(cl, "square_scalars", true)
+set_attribute(cl, "prior_trace_bound", 10.0)
+optimize!(cl)
+
+# We can speed it up with sparse low-rank constraints:
+
+set_optimizer(lr, dual_optimizer(LRO.Optimizer))
+set_attribute(lr, "solver", LRO.BurerMonteiro.Solver)
+set_attribute(lr, "sub_solver", SDPLRPlus.Solver)
+set_attribute(lr, "ranks", [15])
+set_attribute(lr, "maxmajoriter", 100)
+set_attribute(lr, "square_scalars", true)
+set_attribute(lr, "prior_trace_bound", 10.0)
+optimize!(lr)
+termination_status(lr)
+objective_value(lr)
+solve_time(lr)
