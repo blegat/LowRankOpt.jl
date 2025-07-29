@@ -359,26 +359,22 @@ end
 # We define a new type so that we can define a custom `getindex`
 struct JProdBuffer{T}
     A::Vector{SparseArrays.SparseMatrixCSC{T,Int64}}
-    cache::Vector{T}
 end
 
 function buffer_for_jprod(model::Model{T}) where {T}
-    return JProdBuffer(
-        [buffer_for_jprod(model, i) for i in matrix_indices(model)],
-        zeros(T, model.meta.ncon),
-    )
+    return JProdBuffer([
+        buffer_for_jprod(model, i) for i in matrix_indices(model)
+    ],)
 end
 
-Base.getindex(buf::JProdBuffer, i::MatrixIndex) = (buf.A[i.value], buf.cache)
+Base.getindex(buf::JProdBuffer, i::MatrixIndex) = buf.A[i.value]
 
 _vec(x::AbstractVector) = x
 _vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
 _vec(x::Base.ReshapedArray) = _vec(parent(x))
 
-function _add_jprod!(V, Jv, A, cache)
-    LinearAlgebra.mul!(cache, A', _vec(V))
-    Jv .+= cache
-    return Jv
+function _add_jprod!(V, Jv::AbstractArray{T}, A) where {T}
+    return LinearAlgebra.mul!(Jv, A', _vec(V), true, true)
 end
 
 function add_sub_jprod!(
@@ -387,11 +383,10 @@ function add_sub_jprod!(
     V::AbstractMatrix,
     Jv::AbstractVector,
     I,
-    buffer,
+    A,
 )
-    A, cache = buffer
     # `view(cache, I)` would be terribly slow, only the number of elements of `I` matter here
-    return _add_jprod!(V, Jv, view(A, :, I), view(cache, eachindex(I)))
+    return _add_jprod!(V, Jv, view(A, :, I))
 end
 
 function add_jprod!(
@@ -401,7 +396,7 @@ function add_jprod!(
     Jv::AbstractVector,
     buffer,
 )
-    return _add_jprod!(V, Jv, buffer...)
+    return _add_jprod!(V, Jv, buffer)
 end
 
 function add_jprod!(
