@@ -32,7 +32,7 @@ end
 function test_mul_error()
     F = LRO.positive_semidefinite_factorization(DummySparse())
     err = ErrorException(
-        "Missing `_mul!` between `Vector{Float64}`, `Main.TestSets.DummySparse` and `Float64`",
+        "Missing `_add_mul!` between `Vector{Float64}`, `Main.TestSets.DummySparse` and `Float64`",
     )
     @test_throws err LinearAlgebra.mul!(rand(2), F, rand(2), true, true)
     return
@@ -75,25 +75,38 @@ function test_dot()
     end
 end
 
-function _test_mul(A, B)
+function _test_mul(A, B, α, β)
     if B isa AbstractVector
         res = ones(length(B))
     else
         res = ones(size(A, 1), size(B, 2))
     end
-    LinearAlgebra.mul!(res, A, B, 2.0, true)
+    LinearAlgebra.mul!(res, A, B, α, β)
     expected = ones(size(res))
-    LinearAlgebra.mul!(expected, Array(A), Array(B), 2.0, true)
+    LinearAlgebra.mul!(expected, Array(A), Array(B), α, β)
     @test res ≈ expected
+end
+
+function _test_mul(A, B)
+    v = (false, true, 2.0)
+    @testset "α=$α" for α in v
+        @testset "β=$β" for β in v[1:2]
+            _test_mul(A, B, α, β)
+        end
+    end
 end
 
 function test_mul()
     matrices = _sample_matrices()
-    for A in matrices
+    @testset "$(nameof(typeof(A)))" for A in matrices
         x = reverse(collect(axes(A, 2)))
-        _test_mul(A, x)
+        @testset "$(typeof(x))" begin
+            _test_mul(A, x)
+        end
         X = reshape(reverse(1:2size(A, 2)), size(A, 2), 2)
-        _test_mul(A, X)
+        @testset "$(typeof(X))" begin
+            _test_mul(A, X)
+        end
     end
 end
 
