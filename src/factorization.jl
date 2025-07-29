@@ -404,7 +404,6 @@ function _mul!(
     return _add_mul!(res, A, B, α)
 end
 
-
 function _add_mul!(
     res::AbstractVector,
     x::SparseArrays.SparseVector,
