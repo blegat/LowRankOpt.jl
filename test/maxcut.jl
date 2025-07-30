@@ -122,17 +122,19 @@ function schur_test(model::LRO.Model{T}, w, κ) where {T}
     H = zeros(n, n)
     H = LRO.schur_complement!(model, w, H, schur_buffer)
     Hy = similar(y)
-    LRO.eval_schur_complement!(Hy, model, w, y, schur_buffer[1], jtprod_buffer)
+    LRO.eval_schur_complement!(model, w, y, Hy)
     @test Hy ≈ H * y
     for i in LRO.matrix_indices(model)
         Wi = @inferred w[i]
         _alloc_schur_complement(model, i, Wi, H, schur_buffer)
     end
     for i in LRO.matrix_indices(model)
-        ret = LRO.dual_cons!(jtprod_buffer, model, i, y)
+        ret = LRO.dual_cons!(model, y, i)
         @test ret isa SparseMatrixCSC
     end
-    @test LRO.dual_cons(model, LRO.ScalarIndex, y) isa SparseArrays.SparseVector
+    dcons = ones(model.dim.num_scalars)
+    LRO.dual_cons(model, y, dcons, LRO.ScalarIndex)
+    @test dcons ≈ model.d_lin - model.C_lin' * y
 end
 
 function schur_test(model::LRO.Model{T}, κ) where {T}

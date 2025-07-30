@@ -335,7 +335,19 @@ function MOI.copy_to(
         key in SOLVER_OPTIONS && key != "solver"
     )
     dest.solver = dest.options["solver"](dest.model; options...)
-    return MOI.Utilities.identity_index_map(src)
+    index_map = MOI.Utilities.identity_index_map(src)
+    vis_src = MOI.get(src, MOI.ListOfVariableIndices())
+    # Just to throw a nice error saying we don't support such attributes
+    # Filter them out since we already took care of them
+    no_obj = MOI.Utilities.ModelFilter(attr -> !(attr isa MOI.ObjectiveFunction || attr isa MOI.ObjectiveSense), src)
+    # We error for the rest. In the future, we should also take care of starting values
+    MOI.Utilities.pass_attributes(dest, no_obj, index_map)
+    MOI.Utilities.pass_attributes(dest, src, index_map, vis_src)
+    for (F, S) in constraint_types
+        cis_src = MOI.get(src, MOI.ListOfConstraintIndices{F,S}())
+        MOI.Utilities.pass_attributes(dest, src, index_map, cis_src)
+    end
+    return index_map
 end
 
 function MOI.copy_to(dest::Optimizer{T}, src::MOI.ModelLike) where {T}
@@ -462,9 +474,6 @@ end
 struct Solution <: MOI.AbstractModelAttribute end
 MOI.is_set_by_optimize(::Solution) = true
 
-function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::Solution)
-    return VectorizedSolution(solver.stats.solution, solver.model.dim)
-end
 MOI.get(optimizer::Optimizer, attr::Solution) = MOI.get(optimizer.solver, attr)
 
 function MOI.get(

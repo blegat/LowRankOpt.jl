@@ -230,26 +230,8 @@ end
 
 dual_obj(model::Model, y::AbstractVector) = LinearAlgebra.dot(model.b, y)
 
-function jtprod(model::Model, ::Type{ScalarIndex}, y::AbstractVector)
-    return model.C_lin' * y
-end
-
-function buffer_for_jtprod(model::Model)
-    if iszero(num_matrices(model))
-        return
-    end
-    return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
-end
-
-_merge_sparsity(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC) = abs.(A) + abs.(B)
-_merge_sparsity(::FillArrays.Zeros, B::SparseArrays.SparseMatrixCSC) = B
-
-function buffer_for_jtprod(model::Model, mat_idx::MatrixIndex)
-    if iszero(model.meta.ncon)
-        return
-    end
-    # FIXME: at some point, switch to dense
-    return reduce(_merge_sparsity, model.A[mat_idx.value, j] for j in 1:model.meta.ncon)
+function jtprod!(model::Model, y::AbstractVector, vJ::AbstractVector, ::Type{ScalarIndex})
+    return LinearAlgebra.mul!(vJ, model.C_lin', y)
 end
 
 # Computes `A .+= B * α`
@@ -280,42 +262,9 @@ function _add_mul!(
     end
 end
 
-_zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
-
-function jtprod!(buffer, model::Model, mat_idx::MatrixIndex, y)
-    _zero!(buffer)
-    for j in eachindex(y)
-        _add_mul!(buffer, model.A[mat_idx.value, j], y[j])
-    end
-    return buffer
-end
-
-function dual_cons(model::Model, ::Type{ScalarIndex}, y::AbstractVector)
-    return model.d_lin - jtprod(model, ScalarIndex, y)
-end
-
-function dual_cons!(
-    buffer,
-    model::Model,
-    mat_idx::MatrixIndex,
-    y::AbstractVector,
-)
-    i = mat_idx.value
-    return model.C[i] - jtprod!(buffer[i], model, mat_idx, y)
-end
-
-function NLPModels.jtprod!(
-    model::Model,
-    _::AbstractVector,
-    y::AbstractVector,
-    vJ::AbstractVector,
-    buffer,
-)
-    vJ[ScalarIndex] .= jtprod(model, ScalarIndex, y)
-    for mat_idx in matrix_indices(model)
-        i = mat_idx.value
-        vJ[mat_idx] .= jtprod!(buffer[i], model, mat_idx, y)
-    end
+function dual_cons!(model::Model, y::AbstractVector, res, ::Type{ScalarIndex})
+    copyto!(res, model.d_lin)
+    return LinearAlgebra.mul!(res, model.C_lin', y, -1, true)
 end
 
 NLPModels.grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
@@ -334,95 +283,11 @@ function NLPModels.cons!(
     return cx
 end
 
-function _add_vec!(_, _, _, _, offset, ::FillArrays.Zeros)
-    return offset
-end
-
-function _add_vec!(I, J, V, j, offset, A::SparseArrays.SparseMatrixCSC)
-    Ai, Av = SparseArrays.findnz(A[:])
-    K = offset .+ eachindex(Ai)
-    I[K] = Ai
-    J[K] .= j
-    V[K] = Av
-    return offset + length(Ai)
-end
-
-# `SparseMatrixCSC` is stored with an offset by column.
-# This means that getting view `view(A, :, I)` can be handles efficently,
-# these give `SparseMatrixCSCView` (if `I` is a `UnitRange`) and
-# `SparseMatrixCSCColumnSubset` otherwise.
-# In `schur.jl`, we therefore get a `SparseMatrixCSCColumnSubset`.
-# Since we want to use subsets of constraint indices, we use the columns
-# of `A` for constraint indices and the rows of `A` for matrix indices.
-function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
-    nnz = sum(1:model.meta.ncon; init = 0) do j
-        return _nnz(model.A[i.value, j])
-    end
-    I = zeros(Int64, nnz)
-    J = zeros(Int64, nnz)
-    V = zeros(T, nnz)
-    offset = 0
-    for j in 1:model.meta.ncon
-        offset = _add_vec!(I, J, V, j, offset, model.A[i.value, j])
-    end
-    A = SparseArrays.sparse(
-        I,
-        J,
-        V,
-        side_dimension(model, i)^2,
-        model.meta.ncon,
-    )
-    return A
-end
-
-# We define a new type so that we can define a custom `getindex`
-struct JProdBuffer{T}
-    A::Vector{SparseArrays.SparseMatrixCSC{T,Int64}}
-end
-
-function buffer_for_jprod(model::Model{T}) where {T}
-    return JProdBuffer([
-        buffer_for_jprod(model, i) for i in matrix_indices(model)
-    ],)
-end
-
-Base.getindex(buf::JProdBuffer, i::MatrixIndex) = buf.A[i.value]
-
-_vec(x::AbstractVector) = x
-_vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
-_vec(x::Base.ReshapedArray) = _vec(parent(x))
-
-function _add_jprod!(V, Jv::AbstractArray{T}, A) where {T}
-    return LinearAlgebra.mul!(Jv, A', _vec(V), true, true)
-end
-
-function add_sub_jprod!(
-    _::Model,
-    _::MatrixIndex,
-    V::AbstractMatrix,
-    Jv::AbstractVector,
-    I,
-    A,
-)
-    # `view(cache, I)` would be terribly slow, only the number of elements of `I` matter here
-    return _add_jprod!(V, Jv, view(A, :, I))
-end
-
-function add_jprod!(
-    ::Model,
-    ::MatrixIndex,
-    V::AbstractMatrix,
-    Jv::AbstractVector,
-    buffer,
-)
-    return _add_jprod!(V, Jv, buffer)
-end
-
 function add_jprod!(
     model::Model,
-    i::MatrixIndex,
     V::AbstractMatrix,
     Jv::AbstractVector,
+    i::MatrixIndex,
 )
     for j in 1:model.meta.ncon
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
@@ -438,7 +303,7 @@ function NLPModels.jprod!(
 ) where {N}
     LinearAlgebra.mul!(Jv, model.C_lin, v[ScalarIndex])
     for i in matrix_indices(model)
-        add_jprod!(model, i, v[i], Jv, getindex.(args, i)...)
+        add_jprod!(model, v[i], Jv, i)
     end
     return Jv
 end

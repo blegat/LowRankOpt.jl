@@ -66,38 +66,36 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
           for dim in model.msizes]
     WAW = copy.(AW)
 
-    return buffer_for_jprod(model), AW, WAW, σ, last_dense
+    return AW, WAW, σ, last_dense
 end
 
-function add_schur_complement!(model::Model, W, ::Type{MatrixIndex}, H, buffer)
+function add_schur_complement!(model::BufferedModelForSchur, W, ::Type{MatrixIndex}, H)
     for i in matrix_indices(model)
-        add_schur_complement!(model, i, W[i], H, buffer)
+        add_schur_complement!(model, i, W[i], H)
     end
     return H
 end
 
 # /!\ W needs to be symmetric
 function add_schur_complement!(
-    model::Model,
+    model::BufferedModelForSchur,
     mat_idx::MatrixIndex,
     W::AbstractMatrix{T},
     H,
-    buffer,
 ) where {T}
-    jprod_buffer, AW, WAW, σ, last_dense = buffer
-    buf = jprod_buffer[mat_idx]
+    AW, WAW, σ, last_dense = model.schur_buffer
     ilmi = mat_idx.value
     n = model.meta.ncon
 
     for ii in axes(H, 1)
         i = σ[ii, ilmi]
-        Ai = model.A[ilmi, i]
+        Ai = model.model.A[ilmi, i]
         if _nnz(Ai) > 0
             if ii <= last_dense[ilmi]
                 LinearAlgebra.mul!(AW[ilmi], W, Ai)
                 LinearAlgebra.mul!(WAW[ilmi], AW[ilmi], W)
                 I = view(σ, ii:n, ilmi)
-                add_sub_jprod!(model, mat_idx, WAW[ilmi], view(H, I, i), I, buf)
+                add_sub_jprod!(model, mat_idx, WAW[ilmi], view(H, I, i), I)
                 for jj in (ii+1):n
                     j = σ[jj, ilmi]
                     H[i, j] = H[j, i]
@@ -106,7 +104,7 @@ function add_schur_complement!(
                 if _nnz(Ai) > 1
                     @inbounds for jj in ii:n
                         j = σ[jj, ilmi]
-                        Aj = model.A[ilmi, j]
+                        Aj = model.model.A[ilmi, j]
                         if !iszero(_nnz(Aj))
                             ttt = _dot(Ai, Aj, W)
                             H[i, j] += ttt
@@ -121,7 +119,7 @@ function add_schur_complement!(
                     vvvi = only(SparseArrays.nonzeros(Ai))
                     @inbounds for jj in ii:n
                         j = σ[jj, ilmi]
-                        Ajjj = model.A[ilmi, j]
+                        Ajjj = model.model.A[ilmi, j]
                         # As we sort the matrices in decreasing `nnz` order,
                         # the rest of matrices is either zero or have only
                         # one entry
@@ -146,18 +144,18 @@ function add_schur_complement!(
     return H
 end
 
-function add_schur_complement!(model::Model, w, ::Type{ScalarIndex}, H)
-    H .+= model.C_lin * SparseArrays.spdiagm(w) * model.C_lin'
+function add_schur_complement!(model::BufferedModelForSchur, w, ::Type{ScalarIndex}, H)
+    H .+= model.model.C_lin * SparseArrays.spdiagm(w) * model.model.C_lin'
     return H
 end
 
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA_jW⟩
-function schur_complement!(model::Model, W::AbstractVector, H, buffer)
+function schur_complement!(model::BufferedModelForSchur, W::AbstractVector, H)
     fill!(H, zero(eltype(H)))
     if num_matrices(model) > 0
-        add_schur_complement!(model, W, MatrixIndex, H, buffer)
+        add_schur_complement!(model, W, MatrixIndex, H)
     end
     if num_scalars(model) > 0
         add_schur_complement!(model, W[ScalarIndex], ScalarIndex, H)
@@ -169,23 +167,20 @@ end
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
 function eval_schur_complement!(
-    result,
-    model::Model,
+    model::BufferedModelForSchur,
     W,
     y,
-    jprod_buffer,
-    jtprod_buffer,
+    result,
 )
     fill!(result, zero(eltype(result)))
     for i in matrix_indices(model)
         add_jprod!(
             model,
-            i,
-            W[i] * jtprod!(jtprod_buffer[i.value], model, i, y) * W[i],
+            W[i] * jtprod!(model, y, i) * W[i],
             result,
-            jprod_buffer[i],
+            i,
         )
     end
-    result .+= model.C_lin * (W[ScalarIndex] .* (model.C_lin' * y))
+    result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
     return result
 end

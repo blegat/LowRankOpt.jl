@@ -18,6 +18,7 @@ include("Test/Test.jl")
 include("Bridges/Bridges.jl")
 
 include("model.jl")
+include("buffer.jl")
 include("schur.jl")
 include("MOI_wrapper.jl")
 include("BurerMonteiro.jl")
