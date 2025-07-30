@@ -145,10 +145,13 @@ function buffer_for_jtprod(model::Model)
     return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
 end
 
-_merge_sparsity(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC) = abs.(A) + abs.(B)
+_merge_sparsity(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC) = A + B
 _merge_sparsity(::FillArrays.Zeros, B::SparseArrays.SparseMatrixCSC) = B
 _merge_sparsity(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros) = A
 _merge_sparsity(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
+
+_abs(A::SparseArrays.SparseMatrixCSC) = abs.(A)
+_abs(A::FillArrays.Zeros) = A
 
 function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
     if iszero(model.meta.ncon)
@@ -156,7 +159,10 @@ function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
         return FillArrays.Zeros{T}(d, d)
     end
     # FIXME: at some point, switch to dense
-    return reduce(_merge_sparsity, model.A[mat_idx.value, j] for j in 1:model.meta.ncon)
+    # /!\ If there is only one nonzero matrix and we didn't have `_abs`,
+    #     we would return an alias of that only matrix so that `_abs` has the
+    #     non-obvious role of avoid this as well as avoiding cancellations.
+    return reduce(_merge_sparsity, _abs(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon)
 end
 
 function NLPModels.jtprod!(
