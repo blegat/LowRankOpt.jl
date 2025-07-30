@@ -94,47 +94,48 @@ function ConvexSolver(model::LRO.Model)
     return ConvexSolver(model, stats)
 end
 
+function LRO.MOI.get(solver::ConvexSolver, ::LRO.Solution)
+    return LRO.VectorizedSolution(solver.stats.solution, solver.model.dim)
+end
+
 function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
     return
 end
 
-function _alloc_schur_complement(model, i, Wi, H, schur_buffer)
+function _alloc_schur_complement(model, i, Wi, H)
     if VERSION < v"1.11"
         return
     end
-    LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
-    @test 0 ==
-          @allocated LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
+    LRO.add_schur_complement!(model, i, Wi, H)
+    @test 0 == @allocated LRO.add_schur_complement!(model, i, Wi, H)
 end
 
-function schur_test(model::LRO.Model{T}, w, κ) where {T}
-    schur_buffer = LRO.buffer_for_schur_complement(model, κ)
-    jtprod_buffer = LRO.buffer_for_jtprod(model)
+function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     n = model.meta.ncon
     y = rand(T, n)
 
     Jv = similar(y)
     vJ = similar(w)
-    NLPModels.jprod!(model, w, w, Jv, schur_buffer[1])
-    NLPModels.jtprod!(model, w, y, vJ, jtprod_buffer)
+    NLPModels.jprod!(model, w, w, Jv)
+    NLPModels.jtprod!(model, w, y, vJ)
     @test dot(Jv, y) ≈ dot(vJ, w)
 
     H = zeros(n, n)
-    H = LRO.schur_complement!(model, w, H, schur_buffer)
+    H = LRO.schur_complement!(model, w, H)
     Hy = similar(y)
     LRO.eval_schur_complement!(model, w, y, Hy)
     @test Hy ≈ H * y
     for i in LRO.matrix_indices(model)
         Wi = @inferred w[i]
-        _alloc_schur_complement(model, i, Wi, H, schur_buffer)
+        _alloc_schur_complement(model, i, Wi, H)
     end
     for i in LRO.matrix_indices(model)
         ret = LRO.dual_cons!(model, y, i)
         @test ret isa SparseMatrixCSC
     end
-    dcons = ones(model.dim.num_scalars)
-    LRO.dual_cons(model, y, dcons, LRO.ScalarIndex)
-    @test dcons ≈ model.d_lin - model.C_lin' * y
+    dcons = ones(LRO.num_scalars(model))
+    LRO.dual_cons!(model, y, dcons, LRO.ScalarIndex)
+    @test dcons ≈ model.model.d_lin - model.model.C_lin' * y
 end
 
 function schur_test(model::LRO.Model{T}, κ) where {T}
@@ -143,7 +144,7 @@ function schur_test(model::LRO.Model{T}, κ) where {T}
     for i in LRO.matrix_indices(model)
         W[i] .= W[i] .+ W[i]'
     end
-    return schur_test(model, W, κ)
+    return schur_test(LRO.BufferedModelForSchur(model, κ), W)
 end
 
 @testset "ConvexSolver $T" for T in [Float32, Float64]

@@ -17,6 +17,7 @@ include("distance_to_set.jl")
 include("Test/Test.jl")
 include("Bridges/Bridges.jl")
 
+include("solution.jl")
 include("model.jl")
 include("buffer.jl")
 include("schur.jl")

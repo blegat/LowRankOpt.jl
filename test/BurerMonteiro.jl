@@ -182,7 +182,7 @@ end;
     )
     @test model.meta.ncon == 0
     @test LRO.norm_jac(model, LRO.MatrixIndex(1)) == 0
-    @test isnothing(LRO.buffer_for_jtprod(model, LRO.MatrixIndex(1)))
+    @test LRO.buffer_for_jtprod(model, LRO.MatrixIndex(1)) isa LRO.FillArrays.Zeros
 end;
 
 @testset "Fallback" begin
