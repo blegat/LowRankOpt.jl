@@ -339,7 +339,12 @@ function MOI.copy_to(
     vis_src = MOI.get(src, MOI.ListOfVariableIndices())
     # Just to throw a nice error saying we don't support such attributes
     # Filter them out since we already took care of them
-    no_obj = MOI.Utilities.ModelFilter(attr -> !(attr isa MOI.ObjectiveFunction || attr isa MOI.ObjectiveSense), src)
+    no_obj = MOI.Utilities.ModelFilter(
+        attr -> !(
+            attr isa MOI.ObjectiveFunction || attr isa MOI.ObjectiveSense
+        ),
+        src,
+    )
     # We error for the rest. In the future, we should also take care of starting values
     MOI.Utilities.pass_attributes(dest, no_obj, index_map)
     MOI.Utilities.pass_attributes(dest, src, index_map, vis_src)

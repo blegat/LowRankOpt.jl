@@ -1,4 +1,11 @@
-mutable struct BufferedModelForSchur{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T},JB,JTB,SB} <: AbstractModel{T}
+mutable struct BufferedModelForSchur{
+    T,
+    C<:AbstractMatrix{T},
+    A<:AbstractMatrix{T},
+    JB,
+    JTB,
+    SB,
+} <: AbstractModel{T}
     model::Model{T,C,A}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     jprod_buffer::JB
@@ -33,16 +40,28 @@ function dual_obj(model::BufferedModelForSchur, y::AbstractVector)
     return dual_obj(model.model, y)
 end
 
-NLPModels.grad(model::BufferedModelForSchur, ::Type{ScalarIndex}) = NLPModels.grad(model.model, ScalarIndex)
-NLPModels.grad(model::BufferedModelForSchur, i::MatrixIndex) = NLPModels.grad(model.model, i)
+function NLPModels.grad(model::BufferedModelForSchur, ::Type{ScalarIndex})
+    return NLPModels.grad(model.model, ScalarIndex)
+end
+function NLPModels.grad(model::BufferedModelForSchur, i::MatrixIndex)
+    return NLPModels.grad(model.model, i)
+end
 
 #########################
 ###### Constraints ######
 #########################
 
 cons_constant(model::BufferedModelForSchur) = cons_constant(model.model)
-NLPModels.jac(model::BufferedModelForSchur, j::Integer, ::Type{ScalarIndex}) = NLPModels.jac(model.model, j, ScalarIndex)
-norm_jac(model::BufferedModelForSchur, i::MatrixIndex) = norm_jac(model.model, i)
+function NLPModels.jac(
+    model::BufferedModelForSchur,
+    j::Integer,
+    ::Type{ScalarIndex},
+)
+    return NLPModels.jac(model.model, j, ScalarIndex)
+end
+function norm_jac(model::BufferedModelForSchur, i::MatrixIndex)
+    return norm_jac(model.model, i)
+end
 
 errors(model::BufferedModelForSchur, x; kws...) = errors(model.model, x; kws...)
 
@@ -134,8 +153,13 @@ end
 ###### Jᵀ product ######
 ########################
 
-function jtprod!(model::BufferedModelForSchur, y::AbstractVector, vJ::AbstractVector, ::Type{ScalarIndex})
-    jtprod!(model.model, y, vJ, ScalarIndex)
+function jtprod!(
+    model::BufferedModelForSchur,
+    y::AbstractVector,
+    vJ::AbstractVector,
+    ::Type{ScalarIndex},
+)
+    return jtprod!(model.model, y, vJ, ScalarIndex)
 end
 
 function buffer_for_jtprod(model::Model)
@@ -145,7 +169,12 @@ function buffer_for_jtprod(model::Model)
     return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
 end
 
-_merge_sparsity(A::SparseArrays.SparseMatrixCSC, B::SparseArrays.SparseMatrixCSC) = A + B
+function _merge_sparsity(
+    A::SparseArrays.SparseMatrixCSC,
+    B::SparseArrays.SparseMatrixCSC,
+)
+    return A + B
+end
 _merge_sparsity(::FillArrays.Zeros, B::SparseArrays.SparseMatrixCSC) = B
 _merge_sparsity(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros) = A
 _merge_sparsity(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
@@ -162,7 +191,10 @@ function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
     # /!\ If there is only one nonzero matrix and we didn't have `_abs`,
     #     we would return an alias of that only matrix so that `_abs` has the
     #     non-obvious role of avoid this as well as avoiding cancellations.
-    return reduce(_merge_sparsity, _abs(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon)
+    return reduce(
+        _merge_sparsity,
+        _abs(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon
+    )
 end
 
 function NLPModels.jtprod!(
@@ -181,11 +213,7 @@ _zero!(A::FillArrays.Zeros) = A
 _zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
 
 # Computes `A .+= B * α`
-function _add_mul!(
-    A::SparseArrays.SparseMatrixCSC,
-    ::FillArrays.Zeros,
-    _,
-)
+function _add_mul!(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros, _)
     return A
 end
 
@@ -220,7 +248,12 @@ function jtprod!(model::BufferedModelForSchur, y, mat_idx::MatrixIndex)
     return jtprod!(model.model, y, model.jtprod_buffer[mat_idx.value], mat_idx)
 end
 
-function dual_cons!(model::BufferedModelForSchur, y::AbstractVector, res, ::Type{ScalarIndex})
+function dual_cons!(
+    model::BufferedModelForSchur,
+    y::AbstractVector,
+    res,
+    ::Type{ScalarIndex},
+)
     return dual_cons!(model.model, y, res, ScalarIndex)
 end
 

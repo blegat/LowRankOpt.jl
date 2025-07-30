@@ -60,7 +60,8 @@ The fields of the `struct` as related to the arrays of the above formulation as 
 * The matrix ``C_i`` is given by `C[i]`.
 * The matrix ``A_{i,j}`` is given by `A[i,j]`.
 """
-mutable struct Model{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T}} <: AbstractModel{T}
+mutable struct Model{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T}} <:
+               AbstractModel{T}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     dim::Dimensions
     C::Vector{C}
@@ -152,7 +153,12 @@ end
 
 dual_obj(model::Model, y::AbstractVector) = LinearAlgebra.dot(model.b, y)
 
-function jtprod!(model::Model, y::AbstractVector, vJ::AbstractVector, ::Type{ScalarIndex})
+function jtprod!(
+    model::Model,
+    y::AbstractVector,
+    vJ::AbstractVector,
+    ::Type{ScalarIndex},
+)
     return LinearAlgebra.mul!(vJ, model.C_lin', y)
 end
 

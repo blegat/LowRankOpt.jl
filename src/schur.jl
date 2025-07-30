@@ -69,7 +69,12 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
     return AW, WAW, σ, last_dense
 end
 
-function add_schur_complement!(model::BufferedModelForSchur, W, ::Type{MatrixIndex}, H)
+function add_schur_complement!(
+    model::BufferedModelForSchur,
+    W,
+    ::Type{MatrixIndex},
+    H,
+)
     for i in matrix_indices(model)
         add_schur_complement!(model, i, W[i], H)
     end
@@ -144,7 +149,12 @@ function add_schur_complement!(
     return H
 end
 
-function add_schur_complement!(model::BufferedModelForSchur, w, ::Type{ScalarIndex}, H)
+function add_schur_complement!(
+    model::BufferedModelForSchur,
+    w,
+    ::Type{ScalarIndex},
+    H,
+)
     H .+= model.model.C_lin * SparseArrays.spdiagm(w) * model.model.C_lin'
     return H
 end
@@ -166,20 +176,10 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
-function eval_schur_complement!(
-    model::BufferedModelForSchur,
-    W,
-    y,
-    result,
-)
+function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
     fill!(result, zero(eltype(result)))
     for i in matrix_indices(model)
-        add_jprod!(
-            model,
-            W[i] * jtprod!(model, y, i) * W[i],
-            result,
-            i,
-        )
+        add_jprod!(model, W[i] * jtprod!(model, y, i) * W[i], result, i)
     end
     result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
     return result
