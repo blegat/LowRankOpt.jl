@@ -29,6 +29,9 @@ function test_zero_Ai()
     for A in b.model.A
         @test buf.jtprod_buffer[] !== A
     end
+    for κ in 0:5
+        schur_test(model, κ)
+    end
 end
 
 function runtests()

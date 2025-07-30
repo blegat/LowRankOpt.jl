@@ -4,7 +4,9 @@
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
 using Test
+using LinearAlgebra
 import SolverCore
+using Dualization
 import LowRankOpt as LRO
 
 function _test_vecprod(f, len, J; tol = 1e-6)
@@ -76,20 +78,23 @@ function _backend(model)
     return b
 end
 
-function diff_check(model)
-    b = _backend(model)
-    bm = b.solver.model
-    x = rand(bm.meta.nvar)
+function diff_check(model::NLPModels.AbstractNLPModel)
+    x = rand(model.meta.nvar)
     @testset "Gradient" begin
-        grad_check(bm, x)
-        @test isempty(NLPModelsTest.gradient_check(bm; x))
+        grad_check(model, x)
+        @test isempty(NLPModelsTest.gradient_check(model; x))
     end
     @testset "Jacobian" begin
-        jac_check(bm, x)
+        jac_check(model, x)
     end
     @testset "Hessian" begin
-        hess_check(bm, x)
+        hess_check(model, x)
     end
+end
+
+function diff_check(model::JuMP.AbstractModel)
+    b = _backend(model)
+    diff_check(b.solver.model)
 end
 
 struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
@@ -139,18 +144,27 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     end
     for i in LRO.matrix_indices(model)
         ret = LRO.dual_cons!(model, y, i)
-        @test ret isa SparseMatrixCSC
+        @test ret isa SparseArrays.SparseMatrixCSC
     end
     dcons = ones(LRO.num_scalars(model))
     LRO.dual_cons!(model, y, dcons, LRO.ScalarIndex)
     @test dcons ≈ model.model.d_lin - model.model.C_lin' * y
 end
 
-function schur_test(model::LRO.Model{T}, κ) where {T}
+function schur_test(model::LRO.BufferedModelForSchur{T}) where {T}
     w = rand(T, model.meta.nvar)
-    W = LRO.VectorizedSolution(w, model.dim)
+    W = LRO.VectorizedSolution(w, model.model.dim)
     for i in LRO.matrix_indices(model)
         W[i] .= W[i] .+ W[i]'
     end
-    return schur_test(LRO.BufferedModelForSchur(model, κ), W)
+    schur_test(model, W)
+end
+
+function schur_test(model::LRO.Model, κ)
+    return schur_test(LRO.BufferedModelForSchur(model, κ))
+end
+
+function schur_test(model::JuMP.AbstractModel, κ)
+    b = _backend(model)
+    schur_test(b.solver.model, κ)
 end
