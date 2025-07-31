@@ -201,7 +201,7 @@ function NLPModels.jtprod!(
 )
     jtprod!(model, y, vJ[ScalarIndex], ScalarIndex)
     for mat_idx in matrix_indices(model)
-        vJ[mat_idx] .= jtprod!(model, y, mat_idx)
+        vJ[mat_idx] .= unsafe_jtprod(model, y, mat_idx)
     end
 end
 
@@ -228,22 +228,29 @@ function _add_mul!(
             while SparseArrays.rowvals(A)[it_A[1]] < row_B
                 it_A = iterate(range_A, it_A[2])
             end
+            # By construction, since we constructed `A` with `_merge_sparsity`
             @assert row_B == SparseArrays.rowvals(A)[it_A[1]]
             SparseArrays.nonzeros(A)[it_A[1]] += SparseArrays.nonzeros(B)[k] * α
         end
     end
 end
 
-function jtprod!(model::Model, y, buffer, mat_idx::MatrixIndex)
+"""
+    unsafe_jtprod(model::BufferedModelForSchur, y, i::MatrixIndex)
+
+Return the product between the sub-Jacobian associated to `i` and `y`:
+`∑ⱼ Aᵢⱼ yⱼ`. This function is **unsafe** because it returns
+an alias to an internal buffer `model.jtprod_buffer[i.value]` that is
+going to be reused whenever `unsafe_jprod` or `unsafe_dual_cons` is called
+is called for the same `i`.
+"""
+function unsafe_jtprod(model::BufferedModelForSchur, y, i::MatrixIndex)
+    buffer = model.jtprod_buffer[i.value]
     _zero!(buffer)
     for j in eachindex(y)
-        _add_mul!(buffer, model.A[mat_idx.value, j], y[j])
+        _add_mul!(buffer, model.model.A[i.value, j], y[j])
     end
     return buffer
-end
-
-function jtprod!(model::BufferedModelForSchur, y, mat_idx::MatrixIndex)
-    return jtprod!(model.model, y, model.jtprod_buffer[mat_idx.value], mat_idx)
 end
 
 function dual_cons!(
@@ -260,14 +267,31 @@ end
 
 # Note that we can't use `-` because of https://github.com/JuliaArrays/FillArrays.jl/issues/412
 _sub(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
-_sub(A::AbstractArray, ::FillArrays.Zeros) = copy(A)
-_sub(::FillArrays.Zeros, B::AbstractArray) = -B
+# /!\ We don't copy, we warn about it in the docstring.
+_sub(A::AbstractArray, ::FillArrays.Zeros) = A
+function _sub(::FillArrays.Zeros, B::AbstractArray{T}) where {T}
+    # `B` is an alias to an entry of `jtprod_buffer`
+    # so it is safe to modify.
+    # The fact that we may return an alias to this matrix
+    # since we don't copy is warned in the docstring/`
+    LinearAlgebra.rmul!(B, -one(T))
+    return B
+end
 _sub(A::AbstractArray, B::AbstractArray) = A - B
 
-function dual_cons!(
+"""
+    unsafe_dual_cons(model::BufferedModelForSchur, y, i::MatrixIndex)
+
+Return value of the dual constraint of index `i`:
+`C - ∑ⱼ Aᵢⱼ yⱼ`. This function is **unsafe** because it may return
+an alias to the matrix `C` or the internal buffer
+`model.jtprod_buffer[i.value]`. So throw away the reference after using
+the returned value and don't call any mutating operation on it.
+"""
+function unsafe_dual_cons(
     model::BufferedModelForSchur,
     y::AbstractVector,
     i::MatrixIndex,
 )
-    return _sub(model.model.C[i.value], jtprod!(model, y, i))
+    return _sub(model.model.C[i.value], unsafe_jtprod(model, y, i))
 end
