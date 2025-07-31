@@ -4,28 +4,102 @@
 |:----------------:|
 | [![Build Status][build-img]][build-url] [![Codecov branch][codecov-img]][codecov-url] |
 
-Extends MathOptInterface (MOI) to low-rank constraints.
+Semidefinite solvers solve a problem of the form
+```math
+\begin{aligned}
+\min {} & \langle C, X \rangle &
+\max {} & b^\top y
+\\
+\text{s.t. } & \langle A_j, X \rangle = b_j
+\qquad
+\forall j \in \{1,\ldots,m\} &
+\text{s.t. } & \sum_{j=1}^m y_j A_j \preceq C
+\qquad
+\forall i \in \{1,\ldots,\text{nlmi}\}
+\\
+& X \succeq 0
+\end{aligned}
+```
+This package decouples the implementation of such solvers in two parts:
+
+1. The computation of the scalar products between the solution $X$ and the matrices $C$ and $A_j$ as well as
+   the computation $\sum_{j=1}^m y_j A_j$
+2. The implementation of an iterative solver using the first part as callback.
+
+This package implements the first part and interfaces with a solver implementing the second part using
+[NLPModels](https://jso.dev/NLPModels.jl), slightly extended for the specifics of semidefinite programs.
+It also implements the Burer-Monteiro approach that gets rid of the positive semidefinite constraints
+which allows using any existing [NLPModels](https://jso.dev/NLPModels.jl) solver for part 2.
+For the part 1., it is crucial to exploit the specific structure of the matrices $C$, $A_j$ and $X$ for efficiency.
+For instance, $X$ is often block-diagonal with some blocks being diagonal.
+Second, the matrices $C$ and $A_j$ may be dense ($(O(n^2))$ nonzeros), sparse ($(O(n))$ nonzeros), very sparse ($(O(n))$ nonzeros), zero.
+These matrices may also be low-rank and the low-rank factors could be vectors or matrices that could again have different sparsity characteristics.
+When using Burer-Monteiro, the blocks of the matrix $X$ are also low-rank.
+Having to deal with all those possibilities when implementing the part 2. makes it challenging to write
+an SDP solver. The goal of this package is to significantly simplify the implementation of new
+SDP solver by taking care of part 1.
+
+This packages also extends MathOptInterface (MOI) to low-rank constraints. This allow the user to
+specify low-rank blocks of the $A_j$ matrices explicitly.
+For a benchmark on the importance of low-rank constraints, see "Why you should stop using the monomial basis" at [JuMP-dev 2024](https://jump.dev/meetings/jumpdev2024/) : [slides](https://jump.dev/assets/jump-dev-workshops/2024/legat.html) [video](https://youtu.be/CGPHaHxCG2w)
+This package started as an [MOI issue](https://github.com/jump-dev/MathOptInterface.jl/issues/2197) and [MOI PR](https://github.com/jump-dev/MathOptInterface.jl/pull/2198).
 
 [build-img]: https://github.com/blegat/LowRankOpt.jl/actions/workflows/ci.yml/badge.svg?branch=main
 [build-url]: https://github.com/blegat/LowRankOpt.jl/actions?query=workflow%3ACI
 [codecov-img]: https://codecov.io/gh/blegat/LowRankOpt.jl/branch/main/graph/badge.svg
 [codecov-url]: https://codecov.io/gh/blegat/LowRankOpt.jl/branch/main
 
-See "Why you should stop using the monomial basis" at [JuMP-dev 2024](https://jump.dev/meetings/jumpdev2024/) : [slides](https://jump.dev/assets/jump-dev-workshops/2024/legat.html) [video](https://youtu.be/CGPHaHxCG2w)
-
-Started as an [MOI issue](https://github.com/jump-dev/MathOptInterface.jl/issues/2197) and [MOI PR](https://github.com/jump-dev/MathOptInterface.jl/pull/2198).
-
 ## Use with JuMP
 
-To use LowRankOpt with [JuMP](https://github.com/jump-dev/JuMP.jl), use
-add its bridge to your model with:
+To use the Burer-Monteiro solver, choose a [JSO](https://jso.dev/) solver, say [Percival](https://github.com/JuliaSmoothOptimizers/Percival.jl),
+and then write:
 ```julia
-model = Model()
-LRO.add_all_bridges(model, Float64)
+using JuMP
+import LowRankOpt as LRO
+import Percival
+model = Model(LRO.Optimizer)
+set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
+set_attribute(model, "sub_solver", Percival.PercivalSolver)
 ```
-Then, either use the `LRO.SetDotProducts` or `LRO.LinearCombinationInSet`.
+You can replace Percival with any other [JSO](https://jso.dev/) solver (only first order at the moment).
+You can also use [SDPLRPlus](https://github.com/luotuoqingshan/SDPLRPlus.jl), but it's a WIP so at the moment, you need to checkout [this branch](https://github.com/luotuoqingshan/SDPLRPlus.jl/pull/20).
+
+As non-Burer-Monteiro solver, the currently only option is [Loraine](https://github.com/kocvara/Loraine.jl)
+from which part of the code of part 1. was based.
+It's also a WIP so you need to checkout [this branch](https://github.com/kocvara/Loraine.jl/pull/29).
+```julia
+using JuMP
+import LowRankOpt as LRO
+import Loraine
+model = Model(dual_optimizer(LRO.Optimizer))
+set_attribute(model, "solver", Loraine.Solver)
+```
+
+### Low-rank constraints
+
+If you $A_j$ matrices have a custom structure that you would like the solver to exploit
+to speed up computation, specify them with the sets `LowRankOpt.SetDotProducts` or
+`LRO.LinearCombinationInSet`.
+For you model to also work with other solver not supporting these low-rank constraints,
+add the bridges defined in this package.
+```julia
+LowRankOpt.add_all_bridges(model, Float64)
+```
 [Check with `print_active_bridges(model)`](https://jump.dev/JuMP.jl/stable/tutorials/conic/ellipse_approx/)
 to see if the solver receives the low-rank constraint or if it is transformed to classical constraints.
+
+> [!WARNING]
+> `LRO.Optimizer` only supports `LowRankOpt.LinearCombinationInSet` constraints.
+> If you use the set `LowRankOpt.SetDotProducts`, it will be transformed into
+> classical SDP constraints by the bridges added by `LowRankOpt.add_all_bridges(model, Float64)`
+> and the model will lose the structure of the matrices.
+> So if you use `LowRankOpt.SetDotProducts` then add a
+> [Dualization](https://github.com/jump-dev/Dualization.jl/) layer with:
+> ```julia
+> using Dualization
+> model = Model(dual_optimizer(LRO.Optimizer))
+> ```
+> See [this tutorial on Dualization.jl](https://jump.dev/JuMP.jl/stable/tutorials/conic/dualization/).
 
 The solvers that support `LRO.SetDotProducts` are:
 
@@ -36,8 +110,7 @@ The solvers that support `LRO.SetDotProducts` are:
 The solvers that support `LRO.LinearCombinationInSet` are:
 
 * [Hypatia.jl](https://github.com/jump-dev/Hypatia.jl) since [v0.9](https://github.com/jump-dev/Hypatia.jl/releases/tag/v0.9.0)
-
-If you use `LRO.LinearCombinationInSet` while the solvers supports `LRO.SetDotProducts` or vice versa, simply [use a `Dualization.jl` layer](https://jump.dev/JuMP.jl/stable/tutorials/conic/dualization/).
+* `LowRankOpt.Optimizer` since [v0.2.1](https://github.com/blegat/LowRankOpt.jl/releases/tag/v0.2.1)
 
 Note that `Hypatia.jl` only supports `LRO.SetDotProducts{LRO.WITHOUT_SET}` or `LRO.LinearCombinationInSet{LRO.WITHOUT_SET}` and not the `LRO.WITH_SET` version.
 
