@@ -54,7 +54,7 @@ function test_maxcut(; is_dual, sparse, vector)
         @test lro_model.A isa Matrix{LowRankOpt.Factorization{Float64,F,D}}
     else
         lro_model = unsafe_backend(model).model
-        @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
+        @test lro_model.C isa Vector{FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}}
         @test lro_model.A isa Matrix{SparseMatrixCSC{T,Int64}}
         solver = unsafe_backend(model).solver
         LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
