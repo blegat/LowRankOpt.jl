@@ -209,7 +209,7 @@ function NLPModels.jtprod!(
     end
 end
 
-_zero!(A::FillArrays.Zeros) = (@show @__LINE__; A)
+_zero!(A::FillArrays.Zeros) = A
 _zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
 
 # Computes `A .+= B * α`
