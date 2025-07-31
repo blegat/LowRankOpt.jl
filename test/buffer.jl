@@ -55,7 +55,8 @@ end
 
 function test_zero_Ai()
     @testset "all_zero=$all_zero" for all_zero in [false, true]
-        @testset "matrix_in_objective=$matrix_in_objective" for matrix_in_objective in [false, true]
+        @testset "matrix_in_objective=$matrix_in_objective" for matrix_in_objective in
+                                                                [false, true]
             _test_zero_Ai(all_zero, matrix_in_objective)
         end
     end
