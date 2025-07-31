@@ -3,6 +3,8 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
+import Percival
+
 include("diff_check.jl")
 include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
 
@@ -52,7 +54,9 @@ function test_maxcut(; is_dual, sparse, vector)
         @test lro_model.A isa Matrix{LowRankOpt.Factorization{Float64,F,D}}
     else
         lro_model = unsafe_backend(model).model
-        @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
+        @test lro_model.C isa Vector{
+            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
+        }
         @test lro_model.A isa Matrix{SparseMatrixCSC{T,Int64}}
         solver = unsafe_backend(model).solver
         LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
@@ -83,66 +87,6 @@ end
         end
     end
 end;
-
-struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
-    model::LRO.Model{T}
-    stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
-end
-
-function ConvexSolver(model::LRO.Model)
-    stats = SolverCore.GenericExecutionStats(model)
-    return ConvexSolver(model, stats)
-end
-
-function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
-    return
-end
-
-function _alloc_schur_complement(model, i, Wi, H, schur_buffer)
-    if VERSION < v"1.11"
-        return
-    end
-    LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
-    @test 0 ==
-          @allocated LRO.add_schur_complement!(model, i, Wi, H, schur_buffer)
-end
-
-function schur_test(model::LRO.Model{T}, w, κ) where {T}
-    schur_buffer = LRO.buffer_for_schur_complement(model, κ)
-    jtprod_buffer = LRO.buffer_for_jtprod(model)
-    n = model.meta.ncon
-    y = rand(T, n)
-
-    Jv = similar(y)
-    vJ = similar(w)
-    NLPModels.jprod!(model, w, w, Jv, schur_buffer[1])
-    NLPModels.jtprod!(model, w, y, vJ, jtprod_buffer)
-    @test dot(Jv, y) ≈ dot(vJ, w)
-
-    H = zeros(n, n)
-    H = LRO.schur_complement!(model, w, H, schur_buffer)
-    Hy = similar(y)
-    LRO.eval_schur_complement!(Hy, model, w, y, schur_buffer[1], jtprod_buffer)
-    @test Hy ≈ H * y
-    for i in LRO.matrix_indices(model)
-        Wi = @inferred w[i]
-        _alloc_schur_complement(model, i, Wi, H, schur_buffer)
-    end
-    for i in LRO.matrix_indices(model)
-        ret = LRO.dual_cons!(jtprod_buffer, model, i, y)
-        @test ret isa SparseMatrixCSC
-    end
-    @test LRO.dual_cons(model, LRO.ScalarIndex, y) isa SparseArrays.SparseVector
-end
-
-function schur_test(model::LRO.Model{T}, κ) where {T}
-    w = rand(T, model.meta.nvar)
-    W = LRO.VectorizedSolution(w, model.dim)
-    for i in LRO.matrix_indices(model)
-        W[i] .= W[i] .+ W[i]'
-    end
-    return schur_test(model, W, κ)
-end
 
 @testset "ConvexSolver $T" for T in [Float32, Float64]
     model = maxcut(T.(weights), LRO.Optimizer{T})
