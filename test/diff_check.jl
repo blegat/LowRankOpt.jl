@@ -162,9 +162,9 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     for i in LRO.matrix_indices(model)
         @test model.jtprod_buffer[i.value] isa
               Union{FillArrays.Zeros,SparseArrays.SparseMatrixCSC}
-        ret = LRO.jtprod!(model, y, i)
+        ret = LRO.unsafe_jtprod(model, y, i)
         @test ret === model.jtprod_buffer[i.value]
-        ret = LRO.dual_cons!(model, y, i)
+        ret = LRO.unsafe_dual_cons(model, y, i)
         if ret isa SparseArrays.SparseMatrixCSC
             @test ret !== model.model.C[i.value]
         else
