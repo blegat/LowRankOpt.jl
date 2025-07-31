@@ -14,8 +14,6 @@ Semidefinite solvers solve a problem of the form
 \qquad
 \forall j \in \{1,\ldots,m\} &
 \text{s.t. } & \sum_{j=1}^m y_j A_j \preceq C
-\qquad
-\forall i \in \{1,\ldots,\text{nlmi}\}
 \\
 & X \succeq 0
 \end{aligned}
