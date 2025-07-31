@@ -164,8 +164,11 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
         ret = LRO.jtprod!(model, y, i)
         @test ret === model.jtprod_buffer[i.value]
         ret = LRO.dual_cons!(model, y, i)
-        @test ret isa SparseArrays.SparseMatrixCSC
-        @test ret !== model.model.C[i.value]
+        if ret isa SparseArrays.SparseMatrixCSC
+            @test ret !== model.model.C[i.value]
+        else
+            @test ret isa FillArrays.Zeros
+        end
     end
     dcons = ones(LRO.num_scalars(model))
     LRO.dual_cons!(model, y, dcons, LRO.ScalarIndex)

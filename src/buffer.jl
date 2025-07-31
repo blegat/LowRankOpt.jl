@@ -260,7 +260,9 @@ function dual_cons!(
 end
 
 # Note that we can't use `-` because of https://github.com/JuliaArrays/FillArrays.jl/issues/412
+_sub(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
 _sub(A::AbstractArray, ::FillArrays.Zeros) = copy(A)
+_sub(::FillArrays.Zeros, B::AbstractArray) = -B
 _sub(A::AbstractArray, B::AbstractArray) = A - B
 
 function dual_cons!(

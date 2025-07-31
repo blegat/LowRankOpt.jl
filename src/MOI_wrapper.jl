@@ -268,7 +268,9 @@ function _add_constraints(
             A[lmi_id, k] = _MatrixBuilder{T}(d)
         end
         for row in eachindex(func.constants)
-            _add!(A[lmi_id, 1], row, func.constants[row], set)
+            if !iszero(func.constants[row])
+                _add!(A[lmi_id, 1], row, func.constants[row], set)
+            end
         end
         for term in func.terms
             scalar = term.scalar_term

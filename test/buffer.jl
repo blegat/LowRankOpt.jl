@@ -21,6 +21,7 @@ function _test_zero_Ai(all_zero::Bool)
     b = _backend(model)
     T = Float64
     Z = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
+    @test b.model.C isa Vector{Z}
     if all_zero
         @test b.model.A isa Matrix{Z}
     else
