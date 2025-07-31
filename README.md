@@ -11,7 +11,7 @@ Semidefinite solvers solve a problem of the form
 \max {} & b^\top y
 \\
 \text{s.t. } & \langle A_j, X \rangle = b_j
-\qquad
+\,\,\,
 \forall j \in \{1,\ldots,m\} &
 \text{s.t. } & \sum_{j=1}^m y_j A_j \preceq C
 \\
