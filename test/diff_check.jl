@@ -165,10 +165,13 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
         ret = LRO.unsafe_jtprod(model, y, i)
         @test ret === model.jtprod_buffer[i.value]
         ret = LRO.unsafe_dual_cons(model, y, i)
-        if ret isa SparseArrays.SparseMatrixCSC
-            @test ret !== model.model.C[i.value]
-        else
-            @test ret isa FillArrays.Zeros
+        @test ret isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros}
+        Aty = sum(model.model.A[i.value, j] * y[j] for j in 1:model.meta.ncon)
+        @test ret ≈ model.model.C[i.value] - Aty
+        if Aty isa FillArrays.Zeros
+            @test ret === model.model.C[i.value]
+        elseif model.model.C[i.value] isa FillArrays.Zeros
+            @test ret === model.jtprod_buffer[i.value]
         end
     end
     dcons = ones(LRO.num_scalars(model))

@@ -201,7 +201,7 @@ function NLPModels.jtprod!(
 )
     jtprod!(model, y, vJ[ScalarIndex], ScalarIndex)
     for mat_idx in matrix_indices(model)
-        vJ[mat_idx] .= jtprod!(model, y, mat_idx)
+        vJ[mat_idx] .= unsafe_jtprod(model, y, mat_idx)
     end
 end
 
@@ -248,7 +248,7 @@ function unsafe_jtprod(model::BufferedModelForSchur, y, i::MatrixIndex)
     buffer = model.jtprod_buffer[i.value]
     _zero!(buffer)
     for j in eachindex(y)
-        _add_mul!(buffer, model.A[i.value, j], y[j])
+        _add_mul!(buffer, model.model.A[i.value, j], y[j])
     end
     return buffer
 end
@@ -293,5 +293,5 @@ function unsafe_dual_cons(
     y::AbstractVector,
     i::MatrixIndex,
 )
-    return _sub(model.model.C[i.value], jtprod!(model, y, i))
+    return _sub(model.model.C[i.value], unsafe_jtprod(model, y, i))
 end
