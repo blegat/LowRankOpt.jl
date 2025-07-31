@@ -16,9 +16,9 @@ function errors(
     b_den = 1 + LinearAlgebra.norm(cons_constant(model), 1)
     C_den =
         1 +
-        LinearAlgebra.norm(NLPModels.grad(model, ScalarIndex), 1) +
+        LinearAlgebra.norm(grad(model, ScalarIndex), 1) +
         sum(matrix_indices(model), init = zero(b_den)) do i
-            return LinearAlgebra.norm(NLPModels.grad(model, i), 1)
+            return LinearAlgebra.norm(grad(model, i), 1)
         end
     obj_den = 1 + abs(pobj) + abs(dobj)
     return (
