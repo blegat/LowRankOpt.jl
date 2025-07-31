@@ -5,6 +5,7 @@
 
 using Test
 using LinearAlgebra
+using FillArrays
 import SolverCore
 using Dualization
 import LowRankOpt as LRO
