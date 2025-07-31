@@ -259,6 +259,9 @@ function dual_cons!(
     return dual_cons!(model.model, y, res, ScalarIndex)
 end
 
+# TODO If we rename `dual_cons!` to `unsafe_dual_cons`,
+#      we can remove the `copy` and remplace `-B` with a mutation
+
 # Note that we can't use `-` because of https://github.com/JuliaArrays/FillArrays.jl/issues/412
 _sub(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
 _sub(A::AbstractArray, ::FillArrays.Zeros) = copy(A)

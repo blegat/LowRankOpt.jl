@@ -5,7 +5,7 @@ using JuMP, Dualization
 include("diff_check.jl")
 
 # Test with zero Ai matrices
-function _test_zero_Ai(all_zero::Bool)
+function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
     model = Model(dual_optimizer(LRO.Optimizer))
     @variable(model, x[1:2] in MOI.Nonnegatives(2))
     @variable(model, X[1:2, 1:2] in PSDCone())
@@ -15,17 +15,21 @@ function _test_zero_Ai(all_zero::Bool)
         @constraint(model, sum(X) == 2)
     end
     @constraint(model, x[1] - x[2] == 1)
-    @objective(model, Max, x[1])
+    if matrix_in_objective
+        @objective(model, Max, x[1] + X[1, 2] - X[1, 1])
+    else
+        @objective(model, Max, x[1])
+    end
     set_attribute(model, "solver", ConvexSolver)
     optimize!(model)
     b = _backend(model)
     T = Float64
     Z = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
-    @test b.model.C isa Vector{Z}
+    S = SparseArrays.SparseMatrixCSC{T,Int}
+    @test b.model.C isa Vector{matrix_in_objective ? S : Z}
     if all_zero
         @test b.model.A isa Matrix{Z}
     else
-        S = SparseArrays.SparseMatrixCSC{T,Int}
         @test b.model.A isa Matrix{Union{Z,S}}
     end
     @test b.model.A[1] isa Z
@@ -50,8 +54,12 @@ function _test_zero_Ai(all_zero::Bool)
 end
 
 function test_zero_Ai()
-    _test_zero_Ai(false)
-    return _test_zero_Ai(true)
+    @testset "all_zero=$all_zero" for all_zero in [false, true]
+        @testset "matrix_in_objective=$matrix_in_objective" for matrix_in_objective in [false, true]
+            _test_zero_Ai(all_zero, matrix_in_objective)
+        end
+    end
+    return
 end
 
 function runtests()
