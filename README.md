@@ -12,7 +12,7 @@ Semidefinite solvers solve a problem of the form
 \\
 \text{s.t. } & \langle A_j, X \rangle = b_j
 \,\,\,
-\forall j \in \{1,\ldots,m\} &
+\forall j \in \{1,\ldots,m\} \qquad &
 \text{s.t. } & \sum_{j=1}^m y_j A_j \preceq C
 \\
 & X \succeq 0
