@@ -115,8 +115,7 @@ end;
     y = collect(1:b.model.meta.ncon)
     @test LRO.jac(b.model, 1, LRO.MatrixIndex(1)) ==
           sparse([1], [1], [-1], 4, 4)
-    @test LRO.jac(b.model, 1, LRO.ScalarIndex) ==
-          sparsevec([1, 2], [-1, 1], 8)
+    @test LRO.jac(b.model, 1, LRO.ScalarIndex) == sparsevec([1, 2], [-1, 1], 8)
     @test LRO.norm_jac(b.model, LRO.MatrixIndex(1)) == 4
     grad = similar(x)
     NLPModels.grad!(b.model, X, grad)

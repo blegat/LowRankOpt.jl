@@ -178,12 +178,7 @@ end
 function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     X = Solution(x, model.dim)
     G = Solution(g, model.dim)
-    grad!(
-        model,
-        X,
-        LRO.left_factor(G, LRO.ScalarIndex),
-        LRO.ScalarIndex,
-    )
+    grad!(model, X, LRO.left_factor(G, LRO.ScalarIndex), LRO.ScalarIndex)
     for i in LRO.matrix_indices(model.model)
         grad!(model, X[i], G[i], i)
     end
@@ -229,11 +224,7 @@ function jtprod!(
     JtV::AbstractVector,
     ::Type{LRO.ScalarIndex},
 )
-    return LinearAlgebra.mul!(
-        JtV,
-        LRO.jac(model.model, LRO.ScalarIndex)',
-        y,
-    )
+    return LinearAlgebra.mul!(JtV, LRO.jac(model.model, LRO.ScalarIndex)', y)
 end
 
 function jtprod!(
@@ -280,13 +271,7 @@ function NLPModels.jtprod!(
 )
     X = Solution(x, model.dim)
     JtV = Solution(Jtv, model.dim)
-    jtprod!(
-        model,
-        X,
-        y,
-        LRO.left_factor(JtV, LRO.ScalarIndex),
-        LRO.ScalarIndex,
-    )
+    jtprod!(model, X, y, LRO.left_factor(JtV, LRO.ScalarIndex), LRO.ScalarIndex)
     for i in LRO.matrix_indices(model.model)
         jtprod!(model, X[i], y, JtV[i], i)
     end

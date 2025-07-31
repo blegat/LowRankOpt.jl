@@ -53,11 +53,7 @@ end
 #########################
 
 cons_constant(model::BufferedModelForSchur) = cons_constant(model.model)
-function jac(
-    model::BufferedModelForSchur,
-    j::Integer,
-    ::Type{ScalarIndex},
-)
+function jac(model::BufferedModelForSchur, j::Integer, ::Type{ScalarIndex})
     return jac(model.model, j, ScalarIndex)
 end
 function norm_jac(model::BufferedModelForSchur, i::MatrixIndex)
