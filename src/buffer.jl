@@ -40,12 +40,12 @@ function dual_obj(model::BufferedModelForSchur, y::AbstractVector)
     return dual_obj(model.model, y)
 end
 
-function NLPModels.grad(model::BufferedModelForSchur, ::Type{ScalarIndex})
-    return NLPModels.grad(model.model, ScalarIndex)
+function grad(model::BufferedModelForSchur, ::Type{ScalarIndex})
+    return grad(model.model, ScalarIndex)
 end
 
-function NLPModels.grad(model::BufferedModelForSchur, i::MatrixIndex)
-    return NLPModels.grad(model.model, i)
+function grad(model::BufferedModelForSchur, i::MatrixIndex)
+    return grad(model.model, i)
 end
 
 #########################
@@ -53,12 +53,12 @@ end
 #########################
 
 cons_constant(model::BufferedModelForSchur) = cons_constant(model.model)
-function NLPModels.jac(
+function jac(
     model::BufferedModelForSchur,
     j::Integer,
     ::Type{ScalarIndex},
 )
-    return NLPModels.jac(model.model, j, ScalarIndex)
+    return jac(model.model, j, ScalarIndex)
 end
 function norm_jac(model::BufferedModelForSchur, i::MatrixIndex)
     return norm_jac(model.model, i)

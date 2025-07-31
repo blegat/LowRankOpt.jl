@@ -70,7 +70,7 @@ function test_maxcut(; is_dual, sparse, vector)
     diff_check(model)
     X = LRO.positive_semidefinite_factorization(rand(4))
     JtV = LRO.positive_semidefinite_factorization(ones(4))
-    NLPModels.grad!(solver.model, X, JtV, i)
+    LRO.BurerMonteiro.grad!(solver.model, X, JtV, i)
     @test JtV.factor ≈ 2lro_model.C[] * X.factor
     fill!(JtV.factor, 0.0)
     y = rand(lro_model.meta.ncon)
@@ -113,16 +113,16 @@ end;
         [Matrix(x[i]) for i in LRO.matrix_indices(b.model)],
     )
     y = collect(1:b.model.meta.ncon)
-    @test NLPModels.jac(b.model, 1, LRO.MatrixIndex(1)) ==
+    @test LRO.jac(b.model, 1, LRO.MatrixIndex(1)) ==
           sparse([1], [1], [-1], 4, 4)
-    @test NLPModels.jac(b.model, 1, LRO.ScalarIndex) ==
+    @test LRO.jac(b.model, 1, LRO.ScalarIndex) ==
           sparsevec([1, 2], [-1, 1], 8)
     @test LRO.norm_jac(b.model, LRO.MatrixIndex(1)) == 4
     grad = similar(x)
     NLPModels.grad!(b.model, X, grad)
     @test Vector(grad) == [
-        Vector(NLPModels.grad(b.model, LRO.ScalarIndex));
-        NLPModels.grad(b.model, LRO.MatrixIndex(1))[:]
+        Vector(LRO.grad(b.model, LRO.ScalarIndex));
+        LRO.grad(b.model, LRO.MatrixIndex(1))[:]
     ]
     for xx in [x, X]
         err = LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx)

@@ -123,25 +123,24 @@ side_dimension(model::Model, i::MatrixIndex) = model.msizes[i.value]
 ###### Objective ######
 #######################
 
-function NLPModels.obj(model::Model, X::AbstractMatrix, i::MatrixIndex)
+function obj(model::Model, X::AbstractMatrix, i::MatrixIndex)
     return LinearAlgebra.dot(model.C[i.value], X)
 end
 
-function NLPModels.obj(model::Model, x::AbstractVector, ::Type{MatrixIndex})
+function obj(model::Model, x::AbstractVector, ::Type{MatrixIndex})
     result = zero(eltype(x))
     for i in matrix_indices(model)
-        result += NLPModels.obj(model, x[i], i)
+        result += obj(model, x[i], i)
     end
     return result
 end
 
-function NLPModels.obj(model::Model, x::AbstractVector, ::Type{ScalarIndex})
+function obj(model::Model, x::AbstractVector, ::Type{ScalarIndex})
     return LinearAlgebra.dot(model.d_lin, x[ScalarIndex])
 end
 
 function NLPModels.obj(model::Model, x::AbstractVector)
-    return NLPModels.obj(model, x, MatrixIndex) +
-           NLPModels.obj(model, x, ScalarIndex)
+    return obj(model, x, ScalarIndex) + obj(model, x, MatrixIndex)
 end
 
 function NLPModels.grad!(model::Model, _::AbstractVector, g::AbstractVector)
@@ -168,8 +167,8 @@ function dual_cons!(model::Model, y::AbstractVector, res, ::Type{ScalarIndex})
     return LinearAlgebra.mul!(res, model.C_lin', y, -1, true)
 end
 
-NLPModels.grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
-NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
+grad(model::Model, ::Type{ScalarIndex}) = model.d_lin
+grad(model::Model, i::MatrixIndex) = model.C[i.value]
 
 #########################
 ###### Constraints ######
@@ -178,11 +177,11 @@ NLPModels.grad(model::Model, i::MatrixIndex) = model.C[i.value]
 cons_constant(model::Model) = model.b
 
 # Should be only used with `norm`
-NLPModels.jac(model::Model, ::Type{ScalarIndex}) = model.C_lin
-function NLPModels.jac(model::Model, j::Integer, i::MatrixIndex)
+jac(model::Model, ::Type{ScalarIndex}) = model.C_lin
+function jac(model::Model, j::Integer, i::MatrixIndex)
     return model.A[i.value, j]
 end
-function NLPModels.jac(model::Model, j::Integer, ::Type{ScalarIndex})
+function jac(model::Model, j::Integer, ::Type{ScalarIndex})
     return model.C_lin[j, :]
 end
 function norm_jac(model::Model{T}, i::MatrixIndex) where {T}

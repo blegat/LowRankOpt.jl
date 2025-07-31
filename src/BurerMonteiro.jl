@@ -152,24 +152,24 @@ function NLPModels.obj(model::Model, x::AbstractVector)
     return NLPModels.obj(model.model, Solution(x, model.dim))
 end
 
-function NLPModels.grad!(model::Model{false}, _, g, ::Type{LRO.ScalarIndex})
-    return copyto!(g, NLPModels.grad(model.model, LRO.ScalarIndex))
+function grad!(model::Model{false}, _, g, ::Type{LRO.ScalarIndex})
+    return copyto!(g, LRO.grad(model.model, LRO.ScalarIndex))
 end
 
-function NLPModels.grad!(model::Model{true}, x, g, ::Type{LRO.ScalarIndex})
+function grad!(model::Model{true}, x, g, ::Type{LRO.ScalarIndex})
     g .=
-        2 .* NLPModels.grad(model.model, LRO.ScalarIndex) .*
+        2 .* LRO.grad(model.model, LRO.ScalarIndex) .*
         LRO.left_factor(x, LRO.ScalarIndex)
     return g
 end
 
-function NLPModels.grad!(
+function grad!(
     model::Model,
     X::LRO.Factorization,
     G::LRO.Factorization,
     i::LRO.MatrixIndex,
 )
-    C = NLPModels.grad(model.model, i)
+    C = LRO.grad(model.model, i)
     LinearAlgebra.mul!(G.factor, C, X.factor)
     G.factor .*= 2
     return
@@ -178,14 +178,14 @@ end
 function NLPModels.grad!(model::Model, x::AbstractVector, g::AbstractVector)
     X = Solution(x, model.dim)
     G = Solution(g, model.dim)
-    NLPModels.grad!(
+    grad!(
         model,
         X,
         LRO.left_factor(G, LRO.ScalarIndex),
         LRO.ScalarIndex,
     )
     for i in LRO.matrix_indices(model.model)
-        NLPModels.grad!(model, X[i], G[i], i)
+        grad!(model, X[i], G[i], i)
     end
     return g
 end
@@ -222,7 +222,7 @@ function NLPModels.jprod!(
     return NLPModels.jprod!(model.model, X, _OuterProduct(X, V), Jv)
 end
 
-function NLPModels.jtprod!(
+function jtprod!(
     model::Model{false},
     _,
     y::AbstractVector,
@@ -231,19 +231,19 @@ function NLPModels.jtprod!(
 )
     return LinearAlgebra.mul!(
         JtV,
-        NLPModels.jac(model.model, LRO.ScalarIndex)',
+        LRO.jac(model.model, LRO.ScalarIndex)',
         y,
     )
 end
 
-function NLPModels.jtprod!(
+function jtprod!(
     model::Model{true},
     X,
     y::AbstractVector,
     JtV::AbstractVector,
     ::Type{LRO.ScalarIndex},
 )
-    LinearAlgebra.mul!(JtV, NLPModels.jac(model.model, LRO.ScalarIndex)', y)
+    LinearAlgebra.mul!(JtV, LRO.jac(model.model, LRO.ScalarIndex)', y)
     JtV .*= 2 .* LRO.left_factor(X, LRO.ScalarIndex)
     return JtV
 end
@@ -256,12 +256,12 @@ function add_jtprod!(
     i::LRO.MatrixIndex,
 )
     for j in eachindex(y)
-        A = NLPModels.jac(model.model, j, i)
+        A = LRO.jac(model.model, j, i)
         LinearAlgebra.mul!(JtV.factor, A, X.factor, 2y[j], true)
     end
 end
 
-function NLPModels.jtprod!(
+function jtprod!(
     model::Model,
     X,
     y::AbstractVector,
@@ -280,7 +280,7 @@ function NLPModels.jtprod!(
 )
     X = Solution(x, model.dim)
     JtV = Solution(Jtv, model.dim)
-    NLPModels.jtprod!(
+    jtprod!(
         model,
         X,
         y,
@@ -288,7 +288,7 @@ function NLPModels.jtprod!(
         LRO.ScalarIndex,
     )
     for i in LRO.matrix_indices(model.model)
-        NLPModels.jtprod!(model, X[i], y, JtV[i], i)
+        jtprod!(model, X[i], y, JtV[i], i)
     end
     return Jtv
 end
@@ -314,10 +314,10 @@ function NLPModels.hprod!(
     ::Type{LRO.ScalarIndex};
     obj_weight,
 ) where {T}
-    Hv .= obj_weight .* NLPModels.grad(model.model, LRO.ScalarIndex)
+    Hv .= obj_weight .* LRO.grad(model.model, LRO.ScalarIndex)
     LinearAlgebra.mul!(
         Hv,
-        NLPModels.jac(model.model, LRO.ScalarIndex)',
+        LRO.jac(model.model, LRO.ScalarIndex)',
         y,
         true,
         true,
@@ -347,11 +347,11 @@ function NLPModels.hprod!(
     )
     for i in LRO.matrix_indices(model.model)
         Vi = V[i].factor
-        C = NLPModels.grad(model.model, i)
+        C = LRO.grad(model.model, i)
         Hvi = HV[i].factor
         LinearAlgebra.mul!(Hvi, C, Vi, 2obj_weight, false)
         for j in 1:model.meta.ncon
-            A = NLPModels.jac(model.model, j, i)
+            A = LRO.jac(model.model, j, i)
             LinearAlgebra.mul!(Hvi, A, Vi, -2y[j], true)
         end
     end

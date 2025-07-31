@@ -130,12 +130,12 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
 
     idx = LRO.matrix_indices(model)
     @test NLPModels.obj(model, w) ≈
-          dot(NLPModels.grad(model, LRO.ScalarIndex), w[LRO.ScalarIndex]) +
-          dot(NLPModels.grad.(model, idx), getindex.(Ref(w), idx))
+          dot(LRO.grad(model, LRO.ScalarIndex), w[LRO.ScalarIndex]) +
+          dot(LRO.grad.(model, idx), getindex.(Ref(w), idx))
     @test LRO.dual_obj(model, y) ≈ dot(LRO.cons_constant(model), y)
 
-    @test NLPModels.jac(model, 1, LRO.ScalarIndex) ==
-          NLPModels.jac(model.model, 1, LRO.ScalarIndex)
+    @test LRO.jac(model, 1, LRO.ScalarIndex) ==
+          LRO.jac(model.model, 1, LRO.ScalarIndex)
     @test LRO.norm_jac.(model, idx) == LRO.norm_jac.(model.model, idx)
     @test LRO.side_dimension.(model, idx) ==
           LRO.side_dimension.(model.model, idx)
