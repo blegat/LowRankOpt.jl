@@ -43,6 +43,7 @@ end
 function NLPModels.grad(model::BufferedModelForSchur, ::Type{ScalarIndex})
     return NLPModels.grad(model.model, ScalarIndex)
 end
+
 function NLPModels.grad(model::BufferedModelForSchur, i::MatrixIndex)
     return NLPModels.grad(model.model, i)
 end
@@ -62,8 +63,6 @@ end
 function norm_jac(model::BufferedModelForSchur, i::MatrixIndex)
     return norm_jac(model.model, i)
 end
-
-errors(model::BufferedModelForSchur, x; kws...) = errors(model.model, x; kws...)
 
 #######################
 ###### J product ######
@@ -121,6 +120,7 @@ function buffer_for_jprod(model::Model{T}) where {T}
 end
 
 _vec(x::AbstractVector) = x
+_vec(x::FillArrays.Zeros{T}) where {T} = FillArrays.Zeros{T}(length(x))
 _vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
 _vec(x::Base.ReshapedArray) = _vec(parent(x))
 
@@ -209,10 +209,12 @@ function NLPModels.jtprod!(
     end
 end
 
-_zero!(A::FillArrays.Zeros) = A
+_zero!(A::FillArrays.Zeros) = (@show @__LINE__; A)
 _zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
 
 # Computes `A .+= B * α`
+function _add_mul!(::FillArrays.Zeros, ::FillArrays.Zeros, _) end
+
 function _add_mul!(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros, _)
     return A
 end
@@ -257,10 +259,14 @@ function dual_cons!(
     return dual_cons!(model.model, y, res, ScalarIndex)
 end
 
+# Note that we can't use `-` because of https://github.com/JuliaArrays/FillArrays.jl/issues/412
+_sub(A::AbstractArray, ::FillArrays.Zeros) = copy(A)
+_sub(A::AbstractArray, B::AbstractArray) = A - B
+
 function dual_cons!(
     model::BufferedModelForSchur,
     y::AbstractVector,
     i::MatrixIndex,
 )
-    return model.model.C[i.value] - jtprod!(model, y, i)
+    return _sub(model.model.C[i.value], jtprod!(model, y, i))
 end

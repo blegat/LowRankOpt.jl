@@ -4,7 +4,7 @@
 Return [the 6 standard DIMACS errors](https://plato.asu.edu/dimacs/node3.html).
 """
 function errors(
-    model::Model,
+    model::AbstractModel,
     x;
     y = nothing,
     primal_err = NLPModels.cons(model, x),

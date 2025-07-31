@@ -6,6 +6,7 @@ import NLPModels
 import UnsafeArrays
 
 abstract type AbstractModel{T} <: NLPModels.AbstractNLPModel{T,Vector{T}} end
+Base.broadcastable(model::AbstractModel) = Ref(model)
 
 function NLPModels.cons!(
     model::AbstractModel,

@@ -94,7 +94,7 @@ end
 
 function diff_check(model::JuMP.AbstractModel)
     b = _backend(model)
-    diff_check(b.solver.model)
+    return diff_check(b.solver.model)
 end
 
 struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
@@ -127,6 +127,22 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     n = model.meta.ncon
     y = rand(T, n)
 
+    idx = LRO.matrix_indices(model)
+    @test NLPModels.obj(model, w) ≈
+          dot(NLPModels.grad(model, LRO.ScalarIndex), w[LRO.ScalarIndex]) +
+          dot(NLPModels.grad.(model, idx), getindex.(Ref(w), idx))
+    @test LRO.dual_obj(model, y) ≈ dot(LRO.cons_constant(model), y)
+
+    @test NLPModels.jac(model, 1, LRO.ScalarIndex) ==
+          NLPModels.jac(model.model, 1, LRO.ScalarIndex)
+    @test LRO.norm_jac.(model, idx) == LRO.norm_jac.(model.model, idx)
+    @test LRO.side_dimension.(model, idx) ==
+          LRO.side_dimension.(model.model, idx)
+    if !isempty(idx)
+        @test LRO.side_dimension.([model], idx[1]) ==
+              [LRO.side_dimension(model, idx[1])]
+    end
+
     Jv = similar(y)
     vJ = similar(w)
     NLPModels.jprod!(model, w, w, Jv)
@@ -143,8 +159,13 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
         _alloc_schur_complement(model, i, Wi, H)
     end
     for i in LRO.matrix_indices(model)
+        @test model.jtprod_buffer[i.value] isa
+              Union{FillArrays.Zeros,SparseArrays.SparseMatrixCSC}
+        ret = LRO.jtprod!(model, y, i)
+        @test ret === model.jtprod_buffer[i.value]
         ret = LRO.dual_cons!(model, y, i)
         @test ret isa SparseArrays.SparseMatrixCSC
+        @test ret !== model.model.C[i.value]
     end
     dcons = ones(LRO.num_scalars(model))
     LRO.dual_cons!(model, y, dcons, LRO.ScalarIndex)
@@ -157,7 +178,7 @@ function schur_test(model::LRO.BufferedModelForSchur{T}) where {T}
     for i in LRO.matrix_indices(model)
         W[i] .= W[i] .+ W[i]'
     end
-    schur_test(model, W)
+    return schur_test(model, W)
 end
 
 function schur_test(model::LRO.Model, κ)
@@ -166,5 +187,5 @@ end
 
 function schur_test(model::JuMP.AbstractModel, κ)
     b = _backend(model)
-    schur_test(b.solver.model, κ)
+    return schur_test(b.solver.model, κ)
 end
