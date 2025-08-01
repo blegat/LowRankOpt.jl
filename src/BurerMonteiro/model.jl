@@ -75,8 +75,7 @@ function grad!(
     i::LRO.MatrixIndex,
 )
     C = LRO.grad(model.model, i)
-    buffer =
-        _buffer(model.jtprod_buffer[i.value], LRO.right_factor(C), X.factor)
+    buffer = _buffer(model.jtprod_buffer[i.value], C, X.factor)
     LRO.buffered_mul!(G.factor, C, X.factor, true, false, buffer)
     G.factor .*= 2
     return
@@ -158,15 +157,29 @@ function jtprod!(
     return JtV
 end
 
+const _RankOne{T} = LRO.AbstractFactorization{T,<:AbstractVector{T}}
+const _LowRank{T} = LRO.AbstractFactorization{T,<:AbstractMatrix{T}}
+
 function buffer_for_jtprod(
     model::LRO.Model{T},
     dim::Dimensions,
     i::LRO.MatrixIndex,
 ) where {T}
     row = view(model.A, i.value, :)
-    if any(A -> A isa LRO.AbstractFactorization{T,<:AbstractMatrix}, row)
-        error("TODO")
-    elseif any(A -> A isa LRO.AbstractFactorization{T,<:AbstractVector}, row)
+    C = model.C[i.value]
+    if any(A -> A isa _LowRank, row) || C isa _LowRank
+        ncols = maximum(row; init = 0) do A
+            if A isa _LowRank
+                return LRO.max_rank(A)
+            else
+                return 0
+            end
+        end
+        if C isa _LowRank
+            ncols = max(ncols, LRO.max_rank(C))
+        end
+        return zeros(T, dim.ranks[i.value], ncols)
+    elseif any(A -> A isa _RankOne, row) || C isa _RankOne
         return zeros(T, dim.ranks[i.value])
     end
     return
@@ -176,8 +189,10 @@ function buffer_for_jtprod(model::LRO.Model, dim::Dimensions)
     return buffer_for_jtprod.(model, dim, LRO.matrix_indices(model))
 end
 
-_buffer(_, ::AbstractVector, ::AbstractVector) = nothing
-_buffer(buffer::AbstractVector, ::AbstractVector, ::AbstractMatrix) = buffer
+_buffer(_, ::AbstractMatrix, _) = nothing
+_buffer(buffer::AbstractVector, ::_RankOne, ::AbstractMatrix) = buffer
+# TODO check that the size matches, it may not be the highest rank matrix
+_buffer(buffer::AbstractMatrix, ::_LowRank, ::AbstractMatrix) = buffer
 
 function add_jtprod!(
     model::Model,
@@ -185,11 +200,12 @@ function add_jtprod!(
     y::AbstractVector,
     JtV::LRO.Factorization,
     i::LRO.MatrixIndex,
+    α = 2,
 )
     for j in eachindex(y)
         A = LRO.jac(model.model, j, i)
-        buffer = _buffer(model.jtprod_buffer[i.value], A.factor, X.factor)
-        LRO.buffered_mul!(JtV.factor, A, X.factor, 2y[j], true, buffer)
+        buffer = _buffer(model.jtprod_buffer[i.value], A, X.factor)
+        LRO.buffered_mul!(JtV.factor, A, X.factor, α * y[j], true, buffer)
     end
 end
 

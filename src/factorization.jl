@@ -18,6 +18,11 @@ function Base.getindex(m::AbstractFactorization, i::Int, j::Int)
     )
 end
 
+# Structural maximum rank
+function max_rank(m::AbstractFactorization)
+    return size(left_factor(m), 2)
+end
+
 """
     struct Factorization{
         T,
