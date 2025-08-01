@@ -121,15 +121,22 @@ solve_time(lr)
 # and exploit the fact that the lagrangian is a degree-4 polynomial to streamline
 # the linesearch.
 # We need to use `square_scalars` as SDPLRPlus only supports free variables.
+# The default value of SDPLR for `rho_f` is `1e-5`. In SDPLRPlus
+# the corresponding setting is `ptol` so we set it `1e-5` as well.
+# SDPLRPlus also checks the duality gap to automatically update the rank.
+# We can disable this by setting `objtol` to `Inf`
+# Since we set the `objtol` to `Inf`, no need to find a trace bound to set
+# to `prior_trace_bound`
 
 import SDPLRPlus
 set_optimizer(cl, dual_optimizer(LRO.Optimizer))
 set_attribute(cl, "solver", LRO.BurerMonteiro.Solver)
 set_attribute(cl, "sub_solver", SDPLRPlus.Solver)
 set_attribute(cl, "ranks", [15])
-set_attribute(cl, "maxmajoriter", 5)
+set_attribute(lr, "ptol", 1e-5)
+set_attribute(lr, "objtol", Inf)
+set_attribute(lr, "maxmajoriter", 100)
 set_attribute(cl, "square_scalars", true)
-set_attribute(cl, "prior_trace_bound", 10.0)
 optimize!(cl)
 
 # We can speed it up with sparse low-rank constraints:
@@ -138,9 +145,10 @@ set_optimizer(lr, dual_optimizer(LRO.Optimizer))
 set_attribute(lr, "solver", LRO.BurerMonteiro.Solver)
 set_attribute(lr, "sub_solver", SDPLRPlus.Solver)
 set_attribute(lr, "ranks", [15])
+set_attribute(lr, "ptol", 1e-5)
+set_attribute(lr, "objtol", Inf)
 set_attribute(lr, "maxmajoriter", 100)
 set_attribute(lr, "square_scalars", true)
-set_attribute(lr, "prior_trace_bound", 10.0)
 optimize!(lr)
 termination_status(lr)
 objective_value(lr)
