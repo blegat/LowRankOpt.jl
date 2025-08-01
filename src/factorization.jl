@@ -472,7 +472,9 @@ function _add_mul!(
     end
 end
 
-function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, α, β)
+# Without the `@inline`, it allocates on Julia v1.11.6 probably because
+# it decies to not specialize the method
+@inline function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, α, β)
     return LinearAlgebra.mul!(res, A, B, α, β)
 end
 
