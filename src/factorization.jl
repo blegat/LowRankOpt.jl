@@ -395,18 +395,18 @@ function _mul!(
     res::AbstractVecOrMat{T},
     A::SparseArrays.AbstractSparseArray,
     B,
-    α,
+    _add::LinearAlgebra.MulAddMul,
     β,
 ) where {T}
-    if iszero(β)
+    if iszero(_add.β) # TODO Could actually dispatch on the type of MulAddMul
         # Since `A` is sparse, there may be some entries of `res` that we won't touch so
         # we cannot use `LinearAlgebra.MulAddMul(α, β)` as it won't set them to zero.
         # It's better to just set them to zero now and then use `_add_mul!`.
         fill!(res, zero(T))
     else
-        @assert isone(β)
+        @assert isone(β) # TODO Could actually dispatch on the type of MulAddMul to check that it's Bool and true with {_,false,_,Bool}
     end
-    return _add_mul!(res, A, B, α)
+    return _add_mul!(res, A, B, _add.α)
 end
 
 function _add_mul!(
@@ -477,10 +477,11 @@ function _add_mul!(
     end
 end
 
-# Without the `@inline`, it allocates on Julia v1.11.6 probably because
-# it decies to not specialize the method
-@inline function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, α, β)
-    return LinearAlgebra.mul!(res, A, B, α, β)
+# If we took `α` and `β` separately in `buffered_mul!`, because of the few methods before we may call this `LinearAlgebra.mul!`
+# again, the compiler might fail to do constant propagation and then allocate when building `MulAddMul` as it is type unstable.
+# This is the reason we pass around a `MulAddMul that we then dismantle here.
+function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, _add::LinearAlgebra.MulAddMul)
+    return LinearAlgebra.mul!(res, A, B, _add.alpha, _add.beta)
 end
 
 _mul_to!(::Nothing, A, B) = A * B
@@ -490,8 +491,7 @@ function buffered_mul!(
     res::AbstractVecOrMat,
     A::AbstractFactorization,
     B::AbstractVecOrMat,
-    α::Number,
-    β::Number,
+    _add::LinearAlgebra.MulAddMul,
     buffer,
 )
     # TODO if `scaling` is `FillArrays.Fill`, we could just update `α`
@@ -502,7 +502,7 @@ function buffered_mul!(
     C = _mul_to!(buffer, B', right_factor(A))
     C = _rmul_diag!!(C, A.scaling)
     lA = left_factor(A)
-    return _mul!(res, lA, C', α, β)
+    return _mul!(res, lA, C', _add)
 end
 
 # We want the same implementation for the two following ones but we can't use
@@ -511,11 +511,10 @@ function buffered_mul!(
     res::AbstractVecOrMat,
     A::AbstractMatrix,
     B::AbstractVecOrMat,
-    α::Number,
-    β::Number,
+    _add::LinearAlgebra.MulAddMul,
     _,
 )
-    return LinearAlgebra.mul!(res, A, B, α, β)
+    return LinearAlgebra.mul!(res, A, B, _add.α, _add.β)
 end
 
 function LinearAlgebra.mul!(

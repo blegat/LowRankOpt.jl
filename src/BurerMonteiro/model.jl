@@ -76,7 +76,7 @@ function grad!(
 )
     C = LRO.grad(model.model, i)
     buffer = _buffer(model.jtprod_buffer[i.value], C, X.factor)
-    LRO.buffered_mul!(G.factor, C, X.factor, true, false, buffer)
+    LRO.buffered_mul!(G.factor, C, X.factor, LinearAlgebra.MulAddMul(true, false), buffer)
     G.factor .*= 2
     return
 end
@@ -205,7 +205,7 @@ function add_jtprod!(
     for j in eachindex(y)
         A = LRO.jac(model.model, j, i)
         buffer = _buffer(model.jtprod_buffer[i.value], A, X.factor)
-        LRO.buffered_mul!(JtV.factor, A, X.factor, α * y[j], true, buffer)
+        LRO.buffered_mul!(JtV.factor, A, X.factor, LinearAlgebra.MulAddMul(α * y[j], true), buffer)
     end
 end
 
