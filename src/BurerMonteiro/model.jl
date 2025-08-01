@@ -294,14 +294,11 @@ function NLPModels.hprod!(
         obj_weight,
     )
     for i in LRO.matrix_indices(model.model)
-        Vi = V[i].factor
+        Vi = V[i]
         C = LRO.grad(model.model, i)
-        Hvi = HV[i].factor
-        LinearAlgebra.mul!(Hvi, C, Vi, 2obj_weight, false)
-        for j in 1:model.meta.ncon
-            A = LRO.jac(model.model, j, i)
-            LinearAlgebra.mul!(Hvi, A, Vi, -2y[j], true)
-        end
+        Hvi = HV[i]
+        LinearAlgebra.mul!(Hvi.factor, C, Vi.factor, 2obj_weight, false)
+        add_jtprod!(model, Vi, y, Hvi, i, -2)
     end
     return Hv
 end
