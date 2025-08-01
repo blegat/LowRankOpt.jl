@@ -75,7 +75,8 @@ function grad!(
     i::LRO.MatrixIndex,
 )
     C = LRO.grad(model.model, i)
-    buffer = _buffer(model.jtprod_buffer[i.value], LRO.right_factor(C), X.factor)
+    buffer =
+        _buffer(model.jtprod_buffer[i.value], LRO.right_factor(C), X.factor)
     LRO.buffered_mul!(G.factor, C, X.factor, true, false, buffer)
     G.factor .*= 2
     return
@@ -157,7 +158,11 @@ function jtprod!(
     return JtV
 end
 
-function buffer_for_jtprod(model::LRO.Model{T}, dim::Dimensions, i::LRO.MatrixIndex) where {T}
+function buffer_for_jtprod(
+    model::LRO.Model{T},
+    dim::Dimensions,
+    i::LRO.MatrixIndex,
+) where {T}
     row = view(model.A, i.value, :)
     if any(A -> A isa LRO.AbstractFactorization{T,<:AbstractMatrix}, row)
         error("TODO")

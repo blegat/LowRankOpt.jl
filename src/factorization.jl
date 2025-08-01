@@ -518,7 +518,7 @@ function LinearAlgebra.mul!(
     ::Number,
     ::Number,
 )
-    error("This is inefficient, call `buffered_mul!` instead")
+    return error("This is inefficient, call `buffered_mul!` instead")
 end
 
 function LinearAlgebra.mul!(
@@ -528,5 +528,5 @@ function LinearAlgebra.mul!(
     ::Number,
     ::Number,
 )
-    error("This is inefficient, call `buffered_mul!` instead")
+    return error("This is inefficient, call `buffered_mul!` instead")
 end
