@@ -514,7 +514,7 @@ function buffered_mul!(
     _add::LinearAlgebra.MulAddMul,
     _,
 )
-    return LinearAlgebra.mul!(res, A, B, _add.α, _add.β)
+    return LinearAlgebra.mul!(res, A, B, _add.alpha, _add.beta)
 end
 
 function LinearAlgebra.mul!(
