@@ -128,7 +128,12 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     n = model.meta.ncon
     y = rand(T, n)
 
-    idx = LRO.matrix_indices(model)
+    idx = @inferred LRO.matrix_indices(model)
+    if !isempty(idx)
+        @inferred first(idx)
+        @inferred idx[1]
+    end
+
     @test NLPModels.obj(model, w) ≈
           dot(LRO.grad(model, LRO.ScalarIndex), w[LRO.ScalarIndex]) +
           dot(LRO.grad.(model, idx), getindex.(Ref(w), idx))
@@ -148,6 +153,7 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     vJ = similar(w)
     NLPModels.jprod!(model, w, w, Jv)
     NLPModels.jtprod!(model, w, y, vJ)
+    @test 0 == @inferred NLPModels.jtprod!(model, w, y, vJ)
     @test dot(Jv, y) ≈ dot(vJ, w)
 
     H = zeros(n, n)
