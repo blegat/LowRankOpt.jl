@@ -6,6 +6,7 @@
 using Test
 using LinearAlgebra
 using FillArrays
+using JuMP
 import SolverCore
 using Dualization
 import LowRankOpt as LRO
@@ -52,6 +53,11 @@ function jac_check(model, x; kws...)
             J';
             kws...,
         )
+        v = rand(length(x))
+        y = rand(model.meta.ncon)
+        # Warmup
+        NLPModels.jtprod!(model, x, y, v)
+        @test 0 == @allocated NLPModels.jtprod!(model, x, y, v)
     end
 end
 
@@ -153,7 +159,7 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     vJ = similar(w)
     NLPModels.jprod!(model, w, w, Jv)
     NLPModels.jtprod!(model, w, y, vJ)
-    @test 0 == @inferred NLPModels.jtprod!(model, w, y, vJ)
+    @test 0 == @allocated NLPModels.jtprod!(model, w, y, vJ)
     @test dot(Jv, y) ≈ dot(vJ, w)
 
     H = zeros(n, n)
