@@ -396,17 +396,16 @@ function _mul!(
     A::SparseArrays.AbstractSparseArray,
     B,
     _add::LinearAlgebra.MulAddMul,
-    β,
 ) where {T}
-    if iszero(_add.β) # TODO Could actually dispatch on the type of MulAddMul
+    if iszero(_add.beta) # TODO Could actually dispatch on the type of MulAddMul
         # Since `A` is sparse, there may be some entries of `res` that we won't touch so
         # we cannot use `LinearAlgebra.MulAddMul(α, β)` as it won't set them to zero.
         # It's better to just set them to zero now and then use `_add_mul!`.
         fill!(res, zero(T))
     else
-        @assert isone(β) # TODO Could actually dispatch on the type of MulAddMul to check that it's Bool and true with {_,false,_,Bool}
+        @assert isone(_add.beta) # TODO Could actually dispatch on the type of MulAddMul to check that it's Bool and true with {_,false,_,Bool}
     end
-    return _add_mul!(res, A, B, _add.α)
+    return _add_mul!(res, A, B, _add.alpha)
 end
 
 function _add_mul!(
