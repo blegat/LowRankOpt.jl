@@ -479,7 +479,12 @@ end
 # If we took `α` and `β` separately in `buffered_mul!`, because of the few methods before we may call this `LinearAlgebra.mul!`
 # again, the compiler might fail to do constant propagation and then allocate when building `MulAddMul` as it is type unstable.
 # This is the reason we pass around a `MulAddMul that we then dismantle here.
-function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, _add::LinearAlgebra.MulAddMul)
+function _mul!(
+    res::AbstractVecOrMat,
+    A::AbstractVecOrMat,
+    B,
+    _add::LinearAlgebra.MulAddMul,
+)
     return LinearAlgebra.mul!(res, A, B, _add.alpha, _add.beta)
 end
 
