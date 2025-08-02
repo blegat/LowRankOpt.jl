@@ -18,7 +18,7 @@ UnsafeArrays = "c4a57d5a-5b31-53a6-b365-19f8c011fbd6"
 
 [compat]
 FillArrays = "1.13"
-KrylovKit = "0.9.5"
+KrylovKit = "0.9.5, 0.10"
 LinearAlgebra = "1.10"
 MathOptInterface = "1.40"
 MutableArithmetics = "1.6.4"
