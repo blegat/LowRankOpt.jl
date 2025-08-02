@@ -18,6 +18,11 @@ function Base.getindex(m::AbstractFactorization, i::Int, j::Int)
     )
 end
 
+# Structural maximum rank
+function max_rank(m::AbstractFactorization)
+    return size(left_factor(m), 2)
+end
+
 """
     struct Factorization{
         T,
@@ -390,18 +395,17 @@ function _mul!(
     res::AbstractVecOrMat{T},
     A::SparseArrays.AbstractSparseArray,
     B,
-    α,
-    β,
+    _add::LinearAlgebra.MulAddMul,
 ) where {T}
-    if iszero(β)
+    if iszero(_add.beta) # TODO Could actually dispatch on the type of MulAddMul
         # Since `A` is sparse, there may be some entries of `res` that we won't touch so
         # we cannot use `LinearAlgebra.MulAddMul(α, β)` as it won't set them to zero.
         # It's better to just set them to zero now and then use `_add_mul!`.
         fill!(res, zero(T))
     else
-        @assert isone(β)
+        @assert isone(_add.beta) # TODO Could actually dispatch on the type of MulAddMul to check that it's Bool and true with {_,false,_,Bool}
     end
-    return _add_mul!(res, A, B, α)
+    return _add_mul!(res, A, B, _add.alpha)
 end
 
 function _add_mul!(
@@ -423,7 +427,11 @@ function _add_mul!(
     C::LinearAlgebra.AdjOrTrans,
     α,
 )
-    @assert axes(res, 2) == axes(C, 2)
+    # For a small sparse vector of two entries and `C` of length 15,
+    # the `@assert` are slowers than what is gained by
+    # `@inbounds` apparently. See `perf/holy.jl` benchmark `jtprod`
+    #@assert axes(res, 1) == eachindex(x)
+    #@assert axes(res, 2) == axes(C, 2)
     for (row, val) in zip(x.nzind, x.nzval)
         γ = val * α
         for j in axes(res, 2)
@@ -468,41 +476,67 @@ function _add_mul!(
     end
 end
 
-function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, α, β)
-    return LinearAlgebra.mul!(res, A, B, α, β)
+# If we took `α` and `β` separately in `buffered_mul!`, because of the few methods before we may call this `LinearAlgebra.mul!`
+# again, the compiler might fail to do constant propagation and then allocate when building `MulAddMul` as it is type unstable.
+# This is the reason we pass around a `MulAddMul that we then dismantle here.
+function _mul!(
+    res::AbstractVecOrMat,
+    A::AbstractVecOrMat,
+    B,
+    _add::LinearAlgebra.MulAddMul,
+)
+    return LinearAlgebra.mul!(res, A, B, _add.alpha, _add.beta)
 end
 
-function _fact_mul!(
+_mul_to!(::Nothing, A, B) = A * B
+_mul_to!(buffer, A, B) = LinearAlgebra.mul!(buffer, A, B)
+
+function buffered_mul!(
     res::AbstractVecOrMat,
     A::AbstractFactorization,
     B::AbstractVecOrMat,
-    α::Number,
-    β::Number,
+    _add::LinearAlgebra.MulAddMul,
+    buffer,
 )
     # TODO if `scaling` is `FillArrays.Fill`, we could just update `α`
-    C = _lmul_diag!!(A.scaling, right_factor(A)' * B)
+    # We'd like the rows to be the number of columns of `B`
+    # as we take submatrices as subsets of columns (for it to be contiguous)
+    # in the buffer so we compute the transpose
+    # `UΣV'B = U(B'VΣ)'`
+    C = _mul_to!(buffer, B', right_factor(A))
+    C = _rmul_diag!!(C, A.scaling)
     lA = left_factor(A)
-    return _mul!(res, lA, C, α, β)
+    return _mul!(res, lA, C', _add)
 end
 
 # We want the same implementation for the two following ones but we can't use
 # `AbstractVecOrMat` as it would give ambiguity so we redirect to `_fact_mul!`
-function LinearAlgebra.mul!(
-    res::AbstractMatrix,
-    A::AbstractFactorization,
-    B::AbstractMatrix,
-    α::Number,
-    β::Number,
+function buffered_mul!(
+    res::AbstractVecOrMat,
+    A::AbstractMatrix,
+    B::AbstractVecOrMat,
+    _add::LinearAlgebra.MulAddMul,
+    _,
 )
-    return _fact_mul!(res, A, B, α, β)
+    return LinearAlgebra.mul!(res, A, B, _add.alpha, _add.beta)
 end
 
 function LinearAlgebra.mul!(
-    res::AbstractVector,
-    A::AbstractFactorization,
-    B::AbstractVector,
-    α::Number,
-    β::Number,
+    ::AbstractVector,
+    ::AbstractFactorization,
+    ::AbstractVector,
+    ::Number,
+    ::Number,
 )
-    return _fact_mul!(res, A, B, α, β)
+    return error("This is inefficient, call `buffered_mul!` instead")
+end
+
+function LinearAlgebra.mul!(
+    ::AbstractMatrix,
+    ::AbstractFactorization,
+    ::AbstractMatrix,
+    ::Number,
+    ::Number,
+)
+    return error("This is inefficient, call `buffered_mul!` instead")
 end

@@ -1,15 +1,18 @@
-mutable struct Model{S,T,CT,AT} <: NLPModels.AbstractNLPModel{T,Vector{T}}
+mutable struct Model{S,T,CT,AT,JTB} <: NLPModels.AbstractNLPModel{T,Vector{T}}
     model::LRO.Model{T,CT,AT}
     dim::Dimensions{S}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     counters::NLPModels.Counters
+    jtprod_buffer::JTB
     function Model{S}(model::LRO.Model{T,CT,AT}, ranks) where {S,T,CT,AT}
         dim = Dimensions{S}(model, ranks)
-        return new{S,T,CT,AT}(
+        jtprod_buffer = buffer_for_jtprod(model, dim)
+        return new{S,T,CT,AT,typeof(jtprod_buffer)}(
             model,
             dim,
             meta(dim, LRO.cons_constant(model)),
             NLPModels.Counters(),
+            jtprod_buffer,
         )
     end
 end
@@ -42,6 +45,7 @@ function set_rank!(model::Model, i::LRO.MatrixIndex, r)
     set_rank!(model.dim, i, r)
     # `nvar` has changed so we need to reset `model.meta`
     model.meta = meta(model.dim, model.meta.lcon)
+    model.jtprod_buffer = buffer_for_jtprod(model.model, model.dim)
     return
 end
 
@@ -71,7 +75,14 @@ function grad!(
     i::LRO.MatrixIndex,
 )
     C = LRO.grad(model.model, i)
-    LinearAlgebra.mul!(G.factor, C, X.factor)
+    buffer = _buffer(model.jtprod_buffer[i.value], C, X.factor)
+    LRO.buffered_mul!(
+        G.factor,
+        C,
+        X.factor,
+        LinearAlgebra.MulAddMul(true, false),
+        buffer,
+    )
     G.factor .*= 2
     return
 end
@@ -152,16 +163,61 @@ function jtprod!(
     return JtV
 end
 
+const _RankOne{T} = LRO.AbstractFactorization{T,<:AbstractVector{T}}
+const _LowRank{T} = LRO.AbstractFactorization{T,<:AbstractMatrix{T}}
+
+function buffer_for_jtprod(
+    model::LRO.Model{T},
+    dim::Dimensions,
+    i::LRO.MatrixIndex,
+) where {T}
+    row = view(model.A, i.value, :)
+    C = model.C[i.value]
+    if any(A -> A isa _LowRank, row) || C isa _LowRank
+        ncols = maximum(row; init = 0) do A
+            if A isa _LowRank
+                return LRO.max_rank(A)
+            else
+                return 0
+            end
+        end
+        if C isa _LowRank
+            ncols = max(ncols, LRO.max_rank(C))
+        end
+        return zeros(T, dim.ranks[i.value], ncols)
+    elseif any(A -> A isa _RankOne, row) || C isa _RankOne
+        return zeros(T, dim.ranks[i.value])
+    end
+    return
+end
+
+function buffer_for_jtprod(model::LRO.Model, dim::Dimensions)
+    return buffer_for_jtprod.(model, dim, LRO.matrix_indices(model))
+end
+
+_buffer(_, ::AbstractMatrix, _) = nothing
+_buffer(buffer::AbstractVector, ::_RankOne, ::AbstractMatrix) = buffer
+# TODO check that the size matches, it may not be the highest rank matrix
+_buffer(buffer::AbstractMatrix, ::_LowRank, ::AbstractMatrix) = buffer
+
 function add_jtprod!(
     model::Model,
     X::LRO.Factorization,
     y::AbstractVector,
     JtV::LRO.Factorization,
     i::LRO.MatrixIndex,
+    α = 2,
 )
     for j in eachindex(y)
         A = LRO.jac(model.model, j, i)
-        LinearAlgebra.mul!(JtV.factor, A, X.factor, 2y[j], true)
+        buffer = _buffer(model.jtprod_buffer[i.value], A, X.factor)
+        LRO.buffered_mul!(
+            JtV.factor,
+            A,
+            X.factor,
+            LinearAlgebra.MulAddMul(α * y[j], true),
+            buffer,
+        )
     end
 end
 
@@ -185,8 +241,10 @@ function NLPModels.jtprod!(
     X = Solution(x, model.dim)
     JtV = Solution(Jtv, model.dim)
     jtprod!(model, X, y, LRO.left_factor(JtV, LRO.ScalarIndex), LRO.ScalarIndex)
-    for i in LRO.matrix_indices(model.model)
-        jtprod!(model, X[i], y, JtV[i], i)
+    for i::LRO.MatrixIndex in LRO.matrix_indices(model.model)
+        Xi = X[i]
+        JtVi = JtV[i]
+        jtprod!(model, Xi, y, JtVi, i)
     end
     return Jtv
 end
@@ -248,14 +306,11 @@ function NLPModels.hprod!(
         obj_weight,
     )
     for i in LRO.matrix_indices(model.model)
-        Vi = V[i].factor
-        C = LRO.grad(model.model, i)
-        Hvi = HV[i].factor
-        LinearAlgebra.mul!(Hvi, C, Vi, 2obj_weight, false)
-        for j in 1:model.meta.ncon
-            A = LRO.jac(model.model, j, i)
-            LinearAlgebra.mul!(Hvi, A, Vi, -2y[j], true)
-        end
+        Vi = V[i]
+        Hvi = HV[i]
+        grad!(model, Vi, Hvi, i)
+        Hvi.factor .*= obj_weight
+        add_jtprod!(model, Vi, y, Hvi, i, -2)
     end
     return Hv
 end
