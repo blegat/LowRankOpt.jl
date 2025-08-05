@@ -34,8 +34,7 @@ function test_mul_error()
     err = ErrorException(
         "Missing `_add_mul!` between `Vector{Float64}`, `Main.TestSets.DummySparse` and `Float64`",
     )
-    _add = LinearAlgebra.MulAddMul(true, true)
-    @test_throws err LRO.buffered_mul!(rand(2), F, rand(2), _add, nothing)
+    @test_throws err LRO.buffered_mul!(rand(2), F, rand(2), true, true, nothing)
     return
 end
 
@@ -98,8 +97,7 @@ function _test_mul(A, B, α, β)
             end
         end
         @test_throws err LinearAlgebra.mul!(res, A, B, α, β)
-        _add = LinearAlgebra.MulAddMul(α, β)
-        LRO.buffered_mul!(res, A, B, _add, buffer)
+        LRO.buffered_mul!(res, A, B, α, β, buffer)
     else
         LinearAlgebra.mul!(res, A, B, α, β)
     end
