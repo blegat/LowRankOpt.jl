@@ -198,13 +198,15 @@ end
 ###### J product ######
 #######################
 
+import Base.Threads
+
 function add_jprod!(
     model::Model,
     V::AbstractMatrix,
     Jv::AbstractVector,
     i::MatrixIndex,
 )
-    for j in 1:model.meta.ncon
+    Threads.@threads for j in 1:model.meta.ncon
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end
 end
