@@ -485,13 +485,8 @@ end
 
 _mul!(C, A, B, _add) = _generic_mul!(C, A, B, _add)
 
-function _generic_mul!(
-    C,
-    A,
-    B,
-    _add,
-)
-    LinearAlgebra._rscale_add!(C, A, B, _add.alpha, _add.beta)
+function _generic_mul!(C, A, B, _add)
+    return LinearAlgebra._rscale_add!(C, A, B, _add.alpha, _add.beta)
 end
 
 function _generic_mul!(
