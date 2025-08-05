@@ -80,7 +80,8 @@ function grad!(
         G.factor,
         C,
         X.factor,
-        LinearAlgebra.MulAddMul(true, false),
+        true,
+        false,
         buffer,
     )
     G.factor .*= 2
@@ -215,7 +216,8 @@ function add_jtprod!(
             JtV.factor,
             A,
             X.factor,
-            LinearAlgebra.MulAddMul(α * y[j], true),
+            α * y[j],
+            true,
             buffer,
         )
     end
