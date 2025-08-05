@@ -189,3 +189,31 @@ end;
 @testset "Fallback" begin
     @test LRO.Optimizer() isa LRO.Optimizer{Float64}
 end
+
+@testset "Different factor ranks" begin
+    T = Float64
+    model = Model(LRO.Optimizer)
+    cone = MOI.PositiveSemidefiniteConeTriangle(2)
+    factors = LRO.positive_semidefinite_factorization.(Matrix{T}[T[1 3; 3 1], T[1; 2;;], T[3; 4;;]])
+    tri = LRO.TriangleVectorization.(factors)
+    set = LRO.LinearCombinationInSet{LRO.WITHOUT_SET}(cone, tri)
+    set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
+    set_attribute(model, "sub_solver", Percival.PercivalSolver)
+    set_attribute(model, "ranks", [2])
+    @variable(model, x)
+    @variable(model, y)
+    @constraint(model, [1, -x, -y] in set)
+
+    set_attribute(model, "max_iter", 0)
+    optimize!(model)
+    @test termination_status(model) == MOI.ITERATION_LIMIT
+    diff_check(model)
+    nlp = unsafe_backend(model).model;
+    T = Float64
+    MT = LRO.Factorization{T,Matrix{T},LRO.Ones{T}}
+    @test nlp.C isa Vector{MT}
+    @test nlp.C[] == factors[1]
+    @test nlp.A isa Matrix{MT}
+    @test nlp.A[1] == factors[2]
+    @test nlp.A[2] == factors[3]
+end;
