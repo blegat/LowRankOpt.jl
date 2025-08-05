@@ -44,14 +44,7 @@ function jtprod(model, var)
     B = X[i].factor
     α = 2y[j]
     buffer = model.jtprod_buffer[]
-    @btime LRO.buffered_mul!(
-        $res,
-        $A,
-        $B,
-        $α,
-        true,
-        $buffer,
-    )
+    @btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)
 
     C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
     C = LRO._rmul_diag!!(C, A.scaling)
@@ -85,14 +78,7 @@ function jtprod_matrix(model, var)
     #@profview for i in 1:1000_000
     #    LRO.buffered_mul!(res, A, B, α, true, buffer)
     #end
-    @btime LRO.buffered_mul!(
-        $res,
-        $A,
-        $B,
-        $α,
-        true,
-        $buffer,
-    )
+    @btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)
     #@btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)
 
     C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
