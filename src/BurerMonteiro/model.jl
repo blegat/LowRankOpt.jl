@@ -191,8 +191,17 @@ end
 
 _buffer(_, ::AbstractMatrix, _) = nothing
 _buffer(buffer::AbstractVector, ::_RankOne, ::AbstractMatrix) = buffer
-# TODO check that the size matches, it may not be the highest rank matrix
-_buffer(buffer::AbstractMatrix, ::_LowRank, ::AbstractMatrix) = buffer
+function _buffer(buffer::AbstractMatrix, A::_LowRank, ::AbstractMatrix)
+    # FIXME with this if-else, we return a small Union but the compiler
+    #       since to forget about this Union and allocates later
+    #if size(buffer, 2) == LRO.max_rank(A)
+    #    buffer
+    #else
+    # Using this `view` instead of `buffer`, `AllocCheck` now
+    # sees possible allocations but `@allocated` sees none
+    view(buffer, :, Base.OneTo(LRO.max_rank(A)))
+    #end
+end
 
 function add_jtprod!(
     model::Model,
