@@ -231,7 +231,9 @@ function _add!(
         end
         vectorized = set.vectors[row]::TriangleVectorization
         matrix = vectorized.matrix
-        @assert isone(coef) # TODO multiply scaling
+        if !isone(coef)
+            matrix = mul_scaling(matrix, coef)
+        end
         _add!(A, matrix)
     end
 end
