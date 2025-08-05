@@ -42,7 +42,12 @@ function bench_rmul(A)
     x = rand(n, 1)
     y = similar(x)
     println("rmul")
-    @btime LinearAlgebra.mul!($y, $A, $x, 2.0, 1.0)
+    if A.factor isa AbstractVector
+        buffer = zeros(1)
+    else
+        buffer = zeros(1, LRO.max_rank(A))
+    end
+    @btime LRO.buffered_mul!($y, $A, $x, 2.0, 1.0, $buffer)
 end
 
 function bench(aux, var)
@@ -71,6 +76,7 @@ function bench_plus(args...; kws...)
 end
 
 function bench_lro(args...; vector, kws...)
+    println("vector ? $vector")
     model = maxcut(weights(args...; kws...), dual_optimizer(LRO.Optimizer); vector)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", SDPLRPlus.Solver)
@@ -89,5 +95,4 @@ n = 500
 p = 0.1
 bench_plus(n; p)
 bench_lro(n; p, vector = true)
-bench_lro(n; p, vector = false)
 bench_lro(n; p, vector = false)

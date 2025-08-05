@@ -18,6 +18,11 @@ function Base.getindex(m::AbstractFactorization, i::Int, j::Int)
     )
 end
 
+# Structural maximum rank
+function max_rank(m::AbstractFactorization)
+    return size(left_factor(m), 2)
+end
+
 """
     struct Factorization{
         T,
@@ -423,7 +428,11 @@ function _add_mul!(
     C::LinearAlgebra.AdjOrTrans,
     α,
 )
-    @assert axes(res, 2) == axes(C, 2)
+    # For a small sparse vector of two entries and `C` of length 15,
+    # the `@assert` are slowers than what is gained by
+    # `@inbounds` apparently. See `perf/holy.jl` benchmark `jtprod`
+    #@assert axes(res, 1) == eachindex(x)
+    #@assert axes(res, 2) == axes(C, 2)
     for (row, val) in zip(x.nzind, x.nzval)
         γ = val * α
         for j in axes(res, 2)
@@ -468,41 +477,67 @@ function _add_mul!(
     end
 end
 
-function _mul!(res::AbstractVecOrMat, A::AbstractVecOrMat, B, α, β)
-    return LinearAlgebra.mul!(res, A, B, α, β)
-end
+# `MulAddMul(α, β)` is type unstable as the first two type parameters depends on whether `α` is one
+# and whether `β` is zero.
+# One way to avoid this allocation is to construct it and call the next method within `LinearAlgebra.@stable_muladdmul`
+# which will add if-else clauses.
+# This is however not done when calling `BLAS` since when we call BLAS we just wrap and then unwrap this `MulAddMul`
+# so it should be optimized out and hence not allocation should be incurred due to type instability.
+# For this to work, we need to call `@inline` as suggested by
+# https://github.com/JuliaLang/julia/pull/29634#issuecomment-440512432
+@inline _mul!(C, A, B, α, β) = LinearAlgebra.mul!(C, A, B, α, β)
 
-function _fact_mul!(
+_mul_to!(::Nothing, A, B) = A * B
+_mul_to!(buffer, A, B) = LinearAlgebra.mul!(buffer, A, B)
+
+@inline function buffered_mul!(
     res::AbstractVecOrMat,
     A::AbstractFactorization,
     B::AbstractVecOrMat,
-    α::Number,
-    β::Number,
+    α,
+    β,
+    buffer,
 )
     # TODO if `scaling` is `FillArrays.Fill`, we could just update `α`
-    C = _lmul_diag!!(A.scaling, right_factor(A)' * B)
+    # We'd like the rows to be the number of columns of `B`
+    # as we take submatrices as subsets of columns (for it to be contiguous)
+    # in the buffer so we compute the transpose
+    # `UΣV'B = U(B'VΣ)'`
+    C = _mul_to!(buffer, B', right_factor(A))
+    C = _rmul_diag!!(C, A.scaling)
     lA = left_factor(A)
-    return _mul!(res, lA, C, α, β)
+    return _mul!(res, lA, C', α, β)
 end
 
 # We want the same implementation for the two following ones but we can't use
 # `AbstractVecOrMat` as it would give ambiguity so we redirect to `_fact_mul!`
-function LinearAlgebra.mul!(
-    res::AbstractMatrix,
-    A::AbstractFactorization,
-    B::AbstractMatrix,
-    α::Number,
-    β::Number,
+function buffered_mul!(
+    res::AbstractVecOrMat,
+    A::AbstractMatrix,
+    B::AbstractVecOrMat,
+    α,
+    β,
+    _,
 )
-    return _fact_mul!(res, A, B, α, β)
+    return LinearAlgebra.mul!(res, A, B, α, β)
 end
 
 function LinearAlgebra.mul!(
-    res::AbstractVector,
-    A::AbstractFactorization,
-    B::AbstractVector,
-    α::Number,
-    β::Number,
+    ::AbstractVector,
+    ::AbstractFactorization,
+    ::AbstractVector,
+    ::Number,
+    ::Number,
 )
-    return _fact_mul!(res, A, B, α, β)
+    return error("This is inefficient, call `buffered_mul!` instead")
+end
+
+function LinearAlgebra.mul!(
+    ::AbstractMatrix,
+    ::AbstractFactorization,
+    ::AbstractMatrix,
+    ::Number,
+    ::Number,
+)
+    return error("This is inefficient, call `buffered_mul!` instead")
 end

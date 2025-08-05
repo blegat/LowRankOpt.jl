@@ -110,9 +110,12 @@ num_scalars(model::Model) = length(model.d_lin)
 
 num_matrices(model::Model) = length(model.C)
 
+# Julia has troubles inferring the return type of constructors
+_matrix_index(i)::MatrixIndex = MatrixIndex(i)
+
 function matrix_indices(model::Union{Model,AbstractSolution})
     return MOI.Utilities.LazyMap{MatrixIndex}(
-        MatrixIndex,
+        _matrix_index,
         Base.OneTo(num_matrices(model)),
     )
 end

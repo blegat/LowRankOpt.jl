@@ -15,6 +15,8 @@ function Dimensions{S}(model::LRO.Model, ranks) where {S}
     return Dimensions{S}(num_scalars, side_dimensions, ranks, offsets)
 end
 
+Base.broadcastable(d::Dimensions) = Ref(d)
+
 Base.length(d::Dimensions) = d.offsets[end]
 
 function set_rank!(d::Dimensions, i::LRO.MatrixIndex, rank)

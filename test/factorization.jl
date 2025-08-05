@@ -34,7 +34,7 @@ function test_mul_error()
     err = ErrorException(
         "Missing `_add_mul!` between `Vector{Float64}`, `Main.TestSets.DummySparse` and `Float64`",
     )
-    @test_throws err LinearAlgebra.mul!(rand(2), F, rand(2), true, true)
+    @test_throws err LRO.buffered_mul!(rand(2), F, rand(2), true, true, nothing)
     return
 end
 
@@ -81,7 +81,26 @@ function _test_mul(A, B, α, β)
     else
         res = ones(size(A, 1), size(B, 2))
     end
-    LinearAlgebra.mul!(res, A, B, α, β)
+    err = ErrorException("This is inefficient, call `buffered_mul!` instead")
+    if A isa LRO.AbstractFactorization
+        if LRO.left_factor(A) isa AbstractMatrix
+            if B isa AbstractVector
+                buffer = zeros(LRO.max_rank(A))'
+            else
+                buffer = zeros(size(B, 2), LRO.max_rank(A))
+            end
+        else
+            if B isa AbstractVector
+                buffer = nothing
+            else
+                buffer = zeros(size(B, 2))
+            end
+        end
+        @test_throws err LinearAlgebra.mul!(res, A, B, α, β)
+        LRO.buffered_mul!(res, A, B, α, β, buffer)
+    else
+        LinearAlgebra.mul!(res, A, B, α, β)
+    end
     expected = ones(size(res))
     LinearAlgebra.mul!(expected, Array(A), Array(B), α, β)
     @test res ≈ expected
