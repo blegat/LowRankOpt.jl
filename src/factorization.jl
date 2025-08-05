@@ -478,14 +478,41 @@ end
 
 # If we took `α` and `β` separately in `buffered_mul!`, because of the few methods before we may call this `LinearAlgebra.mul!`
 # again, the compiler might fail to do constant propagation and then allocate when building `MulAddMul` as it is type unstable.
-# This is the reason we pass around a `MulAddMul that we then dismantle here.
-function _mul!(
-    res::AbstractVecOrMat,
+# If we call `LinearAlgebra.mul!`, we'll have to dismantle it and rebuild it so we directly call `generic_matmatmul!`
+# We unfortunately miss many specialized methods like the ones for `Diagonal` matrices or the ones that could be define in separate packages :/
+# And we need to distinguish between `matmat` and `matvec` ourself
+
+_mul!(C, A, B, _add) = _generic_mul!(C, A, B, _add)
+
+function _generic_mul!(
+    C::AbstractMatrix,
     A::AbstractVecOrMat,
-    B,
+    B::AbstractVecOrMat,
     _add::LinearAlgebra.MulAddMul,
 )
-    return LinearAlgebra.mul!(res, A, B, _add.alpha, _add.beta)
+    return LinearAlgebra.generic_matmatmul!(
+        C,
+        LinearAlgebra.wrapper_char(A),
+        LinearAlgebra.wrapper_char(B),
+        LinearAlgebra._unwrap(A),
+        LinearAlgebra._unwrap(B),
+        _add,
+    )
+end
+
+function _generic_mul!(
+    C::AbstractVector,
+    A::AbstractVecOrMat,
+    B::AbstractVector,
+    _add::LinearAlgebra.MulAddMul,
+)
+    return LinearAlgebra.generic_matvecmul!(
+        C,
+        LinearAlgebra.wrapper_char(A),
+        LinearAlgebra._unwrap(A),
+        B,
+        _add,
+    )
 end
 
 _mul_to!(::Nothing, A, B) = A * B
