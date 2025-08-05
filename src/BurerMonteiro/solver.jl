@@ -38,3 +38,7 @@ end
 function MOI.get(solver::Solver, ::LRO.Solution)
     return Solution(solver.stats.solution, solver.model.dim)
 end
+
+function MOI.get(solver::Solver, attr::LRO.RawResultAttribute)
+    return MOI.get(solver.solver, attr)
+end
