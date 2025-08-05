@@ -19,14 +19,25 @@ var = solver.solver.var;
 using BenchmarkTools
 import NLPModels
 const BM = LRO.BurerMonteiro
+
+function _jtprod(model, var)
+    C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
+    C = LRO._rmul_diag!!(C, A.scaling)
+    lA = LRO.left_factor(A)
+    println("_add_mul!")
+    @btime LRO._add_mul!($res, $lA, $C', $α)
+end
+
 function jtprod(model, var)
     x = var.Rt
     y = view(var.y, 1:model.meta.ncon)
     Jtv = var.Gt
+    println("jtprod!")
     @btime NLPModels.jtprod!($model, $x, $y, $Jtv)
 
     X = BM.Solution(x, model.dim)
     JtV = BM.Solution(Jtv, model.dim)
+    println("Scalar jtprod!")
     @btime BM.jtprod!(
         $model,
         $X,
@@ -36,6 +47,7 @@ function jtprod(model, var)
     )
 
     i = LRO.MatrixIndex(1)
+    println("Matrix jtprod!")
     @btime BM.add_jtprod!($model, $X[$i], $y, $JtV[$i], $i)
 
     j = 1
@@ -44,47 +56,8 @@ function jtprod(model, var)
     B = X[i].factor
     α = 2y[j]
     buffer = model.jtprod_buffer[]
+    println("buffered_mul!")
     @btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)
-
-    C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
-    C = LRO._rmul_diag!!(C, A.scaling)
-    lA = LRO.left_factor(A)
-    @btime LRO._add_mul!($res, $lA, $C', $α)
 end
 
 jtprod(aux, var)
-
-function jtprod_matrix(model, var)
-    x = var.Rt
-    y = view(var.y, 1:model.meta.ncon)
-    Jtv = var.Gt
-    #@time NLPModels.jtprod!(model, x, y, Jtv)
-    X = @time BM.Solution(x, model.dim)
-    JtV = @time BM.Solution(Jtv, model.dim)
-    #@time BM.jtprod!(model, X, y, LRO.left_factor(JtV, LRO.ScalarIndex), LRO.ScalarIndex)
-    i = LRO.MatrixIndex(1)
-    Xi = @time X[i]
-    JtVi = @time JtV[i]
-    @show length(y)
-    i = LRO.MatrixIndex(1)
-    #@btime BM.add_jtprod!($model, $X[i], $y, $JtV[i], $i)
-    j = 1
-    res = JtVi.factor
-    A = @time LRO.jac(model.model, j, i)
-    B = Xi.factor
-    α = 2y[j]
-    buffer = model.jtprod_buffer[]
-    #@edit LinearAlgebra.mul!(res, A, B, α, true)
-    #@profview for i in 1:1000_000
-    #    LRO.buffered_mul!(res, A, B, α, true, buffer)
-    #end
-    @btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)
-    #@btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)
-
-    C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
-    C = LRO._rmul_diag!!(C, A.scaling)
-    lA = LRO.left_factor(A)
-    #@code_native LRO._add_mul!(res, lA, C', α)
-    @btime LRO._add_mul!($res, $lA, $C', $α)
-end
-jtprod_matrix(aux, var);

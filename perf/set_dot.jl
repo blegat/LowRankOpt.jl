@@ -1,5 +1,7 @@
 include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
 
+using BenchmarkTools
+
 # Important for Dualization
 function bench_set_dot(n)
     T = Float64
