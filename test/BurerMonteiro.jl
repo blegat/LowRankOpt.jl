@@ -194,7 +194,9 @@ end
     T = Float64
     model = Model(LRO.Optimizer)
     cone = MOI.PositiveSemidefiniteConeTriangle(2)
-    factors = LRO.positive_semidefinite_factorization.(Matrix{T}[T[1 3; 3 1], T[1; 2;;], T[3; 4;;]])
+    factors = LRO.positive_semidefinite_factorization.(
+        Matrix{T}[T[1 3; 3 1], T[1; 2;;], T[3; 4;;]],
+    )
     tri = LRO.TriangleVectorization.(factors)
     set = LRO.LinearCombinationInSet{LRO.WITHOUT_SET}(cone, tri)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)

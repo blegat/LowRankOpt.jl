@@ -199,7 +199,7 @@ function _buffer(buffer::AbstractMatrix, A::_LowRank, ::AbstractMatrix)
     #else
     # Using this `view` instead of `buffer`, `AllocCheck` now
     # sees possible allocations but `@allocated` sees none
-    view(buffer, :, Base.OneTo(LRO.max_rank(A)))
+    return view(buffer, :, Base.OneTo(LRO.max_rank(A)))
     #end
 end
 
