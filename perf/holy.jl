@@ -27,7 +27,13 @@ function jtprod(model, var)
 
     X = BM.Solution(x, model.dim)
     JtV = BM.Solution(Jtv, model.dim)
-    @btime BM.jtprod!($model, $X, $y, LRO.left_factor($JtV, LRO.ScalarIndex), LRO.ScalarIndex)
+    @btime BM.jtprod!(
+        $model,
+        $X,
+        $y,
+        LRO.left_factor($JtV, LRO.ScalarIndex),
+        LRO.ScalarIndex,
+    )
 
     i = LRO.MatrixIndex(1)
     @btime BM.add_jtprod!($model, $X[$i], $y, $JtV[$i], $i)
@@ -38,7 +44,13 @@ function jtprod(model, var)
     B = X[i].factor
     α = 2y[j]
     buffer = model.jtprod_buffer[]
-    @btime LRO.buffered_mul!($res, $A, $B, LinearAlgebra.MulAddMul($α, true), $buffer)
+    @btime LRO.buffered_mul!(
+        $res,
+        $A,
+        $B,
+        LinearAlgebra.MulAddMul($α, true),
+        $buffer,
+    )
 
     C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
     C = LRO._rmul_diag!!(C, A.scaling)
@@ -72,7 +84,13 @@ function jtprod_matrix(model, var)
     #@profview for i in 1:1000_000
     #    LRO.buffered_mul!(res, A, B, α, true, buffer)
     #end
-    @btime LRO.buffered_mul!($res, $A, $B, LinearAlgebra.MulAddMul($α, true), $buffer)
+    @btime LRO.buffered_mul!(
+        $res,
+        $A,
+        $B,
+        LinearAlgebra.MulAddMul($α, true),
+        $buffer,
+    )
     #@btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)
 
     C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
