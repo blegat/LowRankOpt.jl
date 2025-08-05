@@ -48,7 +48,8 @@ function jtprod(model, var)
         $res,
         $A,
         $B,
-        LinearAlgebra.MulAddMul($α, true),
+        $α,
+        true,
         $buffer,
     )
 
@@ -88,7 +89,8 @@ function jtprod_matrix(model, var)
         $res,
         $A,
         $B,
-        LinearAlgebra.MulAddMul($α, true),
+        $α,
+        true,
         $buffer,
     )
     #@btime LRO.buffered_mul!($res, $A, $B, $α, true, $buffer)

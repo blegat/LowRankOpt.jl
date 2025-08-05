@@ -395,17 +395,18 @@ function _mul!(
     res::AbstractVecOrMat{T},
     A::SparseArrays.AbstractSparseArray,
     B,
-    _add::LinearAlgebra.MulAddMul,
+    α,
+    β,
 ) where {T}
-    if iszero(_add.beta) # TODO Could actually dispatch on the type of MulAddMul
+    if iszero(β)
         # Since `A` is sparse, there may be some entries of `res` that we won't touch so
         # we cannot use `LinearAlgebra.MulAddMul(α, β)` as it won't set them to zero.
         # It's better to just set them to zero now and then use `_add_mul!`.
         fill!(res, zero(T))
     else
-        @assert isone(_add.beta) # TODO Could actually dispatch on the type of MulAddMul to check that it's Bool and true with {_,false,_,Bool}
+        @assert isone(β)
     end
-    return _add_mul!(res, A, B, _add.alpha)
+    return _add_mul!(res, A, B, α)
 end
 
 function _add_mul!(
@@ -476,58 +477,25 @@ function _add_mul!(
     end
 end
 
-# If we took `α` and `β` separately in `buffered_mul!`, because of the few methods before we may call this `LinearAlgebra.mul!`
-# again, the compiler might fail to do constant propagation and then allocate when building `MulAddMul` as it is type unstable.
-# If we call `LinearAlgebra.mul!`, we'll have to dismantle it and rebuild it so we directly call `generic_matmatmul!`
-# We unfortunately miss many specialized methods like the ones for `Diagonal` matrices or the ones that could be define in separate packages :/
-# We assert that we have strided arrays to be warned if we missed one (e.g. if we have a `FillArrays.Zeros`)
-# And we need to distinguish between `matmat` and `matvec` ourself
-
-_mul!(C, A, B, _add) = _generic_mul!(C, A, B, _add)
-
-function _generic_mul!(C, A, B, _add)
-    return LinearAlgebra._rscale_add!(C, A, B, _add.alpha, _add.beta)
-end
-
-function _generic_mul!(
-    C::StridedMatrix,
-    A::AbstractVecOrMat,
-    B::AbstractVecOrMat,
-    _add::LinearAlgebra.MulAddMul,
-)
-    return LinearAlgebra.generic_matmatmul!(
-        C,
-        LinearAlgebra.wrapper_char(A),
-        LinearAlgebra.wrapper_char(B),
-        LinearAlgebra._unwrap(A)::StridedVecOrMat,
-        LinearAlgebra._unwrap(B)::StridedVecOrMat,
-        _add,
-    )
-end
-
-function _generic_mul!(
-    C::AbstractVector,
-    A::AbstractVecOrMat,
-    B::StridedVector,
-    _add::LinearAlgebra.MulAddMul,
-)
-    return LinearAlgebra.generic_matvecmul!(
-        C,
-        LinearAlgebra.wrapper_char(A),
-        LinearAlgebra._unwrap(A)::StridedVecOrMat,
-        B,
-        _add,
-    )
-end
+# `MulAddMul(α, β)` is type unstable as the first two type parameters depends on whether `α` is one
+# and whether `β` is zero.
+# One way to avoid this allocation is to construct it and call the next method within `LinearAlgebra.@stable_muladdmul`
+# which will add if-else clauses.
+# This is however not done when calling `BLAS` since when we call BLAS we just wrap and then unwrap this `MulAddMul`
+# so it should be optimized out and hence not allocation should be incurred due to type instability.
+# For this to work, we need to call `@inline` as suggested by
+# https://github.com/JuliaLang/julia/pull/29634#issuecomment-440512432
+@inline _mul!(C, A, B, α, β) = LinearAlgebra.mul!(C, A, B, α, β)
 
 _mul_to!(::Nothing, A, B) = A * B
 _mul_to!(buffer, A, B) = LinearAlgebra.mul!(buffer, A, B)
 
-function buffered_mul!(
+@inline function buffered_mul!(
     res::AbstractVecOrMat,
     A::AbstractFactorization,
     B::AbstractVecOrMat,
-    _add::LinearAlgebra.MulAddMul,
+    α,
+    β,
     buffer,
 )
     # TODO if `scaling` is `FillArrays.Fill`, we could just update `α`
@@ -538,7 +506,7 @@ function buffered_mul!(
     C = _mul_to!(buffer, B', right_factor(A))
     C = _rmul_diag!!(C, A.scaling)
     lA = left_factor(A)
-    return _mul!(res, lA, C', _add)
+    return _mul!(res, lA, C', α, β)
 end
 
 # We want the same implementation for the two following ones but we can't use
@@ -547,10 +515,11 @@ function buffered_mul!(
     res::AbstractVecOrMat,
     A::AbstractMatrix,
     B::AbstractVecOrMat,
-    _add::LinearAlgebra.MulAddMul,
+    α,
+    β,
     _,
 )
-    return LinearAlgebra.mul!(res, A, B, _add.alpha, _add.beta)
+    return LinearAlgebra.mul!(res, A, B, α, β)
 end
 
 function LinearAlgebra.mul!(
