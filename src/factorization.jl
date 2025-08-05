@@ -480,12 +480,22 @@ end
 # again, the compiler might fail to do constant propagation and then allocate when building `MulAddMul` as it is type unstable.
 # If we call `LinearAlgebra.mul!`, we'll have to dismantle it and rebuild it so we directly call `generic_matmatmul!`
 # We unfortunately miss many specialized methods like the ones for `Diagonal` matrices or the ones that could be define in separate packages :/
+# We assert that we have strided arrays to be warned if we missed one (e.g. if we have a `FillArrays.Zeros`)
 # And we need to distinguish between `matmat` and `matvec` ourself
 
 _mul!(C, A, B, _add) = _generic_mul!(C, A, B, _add)
 
 function _generic_mul!(
-    C::AbstractMatrix,
+    C,
+    A,
+    B,
+    _add,
+)
+    LinearAlgebra._rscale_add!(C, A, B, _add.alpha, _add.beta)
+end
+
+function _generic_mul!(
+    C::StridedMatrix,
     A::AbstractVecOrMat,
     B::AbstractVecOrMat,
     _add::LinearAlgebra.MulAddMul,
@@ -494,8 +504,8 @@ function _generic_mul!(
         C,
         LinearAlgebra.wrapper_char(A),
         LinearAlgebra.wrapper_char(B),
-        LinearAlgebra._unwrap(A),
-        LinearAlgebra._unwrap(B),
+        LinearAlgebra._unwrap(A)::StridedVecOrMat,
+        LinearAlgebra._unwrap(B)::StridedVecOrMat,
         _add,
     )
 end
@@ -503,13 +513,13 @@ end
 function _generic_mul!(
     C::AbstractVector,
     A::AbstractVecOrMat,
-    B::AbstractVector,
+    B::StridedVector,
     _add::LinearAlgebra.MulAddMul,
 )
     return LinearAlgebra.generic_matvecmul!(
         C,
         LinearAlgebra.wrapper_char(A),
-        LinearAlgebra._unwrap(A),
+        LinearAlgebra._unwrap(A)::StridedVecOrMat,
         B,
         _add,
     )
