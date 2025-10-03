@@ -30,14 +30,14 @@ It also implements the Burer-Monteiro approach that gets rid of the positive sem
 which allows using any existing [NLPModels](https://jso.dev/NLPModels.jl) solver for part 2.
 For the part 1., it is crucial to exploit the specific structure of the matrices $C$, $A_j$ and $X$ for efficiency.
 For instance, $X$ is often block-diagonal with some blocks being diagonal.
-Second, the matrices $C$ and $A_j$ may be dense ($(O(n^2))$ nonzeros), sparse ($(O(n))$ nonzeros), very sparse ($(O(n))$ nonzeros), zero.
+Second, the matrices $C$ and $A_j$ may be dense ($(O(n^2))$ nonzeros), sparse ($(O(n))$ nonzeros), very sparse ($(O(1))$ nonzeros), zero.
 These matrices may also be low-rank and the low-rank factors could be vectors or matrices that could again have different sparsity characteristics.
 When using Burer-Monteiro, the blocks of the matrix $X$ are also low-rank.
 Having to deal with all those possibilities when implementing the part 2. makes it challenging to write
 an SDP solver. The goal of this package is to significantly simplify the implementation of new
 SDP solver by taking care of part 1.
 
-This packages also extends MathOptInterface (MOI) to low-rank constraints. This allow the user to
+This packages also extends MathOptInterface (MOI) to low-rank constraints. This allows the user to
 specify low-rank blocks of the $A_j$ matrices explicitly.
 For a benchmark on the importance of low-rank constraints, see "Why you should stop using the monomial basis" at [JuMP-dev 2024](https://jump.dev/meetings/jumpdev2024/) : [slides](https://jump.dev/assets/jump-dev-workshops/2024/legat.html) [video](https://youtu.be/CGPHaHxCG2w)
 This package started as an [MOI issue](https://github.com/jump-dev/MathOptInterface.jl/issues/2197) and [MOI PR](https://github.com/jump-dev/MathOptInterface.jl/pull/2198).
@@ -75,10 +75,10 @@ set_attribute(model, "solver", Loraine.Solver)
 
 ### Low-rank constraints
 
-If you $A_j$ matrices have a custom structure that you would like the solver to exploit
+If your $A_j$ matrices have a custom structure that you would like the solver to exploit
 to speed up computation, specify them with the sets `LowRankOpt.SetDotProducts` or
 `LRO.LinearCombinationInSet`.
-For you model to also work with other solver not supporting these low-rank constraints,
+For you model to also work with other solvers not supporting these low-rank constraints,
 add the bridges defined in this package.
 ```julia
 LowRankOpt.add_all_bridges(model, Float64)
