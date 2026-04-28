@@ -16,7 +16,14 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 UnsafeArrays = "c4a57d5a-5b31-53a6-b365-19f8c011fbd6"
 
+[weakdeps]
+Dualization = "191a621a-6537-11e9-281d-650236a99e60"
+
+[extensions]
+DualizationExt = "Dualization"
+
 [compat]
+Dualization = "0.5.10, 0.6, 0.7"
 FillArrays = "1.13"
 KrylovKit = "0.9.5, 0.10"
 LinearAlgebra = "1.10"

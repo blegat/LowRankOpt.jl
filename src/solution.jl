@@ -74,6 +74,10 @@ function Base.size(s::ShapedSolution)
 end
 num_matrices(s::ShapedSolution) = length(s.matrices)
 
+if isdefined(LinearAlgebra, :norm_recursive_check)
+    LinearAlgebra.norm_recursive_check(::ShapedSolution) = nothing
+end
+
 function LinearAlgebra.norm2(s::ShapedSolution{T}) where {T}
     # `LinearAlgebra.generic_norm2` starts by computing the ∞ norm and do a rescaling, we don't do that here
     return √(LinearAlgebra.dot(s, s))
