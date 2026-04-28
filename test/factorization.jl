@@ -142,3 +142,36 @@ end
 end
 
 TestSets.runtests()
+
+using SparseArrays
+import LowRankOpt as LRO
+using Test
+
+function _test_sym(L, R)
+    A = LRO.symmetrize_factorization(x, y)
+
+x = sparsevec([2], [1.0], 5)
+y = sparsevec([2], [1.0], 5)
+z = LRO.symmetrize_factorization(x, y)
+@test z.factor == x
+@test z.scaling isa LRO.One
+y = sparsevec([4], [1.0], 5)
+z = LRO.symmetrize_factorization(x, y)
+@test nnz(z.factor) == 4
+A = LRO.AsymmetricFactorization(x, y, LRO.One{Float64}(tuple()))
+@test z ≈ (A + A') / 2
+LRO.AsymmetricFactorization(x, y, LRO.One{Float64}(tuple()))
+z - LRO.AsymmetricFactorization(x, y, LRO.One{Float64}(tuple()))
+z.factor.^2
+@test z.factor[[2, 4],:] ≈ [1 -1; -1 -1] / √2
+z.scaling
+@test z.scaling ≈ [-1, 1] / 2
+y = sparsevec([3, 4], [1.0, -1.0], 5)
+LRO.symmetrize_factorization(x, y).factor
+y = sparsevec([2, 4], [1.0, -1.0], 5)
+LRO.symmetrize_factorization(x, y).factor
+y = sparsevec([1, 2], [1.0, -1.0], 5)
+LRO.symmetrize_factorization(x, y).factor
+x = sparsevec([1, 2], [1.0, -1.0], 5)
+y = sparsevec([1, 2], [-1.0, 1.0], 5)
+LRO.symmetrize_factorization(x, y).factor

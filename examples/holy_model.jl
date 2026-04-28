@@ -55,18 +55,24 @@ end
 # to `[1, -1] * [1, -1]'` so it is rank-1.
 # So it can also use a rank-1 formulation.
 
-function _factor(i, j, n)
+function _factor(i, j, n; sparse = true, vector = true)
     F = sparsevec([i, j], Float64[1, -1], n)
+    if !sparse
+        F = Vector(F)
+    end
+    if !vector
+        F = hcat(F)
+    end
     return LRO.positive_semidefinite_factorization(F)
 end
 
-function holy_lowrank(A)
+function holy_lowrank(A; kws...)
     n = LinearAlgebra.checksquare(A)
     model = Model()
     set = LRO.SetDotProducts{LRO.WITHOUT_SET}(
         MOI.PositiveSemidefiniteConeTriangle(n),
         LRO.TriangleVectorization.([
-            _factor(i, j, n) for i in 1:(n-1) for j in (i+1):n
+            _factor(i, j, n; kws...) for i in 1:(n-1) for j in (i+1):n
         ]),
     )
     @variable(model, x[1:MOI.dimension(set)] in set)

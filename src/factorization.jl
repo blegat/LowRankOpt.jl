@@ -235,7 +235,32 @@ julia> LowRankOpt.symmetrize_factorization([1, 0], [0, 1])
  0.5  0.0
 ```
 """
+<<<<<<< Updated upstream
 function symmetrize_factorization(L, R; use_krylov = true)
+=======
+function symmetrize_factorization(L, R; kws...)
+    if L == R
+        return positive_semidefinite_factorization(L)
+    end
+    I = findall(axes(L, 1)) do i
+        any(!iszero, L[i, :]) || any(!iszero, R[i, :])
+    end
+    if I == axes(L, 1)
+        _sub_symmetrize_factorization(L, R; kws...)
+    else
+        sub = _sub_symmetrize_factorization(L[I, :], R[I, :]; kws...)
+        factor = if sub.factor isa SparseArrays.AbstractSparseArray
+            SparseArrays.spzeros(size(L, 1), max_rank(sub))
+        else
+            zeros(size(L, 1), max_rank(sub))
+        end
+        factor[I, :] = sub.factor
+        return Factorization(factor, sub.scaling)
+    end
+end
+
+function _sub_symmetrize_factorization(L, R; use_krylov = true)
+>>>>>>> Stashed changes
     sym = LinearAlgebra.Symmetric((L * R' + R * L') / 2)
     r = 2size(L, 2)
     if use_krylov

@@ -8,31 +8,46 @@ set_optimizer(lr, dual_optimizer(LRO.Optimizer))
 set_attribute(lr, "solver", LRO.BurerMonteiro.Solver)
 set_attribute(lr, "sub_solver", SDPLRPlus.Solver)
 set_attribute(lr, "ranks", [15])
-set_attribute(lr, "maxmajoriter", 0)
+set_attribute(lr, "maxmajoriter", 20)
 set_attribute(lr, "square_scalars", true)
-optimize!(lr)
-
-solver = unsafe_backend(lr).dual_problem.dual_model.model.optimizer.solver;
-aux = solver.model;
-var = solver.solver.var;
+@profview optimize!(lr)
+#function g(lr)
+    solver = unsafe_backend(lr).dual_problem.dual_model.model.optimizer.solver;
+    model = solver.model;
+    var = solver.solver.var;
+    A = LRO.jac(model.model, LRO.ScalarIndex)
+    y = view(var.y, 1:model.meta.ncon)
+    JtV = view(var.Gt, 1:size(A, 2))
+    C = JtV
+    @edit LinearAlgebra.mul!(JtV, A', y, 1.0, 0.0)
+    MKLSparse.cscmv!('T', 1.0, "GUUF", A, y, 0.0, C)
+    for i in 1:10
+        y = view(var.y, 1:model.meta.ncon)
+        NLPModels.jtprod!(model, var.Rt, y, var.Gt)
+        var.y .* 2
+    end
+#end
+g(lr)
 
 using BenchmarkTools
 import NLPModels
 const BM = LRO.BurerMonteiro
-
-function _jtprod(model, var)
-    C = LRO._mul_to!(buffer, B', LRO.right_factor(A))
-    C = LRO._rmul_diag!!(C, A.scaling)
-    lA = LRO.left_factor(A)
-    println("_add_mul!")
-    @btime LRO._add_mul!($res, $lA, $C', $α)
-end
 
 function jtprod(model, var)
     x = var.Rt
     y = view(var.y, 1:model.meta.ncon)
     Jtv = var.Gt
     println("jtprod!")
+    @profview for _ in 1:10000
+        SDPLRPlus.𝒜t!(
+            Jtv,
+            x,
+            model,
+            var,
+        )
+        #NLPModels.jtprod!(model, x, y, Jtv)
+    end
+    return
     @btime NLPModels.jtprod!($model, $x, $y, $Jtv)
 
     X = BM.Solution(x, model.dim)

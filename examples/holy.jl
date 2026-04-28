@@ -133,9 +133,9 @@ set_optimizer(cl, dual_optimizer(LRO.Optimizer))
 set_attribute(cl, "solver", LRO.BurerMonteiro.Solver)
 set_attribute(cl, "sub_solver", SDPLRPlus.Solver)
 set_attribute(cl, "ranks", [15])
-set_attribute(lr, "ptol", 1e-5)
-set_attribute(lr, "objtol", Inf)
-set_attribute(lr, "maxmajoriter", 100)
+set_attribute(cl, "ptol", 1e-5)
+set_attribute(cl, "objtol", Inf)
+set_attribute(cl, "maxmajoriter", 100)
 set_attribute(cl, "square_scalars", true)
 optimize!(cl)
 
@@ -150,6 +150,10 @@ set_attribute(lr, "objtol", Inf)
 set_attribute(lr, "maxmajoriter", 100)
 set_attribute(lr, "square_scalars", true)
 optimize!(lr)
+@profview optimize!(lr)
 termination_status(lr)
 objective_value(lr)
 solve_time(lr)
+
+solver = unsafe_backend(lr).dual_problem.dual_model.model.optimizer.solver;
+solver
