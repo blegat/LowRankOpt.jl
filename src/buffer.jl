@@ -68,9 +68,10 @@ function jprod!(model, x, v, Jv, ::Type{ScalarIndex})
     return jprod!(model.model, x, v, Jv, ScalarIndex)
 end
 
-function _add_vec!(_, _, _, _, offset, ::FillArrays.Zeros)
-    return offset
-end
+# Ignore for building the buffers for sparse matrices
+const _IgnoreSparse = Union{FillArrays.Zeros,AbstractFactorization}
+
+_add_vec!(_, _, _, _, offset, ::_IgnoreSparse) = offset
 
 function _add_vec!(I, J, V, j, offset, A::SparseArrays.SparseMatrixCSC)
     Ai, Av = SparseArrays.findnz(A[:])
@@ -165,18 +166,19 @@ function buffer_for_jtprod(model::Model)
     return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
 end
 
-function _merge_sparsity(
+function _merge_buffer(
     A::SparseArrays.SparseMatrixCSC,
     B::SparseArrays.SparseMatrixCSC,
 )
-    return A + B
+    return A + B # This merge the sparsity since we took absolute values
 end
-_merge_sparsity(::FillArrays.Zeros, B::SparseArrays.SparseMatrixCSC) = B
-_merge_sparsity(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros) = A
-_merge_sparsity(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
+_merge_buffer(::FillArrays.Zeros, B::SparseArrays.SparseMatrixCSC) = B
+_merge_buffer(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros) = A
+_merge_buffer(A::Matrix, ::Matrix) = A
 
-_abs(A::SparseArrays.SparseMatrixCSC) = abs.(A)
-_abs(A::FillArrays.Zeros) = A
+_buffer_for_jtprod(A::SparseArrays.SparseMatrixCSC) = abs.(A)
+_buffer_for_jtprod(A::Factorization{T}) where {T} = zeros(T, size(A)...)
+_buffer_for_jtprod(A::FillArrays.Zeros) = A
 
 function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
     if iszero(model.meta.ncon)
@@ -188,8 +190,8 @@ function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
     #     we would return an alias of that only matrix so that `_abs` has the
     #     non-obvious role of avoid this as well as avoiding cancellations.
     return reduce(
-        _merge_sparsity,
-        _abs(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon
+        _merge_buffer,
+        _buffer_for_jtprod(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon
     )
 end
 
@@ -206,10 +208,19 @@ function NLPModels.jtprod!(
 end
 
 _zero!(A::FillArrays.Zeros) = A
-_zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
+_zero!(A::SparseArrays.SparseMatrixCSC{T}) where {T} = fill!(SparseArrays.nonzeros(A), zero(T))
+_zero!(A::Matrix{T}) where {T} = fill!(A, zero(T))
 
 # Computes `A .+= B * α`
 function _add_mul!(::FillArrays.Zeros, ::FillArrays.Zeros, _) end
+
+function _add_mul!(A::Matrix, B::Factorization, α)
+    for i in axes(B.factor, 2)
+        f = view(B.factor, :, i)
+        LinearAlgebra.mul!(A, f, f', B.scaling[i] * α, true)
+    end
+    return A
+end
 
 function _add_mul!(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros, _)
     return A

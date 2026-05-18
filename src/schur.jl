@@ -44,6 +44,7 @@ end
 
 _nnz(::FillArrays.Zeros) = 0
 _nnz(A::SparseArrays.SparseMatrixCSC) = SparseArrays.nnz(A)
+_nnz(A::AbstractFactorization) = 0
 
 # The `jprod!` buffer is guaranteed to be the first argument of the tuple.
 # This assumption is used by Loraine.
@@ -81,70 +82,98 @@ function add_schur_complement!(
     return H
 end
 
-# /!\ W needs to be symmetric
 function add_schur_complement!(
     model::BufferedModelForSchur,
     mat_idx::MatrixIndex,
-    W::AbstractMatrix{T},
+    ii,
+    Ai::SparseArrays.SparseMatrixCSC,
+    W,
     H,
-) where {T}
+)
     AW, WAW, σ, last_dense = model.schur_buffer
     ilmi = mat_idx.value
     n = model.meta.ncon
-
-    for ii in axes(H, 1)
-        i = σ[ii, ilmi]
-        Ai = model.model.A[ilmi, i]
-        if _nnz(Ai) > 0
-            if ii <= last_dense[ilmi]
-                LinearAlgebra.mul!(AW[ilmi], W, Ai)
-                LinearAlgebra.mul!(WAW[ilmi], AW[ilmi], W)
-                I = view(σ, ii:n, ilmi)
-                add_sub_jprod!(model, mat_idx, WAW[ilmi], view(H, I, i), I)
-                for jj in (ii+1):n
-                    j = σ[jj, ilmi]
-                    H[i, j] = H[j, i]
-                end
-            else
-                if _nnz(Ai) > 1
-                    @inbounds for jj in ii:n
-                        j = σ[jj, ilmi]
-                        Aj = model.model.A[ilmi, j]
-                        if !iszero(_nnz(Aj))
-                            ttt = _dot(Ai, Aj, W)
-                            H[i, j] += ttt
-                            if i != j
-                                H[j, i] += ttt
-                            end
-                        end
+    i = σ[ii, ilmi]
+    if ii <= last_dense[ilmi]
+        LinearAlgebra.mul!(AW[ilmi], W, Ai)
+        LinearAlgebra.mul!(WAW[ilmi], AW[ilmi], W)
+        I = view(σ, ii:n, ilmi)
+        add_sub_jprod!(model, mat_idx, WAW[ilmi], view(H, I, i), I)
+        for jj in (ii+1):n
+            j = σ[jj, ilmi]
+            H[i, j] = H[j, i]
+        end
+    else
+        if _nnz(Ai) > 1
+            @inbounds for jj in ii:n
+                j = σ[jj, ilmi]
+                Aj = model.model.A[ilmi, j]
+                if !iszero(_nnz(Aj))
+                    ttt = _dot(Ai, Aj, W)
+                    H[i, j] += ttt
+                    if i != j
+                        H[j, i] += ttt
                     end
-                elseif _nnz(Ai) == 1
-                    # A is symmetric
-                    iiiiAi = jjjiAi = only(SparseArrays.rowvals(Ai))
-                    vvvi = only(SparseArrays.nonzeros(Ai))
-                    @inbounds for jj in ii:n
-                        j = σ[jj, ilmi]
-                        Ajjj = model.model.A[ilmi, j]
-                        # As we sort the matrices in decreasing `nnz` order,
-                        # the rest of matrices is either zero or have only
-                        # one entry
-                        if !iszero(_nnz(Ajjj))
-                            iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
-                            vvvj = only(SparseArrays.nonzeros(Ajjj))
-                            ttt =
-                                vvvi *
-                                W[iiiiAi, iiijAj] *
-                                W[jjjiAi, jjjjAj] *
-                                vvvj
-                            H[i, j] += ttt
-                            if i != j
-                                H[j, i] += ttt
-                            end
-                        end
+                end
+            end
+        elseif _nnz(Ai) == 1
+            # A is symmetric
+            iiiiAi = jjjiAi = only(SparseArrays.rowvals(Ai))
+            vvvi = only(SparseArrays.nonzeros(Ai))
+            @inbounds for jj in ii:n
+                j = σ[jj, ilmi]
+                Ajjj = model.model.A[ilmi, j]
+                # As we sort the matrices in decreasing `nnz` order,
+                # the rest of matrices is either zero or have only
+                # one entry
+                if !iszero(_nnz(Ajjj))
+                    iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
+                    vvvj = only(SparseArrays.nonzeros(Ajjj))
+                    ttt =
+                        vvvi *
+                        W[iiiiAi, iiijAj] *
+                        W[jjjiAi, jjjjAj] *
+                        vvvj
+                    H[i, j] += ttt
+                    if i != j
+                        H[j, i] += ttt
                     end
                 end
             end
         end
+    end
+end
+
+function add_schur_complement!(
+    ::BufferedModelForSchur,
+    ::MatrixIndex,
+    ::Integer,
+    Ai::Factorization,
+    W,
+    H,
+)
+    error("TODO")
+    @show size(W.factor)
+    BB = W.factor' * Ai.factor
+    @show size(H)
+    @show size(BB)
+    #LinearAlgebra.mul!(tmp, BB, BB')
+    H .+= (BB * BB') .^ 2
+    return H
+end
+
+# /!\ W needs to be symmetric
+function add_schur_complement!(
+    model::BufferedModelForSchur,
+    i::MatrixIndex,
+    W::AbstractMatrix{T},
+    H,
+) where {T}
+    _, _, σ, _ = model.schur_buffer
+    for _j in axes(H, 1)
+        j = σ[_j, i.value]
+        Ai = model.model.A[i.value, j]
+        add_schur_complement!(model, i, _j, Ai, W, H)
     end
     return H
 end
