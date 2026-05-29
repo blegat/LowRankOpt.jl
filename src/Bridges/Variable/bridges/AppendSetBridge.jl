@@ -25,7 +25,7 @@ end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:AppendSetBridge{T}},
-    ::Type{LRO.SetDotProducts{LRO.WITHOUT_SET,S,V}},
+    ::Type{<:LRO.SetDotProducts{LRO.WITHOUT_SET,S,V}},
 ) where {T,S,V}
     return AppendSetBridge{T,S,V}
 end

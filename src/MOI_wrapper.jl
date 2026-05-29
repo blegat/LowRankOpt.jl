@@ -231,7 +231,9 @@ function _add!(
         end
         vectorized = set.vectors[row]::TriangleVectorization
         matrix = vectorized.matrix
-        @assert isone(coef) # TODO multiply scaling
+        if !isone(coef)
+            matrix = Factorization(matrix.factor, coef * matrix.scaling)
+        end
         _add!(A, matrix)
     end
 end
@@ -502,5 +504,9 @@ function MOI.get(
     MOI.check_result_index_bounds(optimizer, attr)
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
     sol = MOI.get(optimizer, Solution())
-    return sol[ScalarIndex][rows]
+    scalars = sol[ScalarIndex]
+    # `scalars` is a `MOI.Utilities.VectorLazyMap` when `square_scalars=true`.
+    # Its `getindex(::UnitRange)` calls `f(slice)` rather than `f.(slice)`,
+    # so we iterate explicitly to force scalar `getindex` for each row.
+    return T[scalars[i] for i in rows]
 end

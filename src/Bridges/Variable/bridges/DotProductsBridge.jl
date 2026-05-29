@@ -22,7 +22,7 @@ end
 
 function MOI.Bridges.Variable.concrete_bridge_type(
     ::Type{<:DotProductsBridge{T}},
-    ::Type{LRO.SetDotProducts{LRO.WITH_SET,S,V}},
+    ::Type{<:LRO.SetDotProducts{LRO.WITH_SET,S,V}},
 ) where {T,S,V}
     return DotProductsBridge{T,S,V}
 end

@@ -304,6 +304,11 @@ end
 
 _lmul_diag!!(::FillArrays.Ones, VtU) = VtU
 _rmul_diag!!(VtU, ::FillArrays.Ones) = VtU
+# Disambiguate against the `AbstractArray{<:Any,0}` overloads below for the
+# `Number * Ones`-shaped pair (both are 0-dim arrays as far as Julia's
+# `<:` is concerned).
+_lmul_diag!!(::FillArrays.Ones, VtU::Number) = VtU
+_rmul_diag!!(VtU::Number, ::FillArrays.Ones) = VtU
 
 function _lmul_diag!!(s::FillArrays.Fill, VtU::Number)
     return s.value * VtU
@@ -311,6 +316,14 @@ end
 
 function _lmul_diag!!(s::FillArrays.Fill, VtU)
     return LinearAlgebra.lmul!(s.value, VtU)
+end
+
+function _lmul_diag!!(s::AbstractArray{<:Any,0}, VtU::Number)
+    return s[] * VtU
+end
+
+function _lmul_diag!!(s::AbstractArray{<:Any,0}, VtU)
+    return LinearAlgebra.lmul!(s[], VtU)
 end
 
 function _lmul_diag!!(s::AbstractVector, VtU)
@@ -323,6 +336,14 @@ end
 
 function _rmul_diag!!(VtU, s::FillArrays.Fill)
     return LinearAlgebra.rmul!(VtU, s.value)
+end
+
+function _rmul_diag!!(VtU::Number, s::AbstractArray{<:Any,0})
+    return VtU * s[]
+end
+
+function _rmul_diag!!(VtU, s::AbstractArray{<:Any,0})
+    return LinearAlgebra.rmul!(VtU, s[])
 end
 
 function _rmul_diag!!(VtU, s::AbstractVector)

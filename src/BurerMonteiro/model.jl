@@ -211,6 +211,21 @@ function add_jtprod!(
     i::LRO.MatrixIndex,
     α = 2,
 )
+    batch = LRO._rank_one_rowview_batch(view(model.model.A, i.value, :))
+    if batch !== nothing
+        U, w = batch
+        # `JtV.factor += α * U' * Diagonal(y .* w) * U * X.factor`
+        # = forward batched mul `Z = U * X.factor`, scale rows,
+        #   adjoint batched mul `JtV.factor += U' * Z`.
+        # For `U::MultivariateBases.TrigEvalMatrix` both `mul!`s are FFTs.
+        Z = U * X.factor
+        @inbounds for j in axes(Z, 1)
+            scale = α * y[j] * w[j]
+            @views Z[j, :] .*= scale
+        end
+        LinearAlgebra.mul!(JtV.factor, U', Z, true, true)
+        return
+    end
     for j in eachindex(y)
         A = LRO.jac(model.model, j, i)
         buffer = _buffer(model.jtprod_buffer[i.value], A, X.factor)
@@ -271,15 +286,20 @@ function NLPModels.hprod!(
     ::Type{LRO.ScalarIndex};
     obj_weight,
 ) where {T}
+    # Scalar variables in `square_scalars=true` mode are `x_actual = t²`
+    # (t free). For the LP scalar part:
+    #   `L_scalar(t) = obj_weight · d_lin · t² − y · (C_lin · t²)`
+    # so `∇²L_scalar = diag(2 · (obj_weight · d_lin − C_lin' · y))`, hence
+    #   `(H · v)_scalar = 2 · v_scalar · (obj_weight · d_lin − C_lin' · y)`.
     Hv .= obj_weight .* LRO.grad(model.model, LRO.ScalarIndex)
     LinearAlgebra.mul!(
         Hv,
         LRO.jac(model.model, LRO.ScalarIndex)',
         y,
-        true,
+        -one(T),
         true,
     )
-    Hv .*= -2 .* LRO.left_factor(v, LRO.ScalarIndex)
+    Hv .*= 2 .* LRO.left_factor(v, LRO.ScalarIndex)
     return Hv
 end
 

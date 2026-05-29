@@ -198,16 +198,111 @@ end
 ###### J product ######
 #######################
 
+"""
+    _rank_one_rowview_batch(row)
+
+If every entry `j` of `row` is a rank-1 `Factorization` whose `factor` is
+exactly `view(U, j, :)` for a single common parent matrix `U` (with a
+0-dim scalar `scaling`), return `(U, weights)` where
+`weights[j] == only(row[j].scaling)`. Otherwise return `nothing`.
+
+This is the structural detector for the sample-from-a-parent shape produced
+by `SumOfSquares.Bridges.Variable.LowRankBridge`: every per-Lagrange-point
+rank-1 factor `u_j` is a row of `U = MB.transformation_to(gram, lagrange)`.
+When the detector fires, `add_jprod!` / `BurerMonteiro.add_jtprod!` use a
+single batched `mul!(buf, U, ...)` instead of `n` per-constraint inner
+products — which, for `U::MB.TrigEvalMatrix`, collapses `n` per-row
+dot products into one batched FFT per column of the rank-`r` factor.
+"""
+function _rank_one_rowview_batch(row::AbstractVector)
+    isempty(row) && return nothing
+    n = length(row)
+    e1 = first(row)
+    e1 isa Factorization || return nothing
+    e1.factor isa SubArray || return nothing
+    ndims(e1.factor) == 1 || return nothing
+    ndims(e1.scaling) == 0 || return nothing
+    U = parent(e1.factor)
+    U isa AbstractMatrix || return nothing
+    size(U, 1) == n || return nothing
+    T = eltype(U)
+    weights = Vector{T}(undef, n)
+    @inbounds for j in 1:n
+        e = row[j]
+        e isa Factorization || return nothing
+        f = e.factor
+        f isa SubArray || return nothing
+        parent(f) === U || return nothing
+        ndims(e.scaling) == 0 || return nothing
+        idx = parentindices(f)
+        length(idx) == 2 || return nothing
+        idx[1] == j || return nothing
+        idx[2] isa Base.Slice || return nothing
+        weights[j] = only(e.scaling)
+    end
+    return U, weights
+end
+
+# `V = factor * factor'` (rank-`r` PSD with `Ones` scaling). Cons-path
+# shape: `BurerMonteiro.cons!` calls `jprod!(model, X, X, cx)` which lands
+# here with `V = X[i]::positive_semidefinite_factorization`.
+function _add_jprod_batched!(
+    Jv::AbstractVector,
+    U::AbstractMatrix,
+    weights::AbstractVector,
+    V::Factorization{T,<:AbstractMatrix{T},<:FillArrays.Ones{T,1}},
+) where {T}
+    Z = U * V.factor                       # one batched FFT for `U::TrigEvalMatrix`
+    @inbounds for j in eachindex(weights)
+        Jv[j] += weights[j] * sum(abs2, view(Z, j, :))
+    end
+    return true
+end
+
+# `V = α * (left * right')` (rank-`r` asymmetric with constant `Fill` scaling).
+# Jprod-path shape: `BurerMonteiro.jprod!` lands here with
+# `V = _OuterProduct(X, V)[i]::AsymmetricFactorization(_, _, Fill(2, r))`.
+function _add_jprod_batched!(
+    Jv::AbstractVector,
+    U::AbstractMatrix,
+    weights::AbstractVector,
+    V::AsymmetricFactorization{T,<:AbstractMatrix{T},<:FillArrays.Fill{T,1}},
+) where {T}
+    ZL = U * left_factor(V)
+    ZR = U * right_factor(V)
+    α = V.scaling.value
+    @inbounds for j in eachindex(weights)
+        s = zero(T)
+        @simd for k in axes(ZL, 2)
+            s = muladd(ZL[j, k], ZR[j, k], s)
+        end
+        Jv[j] += α * weights[j] * s
+    end
+    return true
+end
+
 function add_jprod!(
     model::Model,
     V::AbstractMatrix,
     Jv::AbstractVector,
     i::MatrixIndex,
 )
+    batch = _rank_one_rowview_batch(view(model.A, i.value, :))
+    if batch !== nothing
+        U, w = batch
+        if _add_jprod_batched!(Jv, U, w, V)
+            return
+        end
+    end
     for j in 1:model.meta.ncon
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end
+    return
 end
+
+# Fallback: signal "no specialisation" to the caller (which then runs the
+# per-constraint loop). Concrete specialisations above return `true`.
+_add_jprod_batched!(::AbstractVector, ::AbstractMatrix, ::AbstractVector, ::AbstractMatrix) = false
 
 function jprod!(
     model::Model,
