@@ -116,6 +116,26 @@ function test_hprod_matches_finite_diff()
     end
 end
 
+# MadNLP uses the *opposite* Lagrangian sign from NLPModels: it solves with
+# `L_MN(x, y) = obj_weight·f(x) + y'·c(x)` (dual feasibility `∇f + Jᵀy = 0`,
+# `MadNLP/src/IPM/kernels.jl:247`), whereas NLPModels uses
+# `L_NLP(x, y) = obj_weight·f(x) − y'·c(x)`. To get the MadNLP Hessian out of
+# NLPModels' `hprod!`, we must negate `y` before passing it in (this is what
+# `bm_madnlp_kkt.jl`'s `eval_lag_hess_wrapper!` does via
+# `kkt.current_y .= .-l`). The test below locks that sign convention in.
+function test_hprod_matches_finite_diff_madnlp_sign()
+    bm = _bm_model()
+    x  = randn(bm.meta.nvar)
+    y  = randn(bm.meta.ncon)
+    obj_weight = 0.7
+    L_MN(x) = obj_weight * NLPModels.obj(bm, x) + LinearAlgebra.dot(y, NLPModels.cons(bm, x))
+    Hfd = FiniteDiff.finite_difference_hessian(L_MN, x)
+    for v in _sample_vectors(bm.meta.nvar)
+        # Pass `-y` to `NLPModels.hprod` to get the MadNLP-convention Hessian.
+        @test NLPModels.hprod(bm, x, -y, v; obj_weight) ≈ Hfd * v rtol = 1e-5 atol = 1e-5
+    end
+end
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$name", "test_")
