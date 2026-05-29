@@ -211,6 +211,21 @@ function add_jtprod!(
     i::LRO.MatrixIndex,
     α = 2,
 )
+    batch = LRO._rank_one_rowview_batch(view(model.model.A, i.value, :))
+    if batch !== nothing
+        U, w = batch
+        # `JtV.factor += α * U' * Diagonal(y .* w) * U * X.factor`
+        # = forward batched mul `Z = U * X.factor`, scale rows,
+        #   adjoint batched mul `JtV.factor += U' * Z`.
+        # For `U::MultivariateBases.TrigEvalMatrix` both `mul!`s are FFTs.
+        Z = U * X.factor
+        @inbounds for j in axes(Z, 1)
+            scale = α * y[j] * w[j]
+            @views Z[j, :] .*= scale
+        end
+        LinearAlgebra.mul!(JtV.factor, U', Z, true, true)
+        return
+    end
     for j in eachindex(y)
         A = LRO.jac(model.model, j, i)
         buffer = _buffer(model.jtprod_buffer[i.value], A, X.factor)

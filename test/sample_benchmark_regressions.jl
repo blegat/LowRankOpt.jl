@@ -232,6 +232,184 @@ end
 #    correct, so the workaround returns the element-wise mapped values.
 # -----------------------------------------------------------------------------
 
+# -----------------------------------------------------------------------------
+# 6. `_rank_one_rowview_batch` detector + batched `add_jprod!` /
+#    `BurerMonteiro.add_jtprod!` path. When the SOS LowRankBridge produces
+#    `Factorization(view(U, j, :), reshape(T[w_j], ()))` for `j = 1:n`, the
+#    detector must surface the parent `U` and the weight vector, and the
+#    batched evaluators must agree (to floating-point precision) with the
+#    per-constraint reference computation. The whole point of this path is
+#    a single `mul!(buf, U, X.factor)` instead of `n` separate `dot`s.
+# -----------------------------------------------------------------------------
+
+function _rank_one_row_from_matrix(U::AbstractMatrix, w::AbstractVector)
+    n = size(U, 1)
+    @assert length(w) == n
+    return [
+        LRO.Factorization(view(U, j, :), reshape([w[j]], ())) for j in 1:n
+    ]
+end
+
+function test_rank_one_rowview_batch_detects_matching_pattern()
+    U = randn(4, 3)
+    w = [0.1, -0.5, 1.2, 0.3]
+    row = _rank_one_row_from_matrix(U, w)
+    out = LRO._rank_one_rowview_batch(row)
+    @test out !== nothing
+    parent_U, weights = out
+    @test parent_U === U
+    @test weights == w
+end
+
+function test_rank_one_rowview_batch_rejects_materialised_factor()
+    # When the bridge materialises rows (the old `collect(view(U, j, :))`
+    # path) the factors are independent `Vector{Float64}`s; there is no
+    # shared parent to batch on, so the detector must decline.
+    U = randn(4, 3)
+    w = ones(4)
+    row = LRO.Factorization{Float64,Vector{Float64},Array{Float64,0}}[
+        LRO.Factorization(collect(view(U, j, :)), reshape([w[j]], ())) for j in 1:4
+    ]
+    @test LRO._rank_one_rowview_batch(row) === nothing
+end
+
+function test_rank_one_rowview_batch_rejects_mismatched_row_index()
+    # Detector must reject if the j-th constraint's view doesn't index row `j`.
+    U = randn(4, 3)
+    w = ones(4)
+    row = _rank_one_row_from_matrix(U, w)
+    # Swap the first and second entries: their `parentindices` no longer
+    # match `(1, :)` and `(2, :)`.
+    row[1], row[2] = row[2], row[1]
+    @test LRO._rank_one_rowview_batch(row) === nothing
+end
+
+function test_rank_one_rowview_batch_rejects_different_parents()
+    U1 = randn(3, 3)
+    U2 = randn(3, 3)
+    row = [
+        LRO.Factorization(view(U1, 1, :), reshape([1.0], ())),
+        LRO.Factorization(view(U2, 2, :), reshape([1.0], ())),
+        LRO.Factorization(view(U1, 3, :), reshape([1.0], ())),
+    ]
+    @test LRO._rank_one_rowview_batch(row) === nothing
+end
+
+function _batched_jprod_ref(row, V::AbstractMatrix)
+    return [LinearAlgebra.dot(A, V) for A in row]
+end
+
+function test_add_jprod_batched_psd_factorization_matches_reference()
+    # `V = factor * factor'` (PSD rank-`r` with `Ones` scaling) — the
+    # `BurerMonteiro.cons!` shape.
+    rng_U = randn(5, 4)
+    w = [0.3, -0.7, 1.1, 0.0, 2.0]
+    row = _rank_one_row_from_matrix(rng_U, w)
+    factor = randn(4, 2)  # side=4, rank=2
+    V = LRO.positive_semidefinite_factorization(factor)
+    expected = _batched_jprod_ref(row, V)
+    out = LRO._rank_one_rowview_batch(row)
+    @test out !== nothing
+    U, weights = out
+    Jv = zeros(Float64, length(weights))
+    @test LRO._add_jprod_batched!(Jv, U, weights, V) === true
+    @test Jv ≈ expected
+end
+
+function test_add_jprod_batched_asymmetric_factorization_matches_reference()
+    # `V = α * (left * right')` (rank-`r` asymmetric with constant `Fill`
+    # scaling) — the `BurerMonteiro.jprod!` shape produced by
+    # `_OuterProduct(X, V)[i]`.
+    rng_U = randn(6, 3)
+    w = randn(6)
+    row = _rank_one_row_from_matrix(rng_U, w)
+    L = randn(3, 2)
+    R = randn(3, 2)
+    α = 2.0
+    V = LRO.AsymmetricFactorization(L, R, FillArrays.Fill(α, 2))
+    expected = _batched_jprod_ref(row, V)
+    out = LRO._rank_one_rowview_batch(row)
+    @test out !== nothing
+    U, weights = out
+    Jv = zeros(Float64, length(weights))
+    @test LRO._add_jprod_batched!(Jv, U, weights, V) === true
+    @test Jv ≈ expected
+end
+
+function test_add_jprod_batched_unspecialised_V_returns_false()
+    # The fallback `_add_jprod_batched!(::Any, ::Any, ::Any, ::AbstractMatrix)`
+    # signals "no specialisation" so `add_jprod!` falls back to the
+    # per-constraint loop. Cover that contract.
+    U = randn(3, 2)
+    w = ones(3)
+    @test LRO._add_jprod_batched!(
+        zeros(3),
+        U,
+        w,
+        Matrix{Float64}(undef, 2, 2),  # a plain `AbstractMatrix`, not a Factorization
+    ) === false
+end
+
+function test_add_jprod_dispatch_batched_path_matches_unbatched()
+    # Build an `LRO.Model` whose single PSD block has rank-1 constraints
+    # arranged as row-views of a parent matrix, then check that
+    # `add_jprod!` (which now routes through the batched path) agrees with
+    # the explicit per-constraint reference.
+    T = Float64
+    ncon = 5
+    side = 4
+    U = randn(ncon, side)
+    w = randn(ncon)
+    row = _rank_one_row_from_matrix(U, w)
+    # Wrap in the `Matrix{A}` shape expected by `LRO.Model.A`.
+    A = reshape(row, 1, ncon)
+    C = LRO.Factorization{T,Vector{T},Array{T,0}}[]
+    push!(C, LRO.Factorization(zeros(T, side), reshape([zero(T)], ())))
+    b = zeros(T, ncon)
+    d_lin = SparseArrays.spzeros(T, 0)
+    C_lin = SparseArrays.spzeros(T, ncon, 0)
+    msizes = [side]
+    model = LRO.Model(C, A, b, d_lin, C_lin, msizes)
+    V = LRO.positive_semidefinite_factorization(randn(side, 2))
+    Jv = zeros(T, ncon)
+    LRO.add_jprod!(model, V, Jv, LRO.MatrixIndex(1))
+    expected = _batched_jprod_ref(row, V)
+    @test Jv ≈ expected
+end
+
+function test_add_jprod_dispatch_unbatched_fallback_still_works()
+    # When the constraint matrices DON'T form a row-view batch (e.g. they
+    # are independent `Vector{Float64}` factors), the detector returns
+    # `nothing` and `add_jprod!` falls back to the per-constraint loop.
+    T = Float64
+    ncon = 3
+    side = 2
+    factors = [randn(T, side) for _ in 1:ncon]  # independent Vectors → no batch
+    w = randn(T, ncon)
+    row = [LRO.Factorization(factors[j], reshape([w[j]], ())) for j in 1:ncon]
+    A = reshape(
+        convert(
+            Vector{LRO.Factorization{T,Vector{T},Array{T,0}}},
+            row,
+        ),
+        1,
+        ncon,
+    )
+    C = LRO.Factorization{T,Vector{T},Array{T,0}}[]
+    push!(C, LRO.Factorization(zeros(T, side), reshape([zero(T)], ())))
+    b = zeros(T, ncon)
+    d_lin = SparseArrays.spzeros(T, 0)
+    C_lin = SparseArrays.spzeros(T, ncon, 0)
+    msizes = [side]
+    model = LRO.Model(C, A, b, d_lin, C_lin, msizes)
+    @test LRO._rank_one_rowview_batch(view(model.A, 1, :)) === nothing
+    V = LRO.positive_semidefinite_factorization(randn(side, 2))
+    Jv = zeros(T, ncon)
+    LRO.add_jprod!(model, V, Jv, LRO.MatrixIndex(1))
+    expected = [LinearAlgebra.dot(model.A[1, j], V) for j in 1:ncon]
+    @test Jv ≈ expected
+end
+
 function test_vector_lazy_map_scalar_indexing_pattern()
     base = [1.0, 2.0, 3.0, -2.0]
     lazy = MOI.Utilities.VectorLazyMap{Float64}(abs2, base)
