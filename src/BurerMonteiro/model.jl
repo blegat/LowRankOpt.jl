@@ -286,15 +286,20 @@ function NLPModels.hprod!(
     ::Type{LRO.ScalarIndex};
     obj_weight,
 ) where {T}
+    # Scalar variables in `square_scalars=true` mode are `x_actual = t²`
+    # (t free). For the LP scalar part:
+    #   `L_scalar(t) = obj_weight · d_lin · t² − y · (C_lin · t²)`
+    # so `∇²L_scalar = diag(2 · (obj_weight · d_lin − C_lin' · y))`, hence
+    #   `(H · v)_scalar = 2 · v_scalar · (obj_weight · d_lin − C_lin' · y)`.
     Hv .= obj_weight .* LRO.grad(model.model, LRO.ScalarIndex)
     LinearAlgebra.mul!(
         Hv,
         LRO.jac(model.model, LRO.ScalarIndex)',
         y,
-        true,
+        -one(T),
         true,
     )
-    Hv .*= -2 .* LRO.left_factor(v, LRO.ScalarIndex)
+    Hv .*= 2 .* LRO.left_factor(v, LRO.ScalarIndex)
     return Hv
 end
 
