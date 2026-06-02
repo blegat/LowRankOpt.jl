@@ -178,7 +178,7 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
         @test ret === model.jtprod_buffer[i.value]
         ret = LRO.unsafe_dual_cons(model, y, i)
         @test ret isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros}
-        Aty = sum(model.model.A[i.value, j] * y[j] for j in 1:model.meta.ncon)
+        Aty = sum(model.model.A[i.value, j] * y[j] for j in 1:(model.meta.ncon))
         @test ret ≈ model.model.C[i.value] - Aty
         if Aty isa FillArrays.Zeros
             @test ret === model.model.C[i.value]
