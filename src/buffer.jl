@@ -89,14 +89,14 @@ end
 # Since we want to use subsets of constraint indices, we use the columns
 # of `A` for constraint indices and the rows of `A` for matrix indices.
 function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
-    nnz = sum(1:model.meta.ncon; init = 0) do j
+    nnz = sum(1:(model.meta.ncon); init = 0) do j
         return _nnz(model.A[i.value, j])
     end
     I = zeros(Int64, nnz)
     J = zeros(Int64, nnz)
     V = zeros(T, nnz)
     offset = 0
-    for j in 1:model.meta.ncon
+    for j in 1:(model.meta.ncon)
         offset = _add_vec!(I, J, V, j, offset, model.A[i.value, j])
     end
     A = SparseArrays.sparse(
@@ -189,7 +189,7 @@ function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
     #     non-obvious role of avoid this as well as avoiding cancellations.
     return reduce(
         _merge_sparsity,
-        _abs(model.A[mat_idx.value, j]) for j in 1:model.meta.ncon
+        _abs(model.A[mat_idx.value, j]) for j in 1:(model.meta.ncon)
     )
 end
 

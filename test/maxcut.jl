@@ -103,7 +103,7 @@ end;
     b.solver.stats.status = :unbounded
     @test termination_status(model) == MOI.INFEASIBLE
     @test primal_status(model) == MOI.INFEASIBLE_POINT
-    x = LRO.VectorizedSolution(collect(1:b.model.meta.nvar), b.model.dim)
+    x = LRO.VectorizedSolution(collect(1:(b.model.meta.nvar)), b.model.dim)
     sim = similar(x)
     @test sim isa typeof(x)
     sim .= x
@@ -112,7 +112,7 @@ end;
         Vector(x[LRO.ScalarIndex]),
         [Matrix(x[i]) for i in LRO.matrix_indices(b.model)],
     )
-    y = collect(1:b.model.meta.ncon)
+    y = collect(1:(b.model.meta.ncon))
     @test LRO.jac(b.model, 1, LRO.MatrixIndex(1)) ==
           sparse([1], [1], [-1], 4, 4)
     @test LRO.jac(b.model, 1, LRO.ScalarIndex) == sparsevec([1, 2], [-1, 1], 8)

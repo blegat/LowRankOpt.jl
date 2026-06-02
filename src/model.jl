@@ -204,7 +204,7 @@ function add_jprod!(
     Jv::AbstractVector,
     i::MatrixIndex,
 )
-    for j in 1:model.meta.ncon
+    for j in 1:(model.meta.ncon)
         Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
     end
 end
