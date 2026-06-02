@@ -2,7 +2,7 @@ name: format-check
 on:
   push:
     branches:
-      - maain
+      - main
       - release-*
   pull_request:
     types: [opened, synchronize, reopened]
