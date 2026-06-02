@@ -106,6 +106,61 @@ function test_attribute(T::Type)
     )
 end
 
+# `SetDotProducts.vectors` is typed `Vs<:AbstractVector{V}`, so passing
+# `eachrow(U)::RowSlices` (or any non-`Vector{V}` `AbstractVector{V}`)
+# should round-trip cleanly through the bridges. Before the `Vs`-threading
+# fix in `DotProductsBridge`/`AppendSetBridge`, the bridges' supertype
+# `S1` parameter erased `Vs` to its `where`-bound, so MOI couldn't convert
+# the concrete `ConstraintIndex{F, SetDotProducts{...Vector{V}}}` to the
+# abstract `ConstraintIndex{F, SetDotProducts{...Vs} where Vs<:...}`.
+function _rowslices_model(T, model)
+    U = T[1 2; 4 5]                                          # 2 rows of length 2
+    vectors_rs = eachrow(U)                                  # ::Base.RowSlices
+    vectors = [
+        LRO.TriangleVectorization(
+            LRO.Factorization(view(U, j, :), reshape(T[one(T)], ())),
+        )
+        for j in eachindex(vectors_rs)
+    ]                                                        # `Vector{V}`
+    @assert vectors isa AbstractVector
+    x, cx = MOI.add_constrained_variables(
+        model,
+        LRO.SetDotProducts{LRO.WITH_SET}(
+            MOI.PositiveSemidefiniteConeTriangle(2),
+            vectors,
+        ),
+    )
+    MOI.add_constraint(model, one(T) * x[1], MOI.EqualTo(zero(T)))
+    MOI.add_constraint(model, one(T) * x[2], MOI.LessThan(zero(T)))
+    return cx
+end
+function test_added_constrained_variable_types_with_rowslices(T::Type)
+    # The bug the explicit `added_constrained_variable_types` method pins
+    # down: looking it up on the `Vs`-erased UnionAll `DotProductsBridge{T}`
+    # used to throw `MethodError` because the default `SetMapBridge`
+    # version couldn't extract `S1` through the 4-parameter UnionAll.
+    @test MOI.Bridges.added_constrained_variable_types(
+        LRO.Bridges.Variable.DotProductsBridge{T},
+    ) isa Vector{Tuple{Type}}
+    @test MOI.Bridges.added_constrained_variable_types(
+        LRO.Bridges.Variable.AppendSetBridge{T},
+    ) isa Vector{Tuple{Type}}
+    # Concrete form should also work and report the concrete `S1` (the
+    # `SetDotProducts` with both `V` and `Vs` filled in).
+    V = LRO.TriangleVectorization{T,LRO.Factorization{T,Vector{T},Array{T,0}}}
+    S = MOI.PositiveSemidefiniteConeTriangle
+    S1 = LRO.SetDotProducts{LRO.WITH_SET,S,V,Vector{V}}
+    @test (S1,) in MOI.Bridges.added_constrained_variable_types(
+        LRO.Bridges.Variable.DotProductsBridge{T,S,V,Vector{V}},
+    )
+    # `AppendSetBridge` should report the matching `WITH_SET` form so
+    # `add_bridge` knows to chain to `DotProductsBridge`.
+    @test (S1,) in MOI.Bridges.added_constrained_variable_types(
+        LRO.Bridges.Variable.AppendSetBridge{T,S,V,Vector{V}},
+    )
+    return
+end
+
 end  # module
 
 TestVariableDotProducts.runtests()
