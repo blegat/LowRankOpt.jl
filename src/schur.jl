@@ -214,9 +214,7 @@ const _Rank1Model{T,C} = Model{T,C,<:_RankOneFactorization{T}}
 
 # The rank-1 Schur path does not consume the sparse `jprod` buffer, but
 # `BufferedModelForSchur` still constructs one. Return a typed placeholder.
-buffer_for_jprod(
-    ::_Rank1Model{T,C},
-) where {T,C<:AbstractMatrix{T}} = nothing
+buffer_for_jprod(::_Rank1Model{T,C}) where {T,C<:AbstractMatrix{T}} = nothing
 
 # `jtprod` of a sum of rank-1 matrices is generically dense, so allocate
 # a dense per-block buffer of the right size.

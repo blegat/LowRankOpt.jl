@@ -19,12 +19,7 @@ import Random
 # Build a tiny `LRO.Model` whose constraint matrices share the
 # `view(U_i, j, :)` shape produced by the SOS bridge / sample-from-parent
 # rank-1 batch (`LRO._rank_one_rowview_batch`).
-function _rank1_model(
-    ::Type{T},
-    sizes::Vector{Int},
-    n::Int;
-    seed = 0,
-) where {T}
+function _rank1_model(::Type{T}, sizes::Vector{Int}, n::Int; seed = 0) where {T}
     rng = Random.MersenneTwister(seed)
     p = length(sizes)
     Us = [randn(rng, T, n, m) for m in sizes]
@@ -36,10 +31,8 @@ function _rank1_model(
     }
     A = Matrix{AT}(undef, p, n)
     for i in 1:p, j in 1:n
-        A[i, j] = LRO.Factorization(
-            view(Us[i], j, :),
-            reshape(T[weights[i][j]], ()),
-        )
+        A[i, j] =
+            LRO.Factorization(view(Us[i], j, :), reshape(T[weights[i][j]], ()))
     end
     CT = LRO.Factorization{T,Vector{T},Array{T,0}}
     C = CT[
@@ -137,19 +130,11 @@ function test_negative_scalings()
     }
     A = Matrix{AT}(undef, 1, n)
     for j in 1:n
-        A[1, j] =
-            LRO.Factorization(view(Us[1], j, :), reshape(T[ws[1][j]], ()))
+        A[1, j] = LRO.Factorization(view(Us[1], j, :), reshape(T[ws[1][j]], ()))
     end
     CT = LRO.Factorization{T,Vector{T},Array{T,0}}
     C = CT[LRO.Factorization(zeros(T, 2), reshape(T[zero(T)], ()))]
-    model2 = LRO.Model(
-        C,
-        A,
-        model.b,
-        model.d_lin,
-        model.C_lin,
-        model.msizes,
-    )
+    model2 = LRO.Model(C, A, model.b, model.d_lin, model.C_lin, model.msizes)
     buf = LRO.BufferedModelForSchur(model2, 1)
     W = _random_sym_blocks(T, sizes; seed = 7)
     H = zeros(T, n, n)

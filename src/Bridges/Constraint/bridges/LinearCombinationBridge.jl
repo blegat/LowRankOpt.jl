@@ -88,7 +88,7 @@ function MOI.Bridges.adjoint_map_function(bridge::LinearCombinationBridge, func)
 end
 
 function MOI.Bridges.inverse_map_function(::LinearCombinationBridge, _)
-    throw(
+    return throw(
         MOI.Bridges.MapNotInvertible(
             "The linear map is not always invertible for `LinearCombinationBridge`, use a `CachingOptimizer` layer",
         ),
