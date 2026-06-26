@@ -3,6 +3,7 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
+import Random
 import Percival
 
 include("diff_check.jl")
@@ -11,6 +12,9 @@ include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
 weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
 
 function test_maxcut(; is_dual, sparse, vector)
+    # The Burer-Monteiro starting point is `rand`-based (see
+    # `BurerMonteiro.meta`)
+    Random.seed!(0)
     opt = LRO.Optimizer
     if is_dual
         opt = dual_optimizer(opt)
