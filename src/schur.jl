@@ -212,10 +212,6 @@ const _RankOneFactorization{T} =
 
 const _Rank1Model{T,C} = Model{T,C,<:_RankOneFactorization{T}}
 
-# The rank-1 Schur path does not consume the sparse `jprod` buffer, but
-# `BufferedModelForSchur` still constructs one. Return a typed placeholder.
-buffer_for_jprod(::_Rank1Model{T,C}) where {T,C<:AbstractMatrix{T}} = nothing
-
 # `jtprod` of a sum of rank-1 matrices is generically dense, so allocate
 # a dense per-block buffer of the right size.
 function buffer_for_jtprod(
@@ -309,4 +305,53 @@ function eval_schur_complement!(
     end
     result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
     return result
+end
+
+# ------------------------------------------------------------
+# `jprod`/`jtprod` for an all-rank-one buffered model
+# ------------------------------------------------------------
+# A full solve (e.g. Loraine) also needs `jprod`/`jtprod`, not just the Schur
+# complement. Rather than special-casing those, we let the rank-one model build
+# the same buffers as the sparse path: the `jprod` buffer stacks `vec(Aᵢⱼ)`
+# columns (so `buffer_for_jprod` must *not* return `nothing`), and the dense
+# `jtprod` buffer is filled with rank-one updates. We only need to teach the
+# generic primitives how to handle a rank-one `Factorization` entry.
+
+# Nonzero (index, value) pairs of a rank-one factor, for both sparse and dense
+# factor vectors (dense factors are used e.g. by the SOS rank-one batch).
+_rank_one_nz(b::SparseArrays.SparseVector) = SparseArrays.findnz(b)
+_rank_one_nz(b::AbstractVector) = (eachindex(b), b)
+
+# `vec(s b b')` has `nnz(b)²` nonzeros at `support(b) × support(b)`.
+function _nnz(F::_RankOneFactorization)
+    bi, _ = _rank_one_nz(F.factor)
+    return length(bi)^2
+end
+
+function _add_vec!(I, J, V, j, offset, F::_RankOneFactorization)
+    s = only(F.scaling)
+    d = length(F.factor)
+    bi, bv = _rank_one_nz(F.factor)
+    k = offset
+    for q in eachindex(bi), p in eachindex(bi)
+        k += 1
+        I[k] = (bi[q] - 1) * d + bi[p]
+        J[k] = j
+        V[k] = s * bv[p] * bv[q]
+    end
+    return k
+end
+
+# `jtprod` buffer is dense for the rank-one model: reset and rank-one update.
+_zero!(A::Matrix{T}) where {T} = fill!(A, zero(T))
+
+function _add_mul!(A::Matrix{T}, F::_RankOneFactorization{T}, α) where {T}
+    c = α * only(F.scaling)
+    if !iszero(c)
+        bi, bv = _rank_one_nz(F.factor)
+        @inbounds for q in eachindex(bi), p in eachindex(bi)
+            A[bi[p], bi[q]] += c * bv[p] * bv[q]
+        end
+    end
+    return A
 end
