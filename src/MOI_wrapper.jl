@@ -137,8 +137,7 @@ const MODEL_OPTIONS = ["detect_rank_one"]
 
 function MOI.optimize!(model::Optimizer)
     options = Dict{Symbol,Any}(
-        Symbol(key) => model.options[key] for
-        key in keys(model.options) if
+        Symbol(key) => model.options[key] for key in keys(model.options) if
         !(key in SOLVER_OPTIONS) && !(key in MODEL_OPTIONS)
     )
     if model.silent

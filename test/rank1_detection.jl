@@ -74,7 +74,8 @@ end
 function test_rank_one_from_factorization()
     g = LRO.positive_semidefinite_factorization([1.0, 2.0, 3.0])
     f = LRO.rank_one(g)
-    @test f isa LRO.Factorization{Float64,<:SparseVector,<:AbstractArray{Float64,0}}
+    @test f isa
+          LRO.Factorization{Float64,<:SparseVector,<:AbstractArray{Float64,0}}
     @test Matrix(f) ≈ Matrix(g)
     return
 end
@@ -111,11 +112,9 @@ function test_detect_rank_one_with_zeros()
 end
 
 function test_detect_rank_one_empty()
-    @test isnothing(LRO.detect_rank_one(Matrix{SparseMatrixCSC{Float64,Int}}(
-        undef,
-        0,
-        0,
-    )))
+    @test isnothing(
+        LRO.detect_rank_one(Matrix{SparseMatrixCSC{Float64,Int}}(undef, 0, 0)),
+    )
     return
 end
 
