@@ -184,3 +184,174 @@ function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
     result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
     return result
 end
+
+# ============================================================
+# Rank-1 Schur complement
+# ============================================================
+#
+# When every constraint matrix in block `i` is rank-1, with
+# `A_{i,j} = d_{i,j} b_{i,j} b_{i,j}'`, the Frobenius inner product
+# collapses (W symmetric):
+#
+#     ⟨A_{i,j}, W A_{i,k} W⟩
+#       = d_{i,j} d_{i,k} ⟨b_{i,j} b_{i,j}', W b_{i,k} b_{i,k}' W⟩
+#       = d_{i,j} d_{i,k} (b_{i,j}' W b_{i,k})².
+#
+# Stacking factors row-wise into `U_i` (n × m_i) and scalings into the
+# n-vector `d_i`, the block contribution to H is
+#
+#     H += (d_i d_i') .* (U_i W U_i').²,
+#
+# i.e. one (n × m_i) × (m_i × m_i) gemm, one (n × m_i) × (m_i × n) gemm,
+# and an entrywise update — no per-constraint `m_i × m_i` dense product.
+# This is the same scalar-product trick implemented by `makeBBBB_rank1`
+# in `Loraine.jl/src/makeBBBB.jl`.
+
+const _RankOneFactorization{T} =
+    Factorization{T,<:AbstractVector{T},<:AbstractArray{T,0}}
+
+const _Rank1Model{T,C} = Model{T,C,<:_RankOneFactorization{T}}
+
+# `jtprod` of a sum of rank-1 matrices is generically dense, so allocate
+# a dense per-block buffer of the right size.
+function buffer_for_jtprod(
+    model::_Rank1Model{T,C},
+) where {T,C<:AbstractMatrix{T}}
+    iszero(num_matrices(model)) && return
+    return map(matrix_indices(model)) do idx
+        m = side_dimension(model, idx)
+        return zeros(T, m, m)
+    end
+end
+
+# Per-block buffer: `U[i]` stacks `b_j'` row-wise, `d[i]` holds the
+# scalings, and `UW[i]`, `M[i]` are pre-allocated work areas reused at
+# every IPM iteration.
+function buffer_for_schur_complement(
+    model::_Rank1Model{T,C},
+    _,
+) where {T,C<:AbstractMatrix{T}}
+    n = model.meta.ncon
+    blocks = matrix_indices(model)
+    p = length(blocks)
+    U = Vector{Matrix{T}}(undef, p)
+    d = Vector{Vector{T}}(undef, p)
+    UW = Vector{Matrix{T}}(undef, p)
+    M = Vector{Matrix{T}}(undef, p)
+    for idx in blocks
+        i = idx.value
+        m_i = side_dimension(model, idx)
+        Ui = Matrix{T}(undef, n, m_i)
+        di = Vector{T}(undef, n)
+        for j in 1:n
+            A_ij = model.A[i, j]
+            Ui[j, :] = A_ij.factor
+            di[j] = only(A_ij.scaling)
+        end
+        U[i] = Ui
+        d[i] = di
+        UW[i] = Matrix{T}(undef, n, m_i)
+        M[i] = Matrix{T}(undef, n, n)
+    end
+    return U, d, UW, M
+end
+
+# /!\ W must be symmetric. Adds the block-i contribution to H using the
+# rank-1 scalar-product trick: H[j,k] += d_j d_k (b_j' W b_k)².
+function add_schur_complement!(
+    model::BufferedModelForSchur{T,C,<:_RankOneFactorization{T}},
+    mat_idx::MatrixIndex,
+    W::AbstractMatrix{T},
+    H,
+) where {T,C<:AbstractMatrix{T}}
+    U_list, d_list, UW_list, M_list = model.schur_buffer
+    i = mat_idx.value
+    U, d, UW, M = U_list[i], d_list[i], UW_list[i], M_list[i]
+    LinearAlgebra.mul!(UW, U, W)
+    LinearAlgebra.mul!(M, UW, U')
+    n = size(U, 1)
+    @inbounds for k in 1:n
+        dk = d[k]
+        for j in 1:n
+            H[j, k] += d[j] * dk * abs2(M[j, k])
+        end
+    end
+    return H
+end
+
+# Same trick, applied directly to `H y` without materializing H:
+# (H y)_j = d_j Σ_k y_k d_k (b_j' W b_k)².
+function eval_schur_complement!(
+    model::BufferedModelForSchur{T,C,<:_RankOneFactorization{T}},
+    W,
+    y::AbstractVector,
+    result::AbstractVector,
+) where {T,C<:AbstractMatrix{T}}
+    fill!(result, zero(eltype(result)))
+    U_list, d_list, UW_list, M_list = model.schur_buffer
+    for idx in matrix_indices(model)
+        i = idx.value
+        U, d, UW, M = U_list[i], d_list[i], UW_list[i], M_list[i]
+        LinearAlgebra.mul!(UW, U, W[idx])
+        LinearAlgebra.mul!(M, UW, U')
+        n = size(U, 1)
+        @inbounds for j in 1:n
+            s = zero(T)
+            for k in 1:n
+                s += y[k] * d[k] * abs2(M[j, k])
+            end
+            result[j] += d[j] * s
+        end
+    end
+    result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
+    return result
+end
+
+# ------------------------------------------------------------
+# `jprod`/`jtprod` for an all-rank-one buffered model
+# ------------------------------------------------------------
+# A full solve (e.g. Loraine) also needs `jprod`/`jtprod`, not just the Schur
+# complement. Rather than special-casing those, we let the rank-one model build
+# the same buffers as the sparse path: the `jprod` buffer stacks `vec(Aᵢⱼ)`
+# columns (so `buffer_for_jprod` must *not* return `nothing`), and the dense
+# `jtprod` buffer is filled with rank-one updates. We only need to teach the
+# generic primitives how to handle a rank-one `Factorization` entry.
+
+# Nonzero (index, value) pairs of a rank-one factor, for both sparse and dense
+# factor vectors (dense factors are used e.g. by the SOS rank-one batch).
+_rank_one_nz(b::SparseArrays.SparseVector) = SparseArrays.findnz(b)
+_rank_one_nz(b::AbstractVector) = (eachindex(b), b)
+
+# `vec(s b b')` has `nnz(b)²` nonzeros at `support(b) × support(b)`.
+function _nnz(F::_RankOneFactorization)
+    bi, _ = _rank_one_nz(F.factor)
+    return length(bi)^2
+end
+
+function _add_vec!(I, J, V, j, offset, F::_RankOneFactorization)
+    s = only(F.scaling)
+    d = length(F.factor)
+    bi, bv = _rank_one_nz(F.factor)
+    k = offset
+    for q in eachindex(bi), p in eachindex(bi)
+        k += 1
+        I[k] = (bi[q] - 1) * d + bi[p]
+        J[k] = j
+        V[k] = s * bv[p] * bv[q]
+    end
+    return k
+end
+
+# `jtprod` buffer is dense for the rank-one model: reset and rank-one update.
+_zero!(A::Matrix{T}) where {T} = fill!(A, zero(T))
+
+function _add_mul!(A::Matrix{T}, F::_RankOneFactorization{T}, α) where {T}
+    c = α * only(F.scaling)
+    if !iszero(c)
+        bi, bv = _rank_one_nz(F.factor)
+        @inbounds for q in eachindex(bi), p in eachindex(bi)
+            A[bi[p], bi[q]] += c * bv[p] * bv[q]
+        end
+    end
+    return A
+end

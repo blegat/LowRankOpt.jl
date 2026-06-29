@@ -3,14 +3,27 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
+module TestMaxcut
+
+using Test
+using SparseArrays
+using FillArrays
+using JuMP
+using Dualization
+import Random
 import Percival
+import NLPModels
+import LowRankOpt as LRO
 
 include("diff_check.jl")
 include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
 
 weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0];
 
-function test_maxcut(; is_dual, sparse, vector)
+function _test_maxcut(; is_dual, sparse, vector)
+    # The Burer-Monteiro starting point is `rand`-based (see
+    # `BurerMonteiro.meta`)
+    Random.seed!(0)
     opt = LRO.Optimizer
     if is_dual
         opt = dual_optimizer(opt)
@@ -80,15 +93,18 @@ function test_maxcut(; is_dual, sparse, vector)
     end
 end
 
-@testset "Max-CUT dual ? $is_dual" for is_dual in [false, true]
-    @testset "Sparse ? $sparse" for sparse in [false, true]
-        @testset "Vector ? $vector" for vector in [false, true]
-            test_maxcut(; is_dual, sparse, vector)
+function test_maxcut()
+    @testset "Max-CUT dual ? $is_dual" for is_dual in [false, true]
+        @testset "Sparse ? $sparse" for sparse in [false, true]
+            @testset "Vector ? $vector" for vector in [false, true]
+                _test_maxcut(; is_dual, sparse, vector)
+            end
         end
     end
-end;
+    return
+end
 
-@testset "ConvexSolver $T" for T in [Float32, Float64]
+function _test_convex_solver(T)
     model = maxcut(T.(weights), LRO.Optimizer{T})
     set_attribute(model, "solver", ConvexSolver)
     b = unsafe_backend(model)
@@ -136,4 +152,26 @@ end;
     schur_test(b.model, 0)
     schur_test(b.model, 1)
     schur_test(b.model, 2)
-end;
+    return
+end
+
+function test_convex_solver()
+    @testset "ConvexSolver $T" for T in [Float32, Float64]
+        _test_convex_solver(T)
+    end
+    return
+end
+
+function runtests()
+    for name in names(@__MODULE__; all = true)
+        if startswith("$name", "test_")
+            @testset "$(name)" begin
+                getfield(@__MODULE__, name)()
+            end
+        end
+    end
+end
+
+end
+
+TestMaxcut.runtests()

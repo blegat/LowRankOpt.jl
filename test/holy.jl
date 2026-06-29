@@ -3,14 +3,20 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
+module TestHoly
+
+using Test
+using SparseArrays
+using JuMP
+using Dualization
+import Random
+import Percival
+import LowRankOpt as LRO
+
 include("diff_check.jl")
 include(joinpath(dirname(@__DIR__), "examples", "holy_model.jl"))
 
-import Random
-using Dualization
-import Percival
-
-function test_holy(; is_dual, low_rank, square_scalars, n = 10)
+function _test_holy(; is_dual, low_rank, square_scalars, n = 10)
     opt = LRO.Optimizer
     if is_dual
         opt = dual_optimizer(opt)
@@ -44,9 +50,26 @@ function test_holy(; is_dual, low_rank, square_scalars, n = 10)
     @test b.model.A isa Matrix{F}
 end
 
-@testset "Holy low-rank ? $low_rank" for low_rank in [false, true]
-    @testset "Square scalars ? $square_scalars" for square_scalars in
-                                                    [false, true]
-        test_holy(; is_dual = true, low_rank, square_scalars)
+function test_holy()
+    @testset "Holy low-rank ? $low_rank" for low_rank in [false, true]
+        @testset "Square scalars ? $square_scalars" for square_scalars in
+                                                        [false, true]
+            _test_holy(; is_dual = true, low_rank, square_scalars)
+        end
     end
-end;
+    return
+end
+
+function runtests()
+    for name in names(@__MODULE__; all = true)
+        if startswith("$name", "test_")
+            @testset "$(name)" begin
+                getfield(@__MODULE__, name)()
+            end
+        end
+    end
+end
+
+end
+
+TestHoly.runtests()
