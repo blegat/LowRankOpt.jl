@@ -131,10 +131,15 @@ end
 
 const SOLVER_OPTIONS = ["solver", "sub_solver", "ranks", "square_scalars"]
 
+# Options consumed while building the `Model` in `copy_to`; they must not be
+# forwarded to the solver constructor nor to `solve!`.
+const MODEL_OPTIONS = ["detect_rank_one"]
+
 function MOI.optimize!(model::Optimizer)
     options = Dict{Symbol,Any}(
         Symbol(key) => model.options[key] for
-        key in keys(model.options) if !(key in SOLVER_OPTIONS)
+        key in keys(model.options) if
+        !(key in SOLVER_OPTIONS) && !(key in MODEL_OPTIONS)
     )
     if model.silent
         options[:verbose] = 0
@@ -318,9 +323,16 @@ function MOI.copy_to(
     end
     b = dest.max_sense ? b0 : -b0
 
+    A_con = _instantiate(A[:, 2:end])
+    if get(dest.options, "detect_rank_one", false)
+        rank_one_A = detect_rank_one(A_con)
+        if !isnothing(rank_one_A)
+            A_con = rank_one_A
+        end
+    end
     dest.model = Model(
         _instantiate(A[:, 1]),
-        _instantiate(A[:, 2:end]),
+        A_con,
         b,
         convert(
             SparseArrays.SparseVector{T,Int64},

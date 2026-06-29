@@ -155,6 +155,92 @@ function positive_semidefinite_factorization(
     return Factorization(factor, Ones{T}(Base.OneTo(size(factor, 2))))
 end
 
+# The uniform rank-one type produced by `rank_one` so that a whole constraint
+# array can be stored as a concrete `Matrix{<:Factorization}` (and hence hit
+# the rank-1 Schur specialization in `schur.jl`).
+const _SparseRankOne{T} =
+    Factorization{T,SparseArrays.SparseVector{T,Int},Array{T,0}}
+
+_sparse_rank_one(factor::SparseArrays.SparseVector{T}, s::T) where {T} =
+    Factorization(factor, s)::_SparseRankOne{T}
+
+"""
+    rank_one(A::AbstractMatrix{T}; atol = 0, rtol = √eps)
+
+If the symmetric matrix `A` is rank one (or zero), return an equivalent
+[`Factorization`](@ref) `s * b * b'`; otherwise return `nothing`. The zero
+matrix maps to a zero-scaling factorization so that an array mixing zeros and
+rank-one matrices can still be converted uniformly (see [`detect_rank_one`](@ref)).
+
+No eigen/SVD is used: if `A = s b b'` then for any `p` with `A[p,p] ≠ 0`,
+column `p` is `A[:,p] = (s b_p) b`, so `b ∝ A[:,p]` and
+`A = A[:,p] A[:,p]' / A[p,p]`. We pick such a pivot `p` and verify the identity.
+"""
+function rank_one end
+
+function rank_one(
+    A::SparseArrays.SparseMatrixCSC{T};
+    atol = zero(real(T)),
+    rtol = sqrt(eps(real(float(T)))),
+) where {T}
+    n = LinearAlgebra.checksquare(A)
+    if iszero(A)
+        return _sparse_rank_one(SparseArrays.spzeros(T, n), zero(T))
+    end
+    p = findfirst(j -> !iszero(A[j, j]), 1:n)
+    isnothing(p) && return nothing # nonzero but zero diagonal ⇒ not rank one
+    u = A[:, p]
+    s = inv(A[p, p])
+    ui, uv = SparseArrays.findnz(u)
+    # A rank-one `s u u'` has exactly `length(ui)^2` nonzeros, all on `ui × ui`.
+    SparseArrays.nnz(A) == length(ui)^2 || return nothing
+    for a in eachindex(ui), b in eachindex(ui)
+        if !isapprox(A[ui[a], ui[b]], s * uv[a] * uv[b]; atol, rtol)
+            return nothing
+        end
+    end
+    return _sparse_rank_one(u, s)
+end
+
+function rank_one(A::FillArrays.Zeros{T}; kws...) where {T}
+    n = LinearAlgebra.checksquare(A)
+    return _sparse_rank_one(SparseArrays.spzeros(T, n), zero(T))
+end
+
+# Already rank one (vector factor): just coerce to the uniform sparse type.
+function rank_one(
+    A::Factorization{T,<:AbstractVector{T},<:AbstractArray{T,0}};
+    kws...,
+) where {T}
+    return _sparse_rank_one(SparseArrays.sparse(A.factor), only(A.scaling))
+end
+
+rank_one(::AbstractMatrix; kws...) = nothing
+
+"""
+    detect_rank_one(A::AbstractMatrix{<:AbstractMatrix}; kws...)
+
+Try to convert every entry of the constraint-matrix array `A` to a rank-one
+[`Factorization`](@ref) via [`rank_one`](@ref). Return the converted
+`Matrix{<:Factorization}` if **all** entries are rank one (or zero), so that the
+result hits the rank-1 Schur specialization; otherwise return `nothing` (leaving
+the caller to keep the original sparse representation, since a per-block mix of
+rank-one and sparse blocks is not supported yet).
+"""
+function detect_rank_one(
+    A::AbstractMatrix{<:AbstractMatrix{T}};
+    kws...,
+) where {T}
+    isempty(A) && return nothing
+    R = Matrix{_SparseRankOne{T}}(undef, size(A))
+    for i in eachindex(IndexCartesian(), A)
+        f = rank_one(A[i]; kws...)
+        isnothing(f) && return nothing
+        R[i] = f
+    end
+    return R
+end
+
 struct AsymmetricFactorization{
     T,
     F<:Union{AbstractVector{T},AbstractMatrix{T}},
