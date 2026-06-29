@@ -161,8 +161,9 @@ end
 const _SparseRankOne{T} =
     Factorization{T,SparseArrays.SparseVector{T,Int},Array{T,0}}
 
-_sparse_rank_one(factor::SparseArrays.SparseVector{T}, s::T) where {T} =
-    Factorization(factor, s)::_SparseRankOne{T}
+function _sparse_rank_one(factor::SparseArrays.SparseVector{T}, s::T) where {T}
+    return Factorization(factor, s)::_SparseRankOne{T}
+end
 
 """
     rank_one(A::AbstractMatrix{T}; atol = 0, rtol = √eps)
