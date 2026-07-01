@@ -368,6 +368,10 @@ function MOI.get(optimizer::Optimizer, ::MOI.SolveTimeSec)
     return optimizer.solver.stats.elapsed_time
 end
 
+function MOI.get(optimizer::Optimizer, ::MOI.BarrierIterations)
+    return optimizer.solver.stats.iter
+end
+
 function MOI.get(optimizer::Optimizer, ::MOI.RawStatusString)
     return SolverCore.STATUSES[optimizer.solver.stats.status]
 end
