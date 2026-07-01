@@ -131,9 +131,22 @@ function add_sub_jprod!(
     Jv::AbstractVector,
     I,
 )
-    # `view(cache, I)` would be terribly slow, only the number of elements of `I` matter here
+    # `Jv[k] += ⟨A[:, I[k]], vec(V)⟩` for each `k`. Going through
+    # `mul!(Jv, view(A, :, I)', vec(V))` hits the generic (non-BLAS, sparse
+    # `getindex`-based) matvec since the adjoint of a `SparseMatrixCSC` column
+    # subset has no specialized method; iterate the CSC columns directly.
     A = model.jprod_buffer[i.value]
-    return _add_jprod!(V, Jv, view(A, :, I))
+    v = _vec(V)
+    rows = SparseArrays.rowvals(A)
+    vals = SparseArrays.nonzeros(A)
+    @inbounds for (k, j) in enumerate(I)
+        acc = zero(eltype(Jv))
+        for p in SparseArrays.nzrange(A, j)
+            acc += vals[p] * v[rows[p]]
+        end
+        Jv[k] += acc
+    end
+    return Jv
 end
 
 function add_jprod!(
