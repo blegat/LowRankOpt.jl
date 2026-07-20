@@ -13,12 +13,15 @@ function errors(
     pobj = NLPModels.obj(model, x),
     dobj = dual_obj(model, y),
 )
-    b_den = 1 + LinearAlgebra.norm(cons_constant(model), 1)
+    # The DIMACS spec writes these as `‖·‖₁`, but defines that as the largest
+    # component; in practice CSDP/SDPT3 (and Loraine) use the 2-norm for `b` and
+    # the Frobenius norm for `C`, so we match that here (`norm` defaults to 2).
+    b_den = 1 + LinearAlgebra.norm(cons_constant(model))
     C_den =
         1 +
-        LinearAlgebra.norm(grad(model, ScalarIndex), 1) +
+        LinearAlgebra.norm(grad(model, ScalarIndex)) +
         sum(matrix_indices(model), init = zero(b_den)) do i
-            return LinearAlgebra.norm(grad(model, i), 1)
+            return LinearAlgebra.norm(grad(model, i))
         end
     obj_den = 1 + abs(pobj) + abs(dobj)
     return (

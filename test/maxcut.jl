@@ -126,10 +126,10 @@ end;
     for xx in [x, X]
         err = LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx)
         @test length(err) == 6
-        @test err[1] ≈ 4.155017729878046
-        @test err[2] ≈ 0.318237296391563
-        @test err[3] ≈ 70/9
-        @test err[4] ≈ 70/9
+        @test err[1] ≈ 10.089041685524935
+        @test err[2] ≈ 0.7727306013872245 rtol = 1e-6
+        @test err[3] ≈ 18.2842712474619
+        @test err[4] ≈ 18.2842712474619
         @test err[5] ≈ 0.92
         @test err[6] ≈ 392.0
     end
