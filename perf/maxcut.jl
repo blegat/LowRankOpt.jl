@@ -66,29 +66,36 @@ end
 
 function bench_plus(args...; kws...)
     C = maxcut_objective(weights(args...; kws...))
-    As = [SymLowRankMatrix(Diagonal(ones(1)), e_i(Float64, i, n, sparse = false, vector = false)) for i in 1:n]
+    As = [
+        SymLowRankMatrix(
+            Diagonal(ones(1)),
+            e_i(Float64, i, n, sparse = false, vector = false),
+        ) for i in 1:n
+    ]
     b = ones(n)
     d = SDPLRPlus.SDPData(C, As, b)
     var = SDPLRPlus.SolverVars(d, 1)
     aux = SDPLRPlus.SolverAuxiliary(d)
     bench(aux, var)
-    bench_lmul(aux.symlowrank_As[1]);
+    return bench_lmul(aux.symlowrank_As[1]);
 end
 
 function bench_lro(args...; vector, kws...)
     println("vector ? $vector")
-    model = maxcut(weights(args...; kws...), dual_optimizer(LRO.Optimizer); vector)
+    model =
+        maxcut(weights(args...; kws...), dual_optimizer(LRO.Optimizer); vector)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", SDPLRPlus.Solver)
     set_attribute(model, "ranks", [1])
     set_attribute(model, "maxmajoriter", 0)
     set_attribute(model, "printlevel", 3)
     @time optimize!(model)
-    solver = unsafe_backend(model).dual_problem.dual_model.model.optimizer.solver
+    solver =
+        unsafe_backend(model).dual_problem.dual_model.model.optimizer.solver
     aux = solver.model
     var = solver.solver.var
     bench(aux, var)
-    bench_rmul(aux.model.A[1])
+    return bench_rmul(aux.model.A[1])
 end
 
 n = 500
