@@ -457,23 +457,18 @@ function _add_mul!(
     end
 end
 
+# `SparseArrays` has a specialized (CSC-traversing) `mul!` method for the
+# adjoint of a `SparseMatrixCSC` so we can safely delegate. It requires a
+# strided destination, so we restrict `res` to `StridedVector` to get a
+# `MethodError` for a non-strided destination rather than silently hitting
+# the generic `getindex`-based fallback.
 function _add_mul!(
-    res::AbstractVector,
+    res::StridedVector,
     Ft::LinearAlgebra.Adjoint{<:Any,<:SparseArrays.SparseMatrixCSC},
     C::AbstractVector,
     α,
 )
-    F = parent(Ft)
-    @assert axes(C, 1) == axes(F, 1)
-    @assert axes(res, 1) == axes(F, 2)
-    for col in axes(F, 2)
-        acc = zero(eltype(res))
-        for i in SparseArrays.nzrange(F, col)
-            acc += SparseArrays.nonzeros(F)[i] * C[SparseArrays.rowvals(F)[i]]
-        end
-        res[col] += acc * α
-    end
-    return res
+    return LinearAlgebra.mul!(res, Ft, C, α, true)
 end
 
 # The adjoint of a column subset of a `SparseMatrixCSC` has no specialized
