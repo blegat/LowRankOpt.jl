@@ -29,6 +29,7 @@ function test_maxcut(; is_dual, sparse, vector)
     set_attribute(model, "max_iter", 20)
     optimize!(model)
     @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test 0 < MOI.get(model, MOI.BarrierIterations()) <= 20
     @test objective_value(model) ≈ 18 rtol = 1e-6
     diff_check(model)
     T = Float64
