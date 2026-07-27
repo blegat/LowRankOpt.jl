@@ -134,7 +134,7 @@ end;
     set_attribute(model, "max_iter", 0)
     optimize!(model)
     @test termination_status(model) == MOI.ITERATION_LIMIT
-    nlp = unsafe_backend(model).model;
+    nlp = unsafe_backend(model).model
     @test nlp.C isa Vector{SparseMatrixCSC{T,Int}}
     @test nlp.C[1] == [3 1; 1 4]
     @test nlp.A isa Matrix{
@@ -210,7 +210,7 @@ end
     optimize!(model)
     @test termination_status(model) == MOI.ITERATION_LIMIT
     diff_check(model)
-    nlp = unsafe_backend(model).model;
+    nlp = unsafe_backend(model).model
     T = Float64
     MT = LRO.Factorization{T,Matrix{T},LRO.Ones{T}}
     @test nlp.C isa Vector{MT}

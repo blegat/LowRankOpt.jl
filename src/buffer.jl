@@ -120,8 +120,8 @@ _vec(x::FillArrays.Zeros{T}) where {T} = FillArrays.Zeros{T}(length(x))
 _vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
 _vec(x::Base.ReshapedArray) = _vec(parent(x))
 
-function _add_jprod!(V, Jv::AbstractArray{T}, A) where {T}
-    return LinearAlgebra.mul!(Jv, A', _vec(V), true, true)
+function _add_jprod!(V, Jv::AbstractArray, A)
+    return _add_mul!(Jv, A', _vec(V), true)
 end
 
 function add_sub_jprod!(

@@ -457,6 +457,54 @@ function _add_mul!(
     end
 end
 
+# `SparseArrays` has a specialized (CSC-traversing) `mul!` method for the
+# adjoint of a `SparseMatrixCSC` so we can safely delegate. It requires a
+# strided destination, so we restrict `res` to `StridedVector` to get a
+# `MethodError` for a non-strided destination rather than silently hitting
+# the generic `getindex`-based fallback.
+function _add_mul!(
+    res::StridedVector,
+    Ft::LinearAlgebra.Adjoint{<:Any,<:SparseArrays.SparseMatrixCSC},
+    C::AbstractVector,
+    α,
+)
+    return LinearAlgebra.mul!(res, Ft, C, α, true)
+end
+
+# The adjoint of a column subset of a `SparseMatrixCSC` has no specialized
+# `mul!` method so it would hit the generic `getindex`-based fallback
+# that does a binary search for each entry of the full dense index space;
+# iterate the stored entries of the selected columns of the parent instead.
+function _add_mul!(
+    res::AbstractVector,
+    Ft::LinearAlgebra.Adjoint{
+        <:Any,
+        <:SubArray{
+            <:Any,
+            2,
+            <:SparseArrays.SparseMatrixCSC,
+            <:Tuple{Base.Slice,Any},
+        },
+    },
+    C::AbstractVector,
+    α,
+)
+    F = parent(parent(Ft))
+    cols = parentindices(parent(Ft))[2]
+    @assert axes(C, 1) == axes(F, 1)
+    @assert axes(res, 1) == axes(cols, 1)
+    rows = SparseArrays.rowvals(F)
+    vals = SparseArrays.nonzeros(F)
+    @inbounds for (k, col) in enumerate(cols)
+        acc = zero(eltype(res))
+        for i in SparseArrays.nzrange(F, col)
+            acc += vals[i] * C[rows[i]]
+        end
+        res[k] += acc * α
+    end
+    return res
+end
+
 function _add_mul!(
     res::AbstractMatrix,
     F::SparseArrays.SparseMatrixCSC,
