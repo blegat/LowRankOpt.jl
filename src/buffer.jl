@@ -120,8 +120,8 @@ _vec(x::FillArrays.Zeros{T}) where {T} = FillArrays.Zeros{T}(length(x))
 _vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
 _vec(x::Base.ReshapedArray) = _vec(parent(x))
 
-function _add_jprod!(V, Jv::AbstractArray{T}, A) where {T}
-    return LinearAlgebra.mul!(Jv, A', _vec(V), true, true)
+function _add_jprod!(V, Jv::AbstractArray, A)
+    return _add_mul!(Jv, A', _vec(V), true)
 end
 
 function add_sub_jprod!(
@@ -131,22 +131,9 @@ function add_sub_jprod!(
     Jv::AbstractVector,
     I,
 )
-    # `Jv[k] += ⟨A[:, I[k]], vec(V)⟩` for each `k`. Going through
-    # `mul!(Jv, view(A, :, I)', vec(V))` hits the generic (non-BLAS, sparse
-    # `getindex`-based) matvec since the adjoint of a `SparseMatrixCSC` column
-    # subset has no specialized method; iterate the CSC columns directly.
+    # `view(cache, I)` would be terribly slow, only the number of elements of `I` matter here
     A = model.jprod_buffer[i.value]
-    v = _vec(V)
-    rows = SparseArrays.rowvals(A)
-    vals = SparseArrays.nonzeros(A)
-    @inbounds for (k, j) in enumerate(I)
-        acc = zero(eltype(Jv))
-        for p in SparseArrays.nzrange(A, j)
-            acc += vals[p] * v[rows[p]]
-        end
-        Jv[k] += acc
-    end
-    return Jv
+    return _add_jprod!(V, Jv, view(A, :, I))
 end
 
 function add_jprod!(

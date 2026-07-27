@@ -458,6 +458,59 @@ function _add_mul!(
 end
 
 function _add_mul!(
+    res::AbstractVector,
+    Ft::LinearAlgebra.Adjoint{<:Any,<:SparseArrays.SparseMatrixCSC},
+    C::AbstractVector,
+    α,
+)
+    F = parent(Ft)
+    @assert axes(C, 1) == axes(F, 1)
+    @assert axes(res, 1) == axes(F, 2)
+    for col in axes(F, 2)
+        acc = zero(eltype(res))
+        for i in SparseArrays.nzrange(F, col)
+            acc += SparseArrays.nonzeros(F)[i] * C[SparseArrays.rowvals(F)[i]]
+        end
+        res[col] += acc * α
+    end
+    return res
+end
+
+# The adjoint of a column subset of a `SparseMatrixCSC` has no specialized
+# `mul!` method so it would hit the generic `getindex`-based fallback
+# that does a binary search for each entry of the full dense index space;
+# iterate the stored entries of the selected columns of the parent instead.
+function _add_mul!(
+    res::AbstractVector,
+    Ft::LinearAlgebra.Adjoint{
+        <:Any,
+        <:SubArray{
+            <:Any,
+            2,
+            <:SparseArrays.SparseMatrixCSC,
+            <:Tuple{Base.Slice,Any},
+        },
+    },
+    C::AbstractVector,
+    α,
+)
+    F = parent(parent(Ft))
+    cols = parentindices(parent(Ft))[2]
+    @assert axes(C, 1) == axes(F, 1)
+    @assert axes(res, 1) == axes(cols, 1)
+    rows = SparseArrays.rowvals(F)
+    vals = SparseArrays.nonzeros(F)
+    @inbounds for (k, col) in enumerate(cols)
+        acc = zero(eltype(res))
+        for i in SparseArrays.nzrange(F, col)
+            acc += vals[i] * C[rows[i]]
+        end
+        res[k] += acc * α
+    end
+    return res
+end
+
+function _add_mul!(
     res::AbstractMatrix,
     F::SparseArrays.SparseMatrixCSC,
     C::AbstractMatrix,
