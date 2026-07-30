@@ -77,7 +77,7 @@ function bench_plus(args...; kws...)
     var = SDPLRPlus.SolverVars(d, 1)
     aux = SDPLRPlus.SolverAuxiliary(d)
     bench(aux, var)
-    return bench_lmul(aux.symlowrank_As[1]);
+    return bench_lmul(aux.symlowrank_As[1])
 end
 
 function bench_lro(args...; vector, kws...)
