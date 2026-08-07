@@ -81,13 +81,42 @@ function _add_vec!(I, J, V, j, offset, A::SparseArrays.SparseMatrixCSC)
     return offset + length(Ai)
 end
 
-# `SparseMatrixCSC` is stored with an offset by column.
-# This means that getting view `view(A, :, I)` can be handles efficently,
-# these give `SparseMatrixCSCView` (if `I` is a `UnitRange`) and
-# `SparseMatrixCSCColumnSubset` otherwise.
-# In `schur.jl`, we therefore get a `SparseMatrixCSCColumnSubset`.
-# Since we want to use subsets of constraint indices, we use the columns
-# of `A` for constraint indices and the rows of `A` for matrix indices.
+"""
+    buffer_for_jprod(model::Model, i::MatrixIndex)
+
+Return the sparse matrix collecting the vectorization of every constraint
+matrix of the `i`th PSD block:
+```
+𝐀ᵢ = [vec(Aᵢ₁) vec(Aᵢ₂) … vec(Aᵢₙ)] ∈ ℝ^(mᵢ² × n)
+```
+where `mᵢ` is the side dimension of the block and `n` is the number of
+constraints. This is the matrix `𝒜` of [HKS24, Section 3.1], which is
+stated there for a single PSD block, here built once per block.
+
+It represents the linear equality-constraint operator
+`Xᵢ ↦ (⟨Aᵢⱼ, Xᵢ⟩)ⱼ` as a single matrix, so that `add_jprod!` is one
+sparse matrix-vector product. It is computed once at problem setup and
+reused at every interior-point iteration, both for the Jacobian products
+and for the dense columns of the Schur complement assembled in
+`schur.jl`.
+
+`SparseMatrixCSC` is stored with an offset by column.
+This means that getting view `view(A, :, I)` can be handles efficently,
+these give `SparseMatrixCSCView` (if `I` is a `UnitRange`) and
+`SparseMatrixCSCColumnSubset` otherwise.
+In `schur.jl`, we therefore get a `SparseMatrixCSCColumnSubset`.
+Since we want to use subsets of constraint indices, we use the columns
+of `A` for constraint indices and the rows of `A` for matrix indices.
+The subsets used in `schur.jl` are suffixes of the constraints sorted by
+decreasing number of nonzeros, following [FKN97].
+
+[HKS24] Habibi, Soodeh, Michal Kočvara, and Michael Stingl. "Loraine -- an
+interior-point solver for low-rank semidefinite programming."
+Optimization Methods and Software 39.6 (2024): 1185-1215.
+[FKN97] Fujisawa, Katsuki, Masakazu Kojima, and Kazuhide Nakata.
+"Exploiting sparsity in primal-dual interior-point methods for
+semidefinite programming." Mathematical Programming 79 (1997): 235-253.
+"""
 function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
     nnz = sum(1:(model.meta.ncon); init = 0) do j
         return _nnz(model.A[i.value, j])
@@ -124,6 +153,21 @@ function _add_jprod!(V, Jv::AbstractArray, A)
     return _add_mul!(Jv, A', _vec(V), true)
 end
 
+"""
+    add_sub_jprod!(
+        model::BufferedModelForSchur,
+        i::MatrixIndex,
+        V::AbstractMatrix,
+        Jv::AbstractVector,
+        I,
+    )
+
+Same as `add_jprod!` but restricted to the constraints of `I`:
+adds `⟨Aᵢⱼ, V⟩` to `Jv[k]` for the `k`th entry `j` of `I`. This is the
+product with the column subset `𝐀ᵢ[:, I]` of the buffer described in
+`buffer_for_jprod`, which is why the buffer is stored with
+constraints as columns.
+"""
 function add_sub_jprod!(
     model::BufferedModelForSchur,
     i::MatrixIndex,
@@ -136,6 +180,20 @@ function add_sub_jprod!(
     return _add_jprod!(V, Jv, view(A, :, I))
 end
 
+"""
+    add_jprod!(
+        model::BufferedModelForSchur,
+        V::AbstractMatrix,
+        Jv::AbstractVector,
+        i::MatrixIndex,
+    )
+
+Add the contribution of the `i`th PSD block to the product between the
+Jacobian of the equality constraints and `V`, that is, add `𝐀ᵢᵀ vec(V)`
+to `Jv`, whose `j`th entry is `⟨Aᵢⱼ, V⟩`. Here `𝐀ᵢ` is the buffer built
+by `buffer_for_jprod` so this is a single sparse matrix-vector
+product.
+"""
 function add_jprod!(
     model::BufferedModelForSchur,
     V::AbstractMatrix,
