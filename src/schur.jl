@@ -1,6 +1,7 @@
 # This code computes the Schur complement using the ideas detailed in [FKN97, Section 3]
 # This is useful to compute search direction in primal-dual interior-point methods for semidefinite programs [FKN97]
 # [FKN97] Fujisawa, Katsuki, Masakazu Kojima, and Kazuhide Nakata. "Exploiting sparsity in primal-dual interior-point methods for semidefinite programming." Mathematical Programming 79 (1997): 235-253.
+# [HKS24] Habibi, Soodeh, Michal Kočvara, and Michael Stingl. "Loraine -- an interior-point solver for low-rank semidefinite programming." Optimization Methods and Software 39.6 (2024): 1185-1215.
 # It was adapted from dapted from Michal Kocvara's code in
 # https://github.com/kocvara/Loraine.jl/blob/bd2821ba830786a78f04081d7e8f5cac25e56cac/src/makeBBBB.jl
 
@@ -81,6 +82,16 @@ function add_schur_complement!(
     return H
 end
 
+# Adds the contribution `𝐀ᵢᵀ (W ⊗ W) 𝐀ᵢ` of the PSD block `mat_idx` to `H`,
+# where `𝐀ᵢ` is the buffer documented in `buffer_for_jprod`.
+# `H` is assembled column by column. For a constraint `i` in the dense
+# regime, that is, one of the `last_dense[ilmi]` first entries of the
+# permutation `σ` sorting the constraints by decreasing number of nonzeros,
+# the dense matrix `W Aᵢ W` is formed once and all the remaining inner
+# products `⟨Aⱼ, W Aᵢ W⟩`, `j ∈ I`, are then obtained with the single
+# sparse matrix-vector product `𝐀ᵢ[:, I]ᵀ vec(W Aᵢ W)` of
+# `add_sub_jprod!`. The constraints with at most one nonzero use the
+# dedicated low-nnz paths below, also following [FKN97].
 # /!\ W needs to be symmetric
 function add_schur_complement!(
     model::BufferedModelForSchur,
@@ -162,6 +173,9 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA_jW⟩
+# [HKS24, (5b)] is stated for a single PSD block; summing over the blocks
+# and adding the contribution of the scalar block gives
+# H = ∑ᵢ 𝐀ᵢᵀ (Wᵢ ⊗ Wᵢ) 𝐀ᵢ + C_lin * Diagonal(w) * C_linᵀ
 function schur_complement!(model::BufferedModelForSchur, W::AbstractVector, H)
     fill!(H, zero(eltype(H)))
     if num_matrices(model) > 0
