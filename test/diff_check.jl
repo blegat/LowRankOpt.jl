@@ -188,6 +188,19 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
             @test ret === model.jtprod_buffer[i.value]
         end
     end
+    # Loraine's `H_alpha` preconditioner builds the low-rank correction to
+    # the Schur complement one constraint at a time: `prec_alpha_S!` calls
+    # `unsafe_jtprod` with a *sparse* `y` (a column of the constraint
+    # matrix), not with a dense one like the interior-point iteration does.
+    # So `unsafe_jtprod` must accept any `AbstractVector` and agree with the
+    # dense result; restricting it to `StridedVector` type-errors there
+    # without failing anything else in this suite.
+    y_sparse = SparseArrays.sparsevec(y)
+    for i in LRO.matrix_indices(model)
+        dense = copy(LRO.unsafe_jtprod(model, y, i))
+        @test LRO.unsafe_jtprod(model, y_sparse, i) ≈ dense
+    end
+
     dcons = ones(LRO.num_scalars(model))
     LRO.dual_cons!(model, y, dcons, LRO.ScalarIndex)
     @test dcons ≈ model.model.d_lin - model.model.C_lin' * y
