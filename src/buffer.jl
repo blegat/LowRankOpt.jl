@@ -223,32 +223,18 @@ function buffer_for_jtprod(model::Model)
     return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
 end
 
-function _merge_sparsity(
-    A::SparseArrays.SparseMatrixCSC,
-    B::SparseArrays.SparseMatrixCSC,
-)
-    return A + B
-end
-_merge_sparsity(::FillArrays.Zeros, B::SparseArrays.SparseMatrixCSC) = B
-_merge_sparsity(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros) = A
-_merge_sparsity(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
-
-_abs(A::SparseArrays.SparseMatrixCSC) = abs.(A)
-_abs(A::FillArrays.Zeros) = A
-
 function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
-    if iszero(model.meta.ncon)
-        d = side_dimension(model, mat_idx)
+    d = side_dimension(model, mat_idx)
+    # If every `Aᵢⱼ` is zero then so is the product, and callers rely on
+    # getting a `Zeros` back (`_sub` then aliases `C` instead of copying).
+    if iszero(model.meta.ncon) ||
+       all(j -> iszero(_nnz(model.A[mat_idx.value, j])), 1:(model.meta.ncon))
         return FillArrays.Zeros{T}(d, d)
     end
-    # FIXME: at some point, switch to dense
-    # /!\ If there is only one nonzero matrix and we didn't have `_abs`,
-    #     we would return an alias of that only matrix so that `_abs` has the
-    #     non-obvious role of avoid this as well as avoiding cancellations.
-    return reduce(
-        _merge_sparsity,
-        _abs(model.A[mat_idx.value, j]) for j in 1:(model.meta.ncon)
-    )
+    # Dense: `unsafe_jtprod` fills this with a single sparse matrix-vector
+    # product against the `buffer_for_jprod` matrix, and the result is
+    # immediately multiplied by dense matrices by `eval_schur_complement!`.
+    return zeros(T, d, d)
 end
 
 function NLPModels.jtprod!(
@@ -263,34 +249,30 @@ function NLPModels.jtprod!(
     end
 end
 
-_zero!(A::FillArrays.Zeros) = A
-_zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
-
-# Computes `A .+= B * α`
-function _add_mul!(::FillArrays.Zeros, ::FillArrays.Zeros, _) end
-
-function _add_mul!(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros, _)
-    return A
+function _jtprod!(
+    buffer::FillArrays.Zeros,
+    ::SparseArrays.SparseMatrixCSC,
+    ::AbstractVector,
+)
+    return buffer
 end
 
-function _add_mul!(
+function _jtprod!(
+    buffer::StridedMatrix,
     A::SparseArrays.SparseMatrixCSC,
-    B::SparseArrays.SparseMatrixCSC,
-    α,
+    # `y` is a `SparseVector` when called from Loraine's `H_alpha`
+    # preconditioner, so this must stay an `AbstractVector`.
+    y::AbstractVector,
 )
-    for col in axes(A, 2)
-        range_A = SparseArrays.nzrange(A, col)
-        it_A = iterate(range_A)
-        for k in SparseArrays.nzrange(B, col)
-            row_B = SparseArrays.rowvals(B)[k]
-            while SparseArrays.rowvals(A)[it_A[1]] < row_B
-                it_A = iterate(range_A, it_A[2])
-            end
-            # By construction, since we constructed `A` with `_merge_sparsity`
-            @assert row_B == SparseArrays.rowvals(A)[it_A[1]]
-            SparseArrays.nonzeros(A)[it_A[1]] += SparseArrays.nonzeros(B)[k] * α
-        end
-    end
+    # `A` is the `buffer_for_jprod` matrix: its `j`th column is `vec(Aᵢⱼ)`, so
+    # this computes `vec(buffer) = A * y = vec(∑ⱼ Aᵢⱼ yⱼ)` in `Θ(nnz(A))`.
+    # Scattering each `Aᵢⱼ` into `buffer` one at a time instead costs
+    # `Θ(ncon * side_dimension)` in loop overhead alone, which dominates
+    # everything else when this is called once per CG iteration.
+    # `_vec` is `UnsafeArrays.uview` so it does not allocate, unlike `vec`
+    # which would allocate a reshaped wrapper on every call.
+    LinearAlgebra.mul!(_vec(buffer), A, y)
+    return buffer
 end
 
 """
@@ -304,11 +286,7 @@ is called for the same `i`.
 """
 function unsafe_jtprod(model::BufferedModelForSchur, y, i::MatrixIndex)
     buffer = model.jtprod_buffer[i.value]
-    _zero!(buffer)
-    for j in eachindex(y)
-        _add_mul!(buffer, model.model.A[i.value, j], y[j])
-    end
-    return buffer
+    return _jtprod!(buffer, model.jprod_buffer[i.value], y)
 end
 
 function dual_cons!(
