@@ -63,6 +63,43 @@ function test_zero_Ai()
     return
 end
 
+# `buffer_for_jtprod` keeps `∑ⱼ Aᵢⱼ yⱼ` sparse when the block is wide
+# compared to the number of constraints and the merged pattern is sparse, see
+# `LRO.DENSE_JTPROD_DENSITY`. No problem in the rest of this suite reaches
+# that path -- they all have `ncon >= side_dimension` -- so build one here.
+function test_sparse_jtprod_buffer()
+    T = Float64
+    d, ncon = 20, 2
+    @assert ncon < d
+    A = [SparseArrays.sparse([j], [j], [T(j)], d, d) for _ in 1:1, j in 1:ncon]
+    model = LRO.Model(
+        [SparseArrays.spzeros(T, d, d)],
+        A,
+        zeros(T, ncon),
+        # `schur_test` exercises the scalar block too, so give it one variable.
+        SparseArrays.sparsevec([1], T[1], 1),
+        SparseArrays.sparse([1, 2], [1, 1], T[1, 1], ncon, 1),
+        [d],
+    )
+    i = LRO.MatrixIndex(1)
+    buffer = LRO.buffer_for_jtprod(model, i)
+    @test buffer isa SparseArrays.SparseMatrixCSC
+    @test SparseArrays.nnz(buffer) <= LRO.DENSE_JTPROD_DENSITY * d^2
+
+    buf = LRO.BufferedModelForSchur(model, 1)
+    @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
+    y = T[2, -3]
+    expected = sum(A[1, j] * y[j] for j in 1:ncon)
+    @test LRO.unsafe_jtprod(buf, y, i) ≈ expected
+    # Loraine's `H_alpha` preconditioner passes a sparse `y`, see `diff_check`.
+    @test LRO.unsafe_jtprod(buf, SparseArrays.sparsevec(y), i) ≈ expected
+
+    for κ in 0:2
+        schur_test(model, κ)
+    end
+    return
+end
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$name", "test_")

@@ -172,7 +172,8 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
         _alloc_schur_complement(model, i, Wi, H)
     end
     for i in LRO.matrix_indices(model)
-        @test model.jtprod_buffer[i.value] isa Union{FillArrays.Zeros,Matrix}
+        @test model.jtprod_buffer[i.value] isa
+              Union{FillArrays.Zeros,Matrix,SparseArrays.SparseMatrixCSC}
         ret = LRO.unsafe_jtprod(model, y, i)
         @test ret === model.jtprod_buffer[i.value]
         ret = LRO.unsafe_dual_cons(model, y, i)
