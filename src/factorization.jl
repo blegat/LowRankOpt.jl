@@ -83,6 +83,8 @@ function Factorization(factor::AbstractVector{T}, scaling::T) where {T}
     return Factorization(factor, fill(scaling, tuple()))
 end
 
+mul_scaling(m::Factorization, coef) = Factorization(m.factor, m.scaling * coef)
+
 left_factor(m::Factorization) = m.factor
 right_factor(m::Factorization) = m.factor
 
