@@ -96,6 +96,14 @@ function MOI.get(optimizer::Optimizer, param::MOI.RawOptimizerAttribute)
     return optimizer.options[param.name]
 end
 
+struct RawResultAttribute <: MOI.AbstractModelAttribute
+    name::String
+end
+MOI.is_set_by_optimize(::RawResultAttribute) = true
+function MOI.get(optimizer::Optimizer, attr::RawResultAttribute)
+    return MOI.get(optimizer.solver, attr)
+end
+
 # MOI.Silent
 
 MOI.supports(::Optimizer, ::MOI.Silent) = true
