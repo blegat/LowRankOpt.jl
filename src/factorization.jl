@@ -235,7 +235,25 @@ julia> LowRankOpt.symmetrize_factorization([1, 0], [0, 1])
  0.5  0.0
 ```
 """
-function symmetrize_factorization(L, R; use_krylov = true)
+function symmetrize_factorization(L, R; kws...)
+    I = findall(axes(L, 1)) do i
+        any(!iszero, L[i, :]) || any(!iszero, R[i, :])
+    end
+    if I == axes(L, 1)
+        _sub_symmetrize_factorization(L, R; kws...)
+    else
+        sub = _sub_symmetrize_factorization(L[I, :], R[I, :]; kws...)
+        factor = if sub.factor isa SparseArrays.AbstractSparseArray
+            SparseArrays.spzeros(size(L, 1), max_rank(sub))
+        else
+            zeros(size(L, 1), max_rank(sub))
+        end
+        factor[I, :] = sub.factor
+        return Factorization(factor, sub.scaling)
+    end
+end
+
+function _sub_symmetrize_factorization(L, R; use_krylov = true)
     sym = LinearAlgebra.Symmetric((L * R' + R * L') / 2)
     r = 2size(L, 2)
     if use_krylov
@@ -246,7 +264,14 @@ function symmetrize_factorization(L, R; use_krylov = true)
     end
     σ = sortperm(abs.(eigvals), rev = true)
     keep = σ[1:r]
-    return Factorization(factor[:, keep], eigvals[keep])
+    new_factor = factor[:, keep]
+    if L isa SparseArrays.AbstractSparseArray && R isa SparseArrays.AbstractSparseArray
+        # TODO We should also do the computation on a subset of indices that is the union
+        #      of the indices of L and R
+        new_factor = SparseArrays.sparse(new_factor)
+        SparseArrays.droptol!(new_factor, Base.rtoldefault(eltype(new_factor)))
+    end
+    return Factorization(new_factor, eigvals[keep])
 end
 
 struct TriangleVectorization{T,M<:AbstractMatrix{T}} <: AbstractVector{T}
