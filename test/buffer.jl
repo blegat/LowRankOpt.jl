@@ -63,39 +63,54 @@ function test_zero_Ai()
     return
 end
 
-# `buffer_for_jtprod` keeps `∑ⱼ Aᵢⱼ yⱼ` sparse when the block is wide
-# compared to the number of constraints and the merged pattern is sparse, see
-# `LRO.DENSE_JTPROD_DENSITY`. No problem in the rest of this suite reaches
-# that path -- they all have `ncon >= side_dimension` -- so build one here.
+# Exercise both sides of `ncon == d`, including overlapping constraint
+# patterns. The buffer choice must account for the Schur product, not just
+# the cost of filling A(y).
 function test_sparse_jtprod_buffer()
     T = Float64
-    d, ncon = 20, 2
-    @assert ncon < d
-    A = [SparseArrays.sparse([j], [j], [T(j)], d, d) for _ in 1:1, j in 1:ncon]
-    model = LRO.Model(
-        [SparseArrays.spzeros(T, d, d)],
-        A,
-        zeros(T, ncon),
-        # `schur_test` exercises the scalar block too, so give it one variable.
-        SparseArrays.sparsevec([1], T[1], 1),
-        SparseArrays.sparse([1, 2], [1, 1], T[1, 1], ncon, 1),
-        [d],
-    )
-    i = LRO.MatrixIndex(1)
-    buffer = LRO.buffer_for_jtprod(model, i)
-    @test buffer isa SparseArrays.SparseMatrixCSC
-    @test SparseArrays.nnz(buffer) <= LRO.DENSE_JTPROD_DENSITY * d^2
+    @testset "d=$d, ncon=$ncon" for (d, ncon) in [(20, 2), (40, 40), (80, 160)]
+        A = [
+            SparseArrays.sparse([mod1(j, d)], [mod1(j, d)], [T(j)], d, d)
+            for _ in 1:1, j in 1:ncon
+        ]
+        model = LRO.Model(
+            [SparseArrays.spzeros(T, d, d)],
+            A,
+            zeros(T, ncon),
+            # `schur_test` exercises the scalar block too.
+            SparseArrays.sparsevec([1], T[1], 1),
+            SparseArrays.sparse([1, 2], [1, 1], T[1, 1], ncon, 1),
+            [d],
+        )
+        i = LRO.MatrixIndex(1)
+        buffer = LRO.buffer_for_jtprod(model, i)
+        @test buffer isa SparseArrays.SparseMatrixCSC
+        @test SparseArrays.nnz(buffer) == min(d, ncon)
+        @test LRO.buffer_for_jtprod(model, i; density = 0) isa Matrix
+        @test LRO.buffer_for_jtprod(model, i; work_ratio = 0) isa Matrix
+        # Both cutoffs include equality, independently of the other cutoff.
+        density = SparseArrays.nnz(buffer) / d^2
+        work_ratio = (ncon * d + ncon * SparseArrays.nnz(buffer)) / d^3
+        @test LRO.buffer_for_jtprod(model, i; density, work_ratio = Inf) isa
+              SparseArrays.SparseMatrixCSC
+        @test LRO.buffer_for_jtprod(model, i; density = Inf, work_ratio) isa
+              SparseArrays.SparseMatrixCSC
+        @test LRO.buffer_for_jtprod(
+            model,
+            i;
+            density = Inf,
+            work_ratio = work_ratio / 2,
+        ) isa Matrix
 
-    buf = LRO.BufferedModelForSchur(model, 1)
-    @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
-    y = T[2, -3]
-    expected = sum(A[1, j] * y[j] for j in 1:ncon)
-    @test LRO.unsafe_jtprod(buf, y, i) ≈ expected
-    # Loraine's `H_alpha` preconditioner passes a sparse `y`, see `diff_check`.
-    @test LRO.unsafe_jtprod(buf, SparseArrays.sparsevec(y), i) ≈ expected
-
-    for κ in 0:2
-        schur_test(model, κ)
+        buf = LRO.BufferedModelForSchur(model, 1)
+        @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
+        y = T[isodd(j) ? j : -j for j in 1:ncon]
+        expected = sum(A[1, j] * y[j] for j in 1:ncon)
+        @test LRO.unsafe_jtprod(buf, y, i) ≈ expected
+        @test LRO.unsafe_jtprod(buf, SparseArrays.sparsevec(y), i) ≈ expected
+        for κ in 0:2
+            schur_test(model, κ)
+        end
     end
     return
 end

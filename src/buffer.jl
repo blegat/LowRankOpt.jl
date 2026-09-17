@@ -239,63 +239,81 @@ _abs(A::FillArrays.Zeros) = A
 """
     DENSE_JTPROD_DENSITY
 
-Density above which `buffer_for_jtprod` preallocates `∑ⱼ Aᵢⱼ yⱼ` as a dense
-matrix instead of a sparse one with the merged sparsity pattern.
-
-Keeping the result sparse saves memory and keeps `eval_schur_complement!`
-multiplying a sparse matrix, which is attractive for problems like Max-Cut
-where every `Aᵢⱼ` has a handful of nonzeros. It is not free though: filling
-the sparse buffer accumulates one `Aᵢⱼ` at a time, which costs
-`Θ(ncon * side_dimension)` in loop overhead *regardless* of the number of
-nonzeros, whereas the dense buffer is filled by a single `Θ(nnz)` sparse
-matrix-vector product. So the sparse buffer only pays off while the result
-is sparse enough *and* `ncon < side_dimension` (see `buffer_for_jtprod`).
-
-Measured on SDPLIB with Loraine's `kit = 1`, three interior-point iterations,
-the dense buffer won even where the density suggested otherwise:
-
-| problem  | ncon | d   | density | sparse   | dense   |
-|----------|------|-----|---------|----------|---------|
-| maxG11   |  800 | 800 | 0.0012  |  6.33 s  | 4.46 s  |
-| thetaG11 | 2401 | 801 | 0.0087  | 39.46 s  | 6.95 s  |
-
-Both have `ncon >= d`, so they now take the dense path on that test alone and
-never build the merged pattern.
+Maximum density of the merged constraint pattern for a sparse `jtprod` buffer.
+The work estimate controlled by `SPARSE_JTPROD_WORK_RATIO` must also favor the
+sparse path: density alone does not predict the cost of the Schur product.
 """
 const DENSE_JTPROD_DENSITY = 0.05
+
+"""
+    SPARSE_JTPROD_WORK_RATIO
+
+Maximum estimated sparse work relative to `d^3`, where `d` is the block size.
+The estimate is `ncon * d + nnz_A * nnz_pattern`: the first term accounts for
+column scans when filling the sparse buffer, and the second estimates the
+pairwise nonzero work of the `_dot` contractions across all constraints.
+`nnz_A` counts nonzeros across the constraint matrices, including overlaps;
+`nnz_pattern` counts nonzeros in their merged pattern.
+
+This is a conservative heuristic, not a flop-count crossover: dense BLAS and
+sparse scalar loops have different costs per operation. Julia v1.13.0 with
+Loraine, loading its SDPLIB examples, gave the following Schur-product timings
+(including `jtprod` fill, not full solves):
+
+| problem  | dense   | sparse + `_dot` | selected |
+|----------|---------|-----------------|----------|
+| maxG11   | 8.66 ms | 1.96 ms         | sparse   |
+| thetaG11 | 8.67 ms | 28.61 ms        | dense    |
+
+The block dimensions and stored nonzero counts are:
+
+| problem  | d   | ncon | nnz_A | nnz_pattern | pattern density |
+|----------|-----|------|-------|-------------|-----------------|
+| maxG11   | 800 | 800  | 800   | 800         | 0.125%          |
+| thetaG11 | 801 | 2401 | 15201 | 5601        | 0.873%          |
+
+Both pass the 5% density cutoff. The work cutoff distinguishes them:
+
+- maxG11: `800*800 + 800*800 = 1_280_000`, below
+  `0.05*800^3 = 25_600_000`. The work ratio is `0.0025 <= 0.05`, so sparse.
+- thetaG11: `2401*801 + 15201*5601 = 87_064_002`, above
+  `0.05*801^3 = 25_696_120.05`. The work ratio is approximately
+  `0.1694 > 0.05`, so dense despite the low merged-pattern density.
+
+These are the best of seven calls after two warmup calls per path, with four
+BLAS threads and one Julia thread on an Intel Core Ultra 7 265H. Both paths
+used identical inputs: the loaded constraint matrices, a random dense
+positive-definite `W`, and a random `y`; their outputs agreed numerically.
+The crossover can vary with hardware, threading, and the distribution of
+nonzeros.
+"""
+const SPARSE_JTPROD_WORK_RATIO = 0.05
 
 function buffer_for_jtprod(
     model::Model{T},
     mat_idx::MatrixIndex;
     density = DENSE_JTPROD_DENSITY,
+    work_ratio = SPARSE_JTPROD_WORK_RATIO,
 ) where {T}
     d = side_dimension(model, mat_idx)
     ncon = model.meta.ncon
     # If every `Aᵢⱼ` is zero then so is the product, and callers rely on
     # getting a `Zeros` back (`_sub` then aliases `C` instead of copying).
-    if iszero(ncon) ||
-       all(j -> iszero(_nnz(model.A[mat_idx.value, j])), 1:ncon)
+    nnz_A = sum(j -> _nnz(model.A[mat_idx.value, j]), 1:ncon; init = 0)
+    if iszero(nnz_A)
         return FillArrays.Zeros{T}(d, d)
     end
-    # Filling the sparse buffer walks every column of the merged pattern once
-    # per constraint, so it costs `Θ(ncon * d)` in loop overhead however few
-    # nonzeros there are, while the dense buffer is one `Θ(nnz(𝐀ᵢ))` matrix-
-    # vector product writing `d^2` entries. The sparse buffer therefore cannot
-    # pay off unless `ncon < d`, whatever the density. Checking this first also
-    # skips building the merged pattern -- itself `ncon` sparse additions --
-    # for the problems that end up dense anyway.
-    if ncon >= d
-        return zeros(T, d, d)
-    end
-    # /!\ If there is only one nonzero matrix and we didn't have `_abs`,
-    #     we would return an alias of that only matrix so that `_abs` has the
-    #     non-obvious role of avoid this as well as avoiding cancellations.
-    pattern = reduce(
-        _merge_sparsity,
-        _abs(model.A[mat_idx.value, j]) for j in 1:ncon
-    )
-    if SparseArrays.nnz(pattern) > density * d^2
-        return zeros(T, d, d)
+    # The absolute values make the merged pattern monotone, so stop as soon
+    # as either cutoff is exceeded instead of merging every dense constraint.
+    # They also prevent the buffer from aliasing a single nonzero constraint.
+    max_nnz =
+        min(density * d^2, (work_ratio * float(d)^3 - float(ncon) * d) / nnz_A)
+    pattern = FillArrays.Zeros{T}(d, d)
+    for j in 1:ncon
+        pattern = _merge_sparsity(pattern, _abs(model.A[mat_idx.value, j]))
+        if _nnz(pattern) > max_nnz
+            return zeros(T, d, d)
+        end
     end
     return pattern
 end
