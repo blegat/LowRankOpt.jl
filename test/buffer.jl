@@ -115,6 +115,60 @@ function test_sparse_jtprod_buffer()
     return
 end
 
+function test_sparse_jtprod_mixed_patterns()
+    d = 20
+    Z = FillArrays.Zeros(d, d)
+    P = SparseArrays.sparse(
+        [1, 3, 4, 1, 1],
+        [1, 1, 1, 3, 4],
+        [1.0, 2.0, 3.0, 2.0, 3.0],
+        d,
+        d,
+    )
+    Q = SparseArrays.sparse(
+        [3, 5, 1, 1],
+        [1, 1, 3, 5],
+        [-2.0, 4.0, -2.0, 4.0],
+        d,
+        d,
+    )
+    # A zero constraint after P must preserve the merged sparse pattern.
+    # Q skips row 1, then row 4, in the merged pattern's first column.
+    # Its overlap with P cancels numerically, but must remain in the pattern.
+    A = Matrix{Union{typeof(Z),typeof(P)}}(undef, 1, 4)
+    A[1, :] = [Z, P, Z, Q]
+    original = deepcopy(A)
+    model = LRO.Model(
+        [SparseArrays.spzeros(d, d)],
+        A,
+        zeros(4),
+        SparseArrays.sparsevec([1], [1.0], 1),
+        SparseArrays.sparse([1, 2], [1, 1], [1.0, 1.0], 4, 1),
+        [d],
+    )
+    i = LRO.MatrixIndex(1)
+    buf = LRO.BufferedModelForSchur(model, 1)
+    buffer = buf.jtprod_buffer[i.value]
+    @test buffer isa SparseArrays.SparseMatrixCSC
+    @test SparseArrays.nnz(buffer) == 7
+    rows, cols = copy(buffer.rowval), copy(buffer.colptr)
+    # Repeated calls check that accumulation clears values without losing
+    # the merged pattern, including entries cancelled by a previous call.
+    for y in ([1.0, 1.0, 1.0, 1.0], [2.0, -3.0, 4.0, 5.0], zeros(4))
+        expected = y[2] * P + y[4] * Q
+        for weights in (y, SparseArrays.sparsevec(y))
+            @test LRO.unsafe_jtprod(buf, weights, i) ≈ expected
+            @test buffer.rowval == rows
+            @test buffer.colptr == cols
+        end
+    end
+    @test A == original
+    for κ in 0:2
+        schur_test(model, κ)
+    end
+    return
+end
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$name", "test_")
