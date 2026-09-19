@@ -63,6 +63,112 @@ function test_zero_Ai()
     return
 end
 
+# Exercise both sides of `ncon == d`, including overlapping constraint
+# patterns. The buffer choice must account for the Schur product, not just
+# the cost of filling A(y).
+function test_sparse_jtprod_buffer()
+    T = Float64
+    @testset "d=$d, ncon=$ncon" for (d, ncon) in [(20, 2), (40, 40), (80, 160)]
+        A = [
+            SparseArrays.sparse([mod1(j, d)], [mod1(j, d)], [T(j)], d, d)
+            for _ in 1:1, j in 1:ncon
+        ]
+        model = LRO.Model(
+            [SparseArrays.spzeros(T, d, d)],
+            A,
+            zeros(T, ncon),
+            # `schur_test` exercises the scalar block too.
+            SparseArrays.sparsevec([1], T[1], 1),
+            SparseArrays.sparse([1, 2], [1, 1], T[1, 1], ncon, 1),
+            [d],
+        )
+        i = LRO.MatrixIndex(1)
+        buffer = LRO.buffer_for_jtprod(model, i)
+        @test buffer isa SparseArrays.SparseMatrixCSC
+        @test SparseArrays.nnz(buffer) == min(d, ncon)
+        @test LRO.buffer_for_jtprod(model, i; density = 0) isa Matrix
+        @test LRO.buffer_for_jtprod(model, i; work_ratio = 0) isa Matrix
+        # Both cutoffs include equality, independently of the other cutoff.
+        density = SparseArrays.nnz(buffer) / d^2
+        work_ratio = (ncon * d + ncon * SparseArrays.nnz(buffer)) / d^3
+        @test LRO.buffer_for_jtprod(model, i; density, work_ratio = Inf) isa
+              SparseArrays.SparseMatrixCSC
+        @test LRO.buffer_for_jtprod(model, i; density = Inf, work_ratio) isa
+              SparseArrays.SparseMatrixCSC
+        @test LRO.buffer_for_jtprod(
+            model,
+            i;
+            density = Inf,
+            work_ratio = work_ratio / 2,
+        ) isa Matrix
+
+        buf = LRO.BufferedModelForSchur(model, 1)
+        @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
+        y = T[isodd(j) ? j : -j for j in 1:ncon]
+        expected = sum(A[1, j] * y[j] for j in 1:ncon)
+        @test LRO.unsafe_jtprod(buf, y, i) ≈ expected
+        @test LRO.unsafe_jtprod(buf, SparseArrays.sparsevec(y), i) ≈ expected
+        for κ in 0:2
+            schur_test(model, κ)
+        end
+    end
+    return
+end
+
+function test_sparse_jtprod_mixed_patterns()
+    d = 20
+    Z = FillArrays.Zeros(d, d)
+    P = SparseArrays.sparse(
+        [1, 3, 4, 1, 1],
+        [1, 1, 1, 3, 4],
+        [1.0, 2.0, 3.0, 2.0, 3.0],
+        d,
+        d,
+    )
+    Q = SparseArrays.sparse(
+        [3, 5, 1, 1],
+        [1, 1, 3, 5],
+        [-2.0, 4.0, -2.0, 4.0],
+        d,
+        d,
+    )
+    # A zero constraint after P must preserve the merged sparse pattern.
+    # Q skips row 1, then row 4, in the merged pattern's first column.
+    # Its overlap with P cancels numerically, but must remain in the pattern.
+    A = Matrix{Union{typeof(Z),typeof(P)}}(undef, 1, 4)
+    A[1, :] = [Z, P, Z, Q]
+    original = deepcopy(A)
+    model = LRO.Model(
+        [SparseArrays.spzeros(d, d)],
+        A,
+        zeros(4),
+        SparseArrays.sparsevec([1], [1.0], 1),
+        SparseArrays.sparse([1, 2], [1, 1], [1.0, 1.0], 4, 1),
+        [d],
+    )
+    i = LRO.MatrixIndex(1)
+    buf = LRO.BufferedModelForSchur(model, 1)
+    buffer = buf.jtprod_buffer[i.value]
+    @test buffer isa SparseArrays.SparseMatrixCSC
+    @test SparseArrays.nnz(buffer) == 7
+    rows, cols = copy(buffer.rowval), copy(buffer.colptr)
+    # Repeated calls check that accumulation clears values without losing
+    # the merged pattern, including entries cancelled by a previous call.
+    for y in ([1.0, 1.0, 1.0, 1.0], [2.0, -3.0, 4.0, 5.0], zeros(4))
+        expected = y[2] * P + y[4] * Q
+        for weights in (y, SparseArrays.sparsevec(y))
+            @test LRO.unsafe_jtprod(buf, weights, i) ≈ expected
+            @test buffer.rowval == rows
+            @test buffer.colptr == cols
+        end
+    end
+    @test A == original
+    for κ in 0:2
+        schur_test(model, κ)
+    end
+    return
+end
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$name", "test_")

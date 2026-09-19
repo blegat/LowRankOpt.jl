@@ -187,13 +187,55 @@ function schur_complement!(model::BufferedModelForSchur, W::AbstractVector, H)
     return H
 end
 
+# Add `⟨Aᵢₖ, W A(y) W⟩` to `result[k]`, where `Ay` is `A(y) = ∑ⱼ Aᵢⱼ yⱼ` as
+# returned by `unsafe_jtprod`.
+#
+# `A(y)` dense: form `W A(y) W` and contract it against `𝐀ᵢ` with one sparse
+# matrix-vector product. Two `d×d` products, so `Θ(d³)` however sparse the
+# `Aᵢₖ` are.
+function _add_eval_schur_complement!(
+    model::BufferedModelForSchur,
+    W::AbstractMatrix,
+    Ay::AbstractMatrix,
+    result,
+    i::MatrixIndex,
+)
+    return add_jprod!(model, W * Ay * W, result, i)
+end
+
+# `A(y)` sparse: contract directly, never forming the `d×d` product, so the
+# cost follows the nonzeros instead of `d`. This is the same trade-off
+# `add_schur_complement!` makes per constraint matrix via `κ`/`last_dense`,
+# here made once for `A(y)`.
+function _add_eval_schur_complement!(
+    model::BufferedModelForSchur,
+    W::AbstractMatrix,
+    Ay::SparseArrays.SparseMatrixCSC,
+    result,
+    i::MatrixIndex,
+)
+    for k in eachindex(result)
+        A = model.model.A[i.value, k]
+        if !iszero(_nnz(A))
+            result[k] += _dot(A, Ay, W)
+        end
+    end
+    return result
+end
+
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
 function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
     fill!(result, zero(eltype(result)))
     for i in matrix_indices(model)
-        add_jprod!(model, W[i] * unsafe_jtprod(model, y, i) * W[i], result, i)
+        _add_eval_schur_complement!(
+            model,
+            W[i],
+            unsafe_jtprod(model, y, i),
+            result,
+            i,
+        )
     end
     result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
     return result

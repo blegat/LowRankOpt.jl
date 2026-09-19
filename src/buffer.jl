@@ -236,19 +236,86 @@ _merge_sparsity(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
 _abs(A::SparseArrays.SparseMatrixCSC) = abs.(A)
 _abs(A::FillArrays.Zeros) = A
 
-function buffer_for_jtprod(model::Model{T}, mat_idx::MatrixIndex) where {T}
-    if iszero(model.meta.ncon)
-        d = side_dimension(model, mat_idx)
+"""
+    DENSE_JTPROD_DENSITY
+
+Maximum density of the merged constraint pattern for a sparse `jtprod` buffer.
+The work estimate controlled by `SPARSE_JTPROD_WORK_RATIO` must also favor the
+sparse path: density alone does not predict the cost of the Schur product.
+"""
+const DENSE_JTPROD_DENSITY = 0.05
+
+"""
+    SPARSE_JTPROD_WORK_RATIO
+
+Maximum estimated sparse work relative to `d^3`, where `d` is the block size.
+The estimate is `ncon * d + nnz_A * nnz_pattern`: the first term accounts for
+column scans when filling the sparse buffer, and the second estimates the
+pairwise nonzero work of the `_dot` contractions across all constraints.
+`nnz_A` counts nonzeros across the constraint matrices, including overlaps;
+`nnz_pattern` counts nonzeros in their merged pattern.
+
+This is a conservative heuristic, not a flop-count crossover: dense BLAS and
+sparse scalar loops have different costs per operation. Julia v1.13.0 with
+Loraine, loading its SDPLIB examples, gave the following Schur-product timings
+(including `jtprod` fill, not full solves):
+
+| problem  | dense   | sparse + `_dot` | selected |
+|----------|---------|-----------------|----------|
+| maxG11   | 8.66 ms | 1.96 ms         | sparse   |
+| thetaG11 | 8.67 ms | 28.61 ms        | dense    |
+
+The block dimensions and stored nonzero counts are:
+
+| problem  | d   | ncon | nnz_A | nnz_pattern | pattern density |
+|----------|-----|------|-------|-------------|-----------------|
+| maxG11   | 800 | 800  | 800   | 800         | 0.125%          |
+| thetaG11 | 801 | 2401 | 15201 | 5601        | 0.873%          |
+
+Both pass the 5% density cutoff. The work cutoff distinguishes them:
+
+- maxG11: `800*800 + 800*800 = 1_280_000`, below
+  `0.05*800^3 = 25_600_000`. The work ratio is `0.0025 <= 0.05`, so sparse.
+- thetaG11: `2401*801 + 15201*5601 = 87_064_002`, above
+  `0.05*801^3 = 25_696_120.05`. The work ratio is approximately
+  `0.1694 > 0.05`, so dense despite the low merged-pattern density.
+
+These are the best of seven calls after two warmup calls per path, with four
+BLAS threads and one Julia thread on an Intel Core Ultra 7 265H. Both paths
+used identical inputs: the loaded constraint matrices, a random dense
+positive-definite `W`, and a random `y`; their outputs agreed numerically.
+The crossover can vary with hardware, threading, and the distribution of
+nonzeros.
+"""
+const SPARSE_JTPROD_WORK_RATIO = 0.05
+
+function buffer_for_jtprod(
+    model::Model{T},
+    mat_idx::MatrixIndex;
+    density = DENSE_JTPROD_DENSITY,
+    work_ratio = SPARSE_JTPROD_WORK_RATIO,
+) where {T}
+    d = side_dimension(model, mat_idx)
+    ncon = model.meta.ncon
+    # If every `Aᵢⱼ` is zero then so is the product, and callers rely on
+    # getting a `Zeros` back (`_sub` then aliases `C` instead of copying).
+    nnz_A = sum(j -> _nnz(model.A[mat_idx.value, j]), 1:ncon; init = 0)
+    if iszero(nnz_A)
         return FillArrays.Zeros{T}(d, d)
     end
-    # FIXME: at some point, switch to dense
-    # /!\ If there is only one nonzero matrix and we didn't have `_abs`,
-    #     we would return an alias of that only matrix so that `_abs` has the
-    #     non-obvious role of avoid this as well as avoiding cancellations.
-    return reduce(
-        _merge_sparsity,
-        _abs(model.A[mat_idx.value, j]) for j in 1:(model.meta.ncon)
-    )
+    # The absolute values make the merged pattern monotone, so stop as soon
+    # as either cutoff is exceeded instead of merging every dense constraint.
+    # They also prevent the buffer from aliasing a single nonzero constraint.
+    max_nnz =
+        min(density * d^2, (work_ratio * float(d)^3 - float(ncon) * d) / nnz_A)
+    pattern = FillArrays.Zeros{T}(d, d)
+    for j in 1:ncon
+        pattern = _merge_sparsity(pattern, _abs(model.A[mat_idx.value, j]))
+        if _nnz(pattern) > max_nnz
+            return zeros(T, d, d)
+        end
+    end
+    return pattern
 end
 
 function NLPModels.jtprod!(
@@ -263,12 +330,9 @@ function NLPModels.jtprod!(
     end
 end
 
-_zero!(A::FillArrays.Zeros) = A
 _zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
 
 # Computes `A .+= B * α`
-function _add_mul!(::FillArrays.Zeros, ::FillArrays.Zeros, _) end
-
 function _add_mul!(A::SparseArrays.SparseMatrixCSC, ::FillArrays.Zeros, _)
     return A
 end
@@ -279,9 +343,14 @@ function _add_mul!(
     α,
 )
     for col in axes(A, 2)
+        range_B = SparseArrays.nzrange(B, col)
+        # `B` is one constraint matrix while `A` is the merged pattern of all
+        # of them, so most columns of `B` are empty. Skipping them with a
+        # `colptr` comparison avoids setting up the `A` iterator for nothing.
+        isempty(range_B) && continue
         range_A = SparseArrays.nzrange(A, col)
         it_A = iterate(range_A)
-        for k in SparseArrays.nzrange(B, col)
+        for k in range_B
             row_B = SparseArrays.rowvals(B)[k]
             while SparseArrays.rowvals(A)[it_A[1]] < row_B
                 it_A = iterate(range_A, it_A[2])
@@ -291,6 +360,47 @@ function _add_mul!(
             SparseArrays.nonzeros(A)[it_A[1]] += SparseArrays.nonzeros(B)[k] * α
         end
     end
+end
+
+function _jtprod!(
+    buffer::FillArrays.Zeros,
+    ::BufferedModelForSchur,
+    ::AbstractVector,
+    ::MatrixIndex,
+)
+    return buffer
+end
+
+# Dense buffer: `𝐀ᵢ`'s `j`th column is `vec(Aᵢⱼ)`, so this computes
+# `vec(buffer) = 𝐀ᵢ * y = vec(∑ⱼ Aᵢⱼ yⱼ)` with a single `Θ(nnz(𝐀ᵢ))` sparse
+# matrix-vector product. `_vec` is `UnsafeArrays.uview` so it does not
+# allocate, unlike `vec` which would allocate a reshaped wrapper every call.
+function _jtprod!(
+    buffer::StridedMatrix,
+    model::BufferedModelForSchur,
+    # `y` is a `SparseVector` when called from Loraine's `H_alpha`
+    # preconditioner, so this must stay an `AbstractVector`.
+    y::AbstractVector,
+    i::MatrixIndex,
+)
+    LinearAlgebra.mul!(_vec(buffer), model.jprod_buffer[i.value], y)
+    return buffer
+end
+
+# Sparse buffer: the result keeps the merged sparsity pattern, so it is
+# accumulated one constraint at a time. See `DENSE_JTPROD_DENSITY` for when
+# this is preferred over the dense buffer above.
+function _jtprod!(
+    buffer::SparseArrays.SparseMatrixCSC,
+    model::BufferedModelForSchur,
+    y::AbstractVector,
+    i::MatrixIndex,
+)
+    _zero!(buffer)
+    for j in eachindex(y)
+        _add_mul!(buffer, model.model.A[i.value, j], y[j])
+    end
+    return buffer
 end
 
 """
@@ -304,11 +414,7 @@ is called for the same `i`.
 """
 function unsafe_jtprod(model::BufferedModelForSchur, y, i::MatrixIndex)
     buffer = model.jtprod_buffer[i.value]
-    _zero!(buffer)
-    for j in eachindex(y)
-        _add_mul!(buffer, model.model.A[i.value, j], y[j])
-    end
-    return buffer
+    return _jtprod!(buffer, model, y, i)
 end
 
 function dual_cons!(
