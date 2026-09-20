@@ -167,6 +167,15 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     Hy = similar(y)
     LRO.eval_schur_complement!(model, w, y, Hy)
     @test Hy ≈ H * y
+    if iszero(LRO.num_scalars(model)) && T == Float64
+        @test 0 == @allocated LRO.eval_schur_complement!(model, w, y, Hy)
+    end
+    # Reuse the workspaces for a different right-hand side, then assemble H again.
+    LRO.eval_schur_complement!(model, w, -y, Hy)
+    @test Hy ≈ -(H * y)
+    H_again = similar(H)
+    LRO.schur_complement!(model, w, H_again)
+    @test H_again ≈ H
     for i in LRO.matrix_indices(model)
         Wi = @inferred w[i]
         _alloc_schur_complement(model, i, Wi, H)

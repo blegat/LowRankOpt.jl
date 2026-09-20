@@ -200,7 +200,10 @@ function _add_eval_schur_complement!(
     result,
     i::MatrixIndex,
 )
-    return add_jprod!(model, W * Ay * W, result, i)
+    AW, WAW = model.schur_buffer
+    LinearAlgebra.mul!(AW[i.value], W, Ay)
+    LinearAlgebra.mul!(WAW[i.value], AW[i.value], W)
+    return add_jprod!(model, WAW[i.value], result, i)
 end
 
 # `A(y)` sparse: contract directly, never forming the `d×d` product, so the
@@ -237,6 +240,8 @@ function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
             i,
         )
     end
-    result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
+    if !iszero(num_scalars(model))
+        result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
+    end
     return result
 end
