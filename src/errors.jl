@@ -30,7 +30,7 @@ function errors(
         isnothing(dual_err) ? zero(b_den) :
         LinearAlgebra.norm(dual_err) / C_den,
         isnothing(dual_slack) ? zero(b_den) :
-        LinearAlgebra.norm(dual_err) / C_den,
+        max(0, -LinearAlgebra.eigmin(dual_slack)) / C_den,
         (pobj - dobj) / obj_den,
         LinearAlgebra.dot(x, dual_slack) / obj_den,
     )
