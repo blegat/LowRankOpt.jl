@@ -104,6 +104,18 @@ function test_sparse_jtprod_buffer()
 
         buf = LRO.BufferedModelForSchur(model, 1)
         @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
+        # A lazy zero matrix contributes nothing, including when only a
+        # subset of constraints is requested. It must not use the generic
+        # unsafe view, which cannot flatten FillArrays.Zeros matrices.
+        V = FillArrays.Zeros{T}(d, d)
+        Jv = T.(1:ncon)
+        expected_Jv = copy(Jv)
+        LRO.add_jprod!(buf, V, Jv, i)
+        @test Jv == expected_Jv
+        I = [ncon, 1]
+        sub_Jv = expected_Jv[I]
+        LRO.add_sub_jprod!(buf, i, V, sub_Jv, I)
+        @test sub_Jv == expected_Jv[I]
         y = T[isodd(j) ? j : -j for j in 1:ncon]
         expected = sum(A[1, j] * y[j] for j in 1:ncon)
         @test LRO.unsafe_jtprod(buf, y, i) ≈ expected
