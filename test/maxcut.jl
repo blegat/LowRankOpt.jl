@@ -130,10 +130,10 @@ end;
         @test length(err) == 6
         @test err[1] ≈ 10.089041685524935
         @test err[2] ≈ 0.7727306013872245 rtol = 1e-6
-        @test err[3] ≈ 18.2842712474619
-        @test err[4] ≈ 1.7456211144846852
-        @test err[5] ≈ 0.92
-        @test err[6] ≈ 392.0
+        @test err[3] ≈ sqrt(204) / (1 + sqrt(8)) + sqrt(4696)
+        @test err[4] ≈ 6.682983224222843
+        @test err[5] ≈ 23 / 17
+        @test err[6] ≈ 204 / 12.5 + 4696 / 8.5
     end
     schur_test(b.model, 0)
     schur_test(b.model, 1)
