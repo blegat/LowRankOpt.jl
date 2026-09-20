@@ -240,6 +240,10 @@ function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
             i,
         )
     end
+    # In the future, we'd want to allocate intermediate buffers for this operations
+    # to make it allocation-free. In the short-term, we just add this `if`
+    # to be allocation-free when there are no scalars to prevent a regerssion
+    # in https://github.com/kocvara/Loraine.jl/pull/29
     if !iszero(num_scalars(model))
         result .+= model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
     end
