@@ -71,12 +71,13 @@ function errors(
     )
 end
 
+# TODO: Revisit this helper with global normalization after the nlpmodel merge.
 # As defined in https://plato.asu.edu/dimacs/node3.html
-function LinearAlgebra.eigmin(x::AbstractSolution{T}) where {T}
-    return min(
-        minimum(x[ScalarIndex], init = zero(T)) +
-        minimum(matrix_indices(x), init = zero(T)) do i
-            return LinearAlgebra.eigmin(LinearAlgebra.Symmetric(x[i]))
-        end,
-    )
-end
+# function LinearAlgebra.eigmin(x::AbstractSolution{T}) where {T}
+#     return min(
+#         minimum(x[ScalarIndex], init = zero(T)) +
+#         minimum(matrix_indices(x), init = zero(T)) do i
+#             return LinearAlgebra.eigmin(LinearAlgebra.Symmetric(x[i]))
+#         end,
+#     )
+# end
