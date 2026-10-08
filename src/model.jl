@@ -89,7 +89,7 @@ mutable struct Model{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T}} <:
         model.msizes = msizes
         n = num_scalars(model)
         model.meta = NLPModels.NLPModelMeta{T,Vector{T}}(
-            n + sum(abs2, msizes, init = 0),
+            Int(n + sum(abs2, msizes, init = 0)),
             ncon = length(b),
         )
         offsets = n .+ [0; cumsum(abs2.(msizes))]
