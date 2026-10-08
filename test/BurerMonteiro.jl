@@ -176,9 +176,9 @@ end;
         [spzeros(1, 1)],
         [ones(1, 1) for _ in 1:1, _ in 1:0],
         zeros(0),
-        sparsevec(Int[], Float64[], 0),
-        sparse(Int[], Int[], Float64[], 0, 0),
-        [1],
+        sparsevec(Int64[], Float64[], 0),
+        sparse(Int64[], Int64[], Float64[], 0, 0),
+        Int64[1],
     )
     @test model.meta.ncon == 0
     @test LRO.norm_jac(model, LRO.MatrixIndex(1)) == 0
