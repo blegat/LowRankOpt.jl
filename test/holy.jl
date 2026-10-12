@@ -38,7 +38,7 @@ function test_holy(; is_dual, low_rank, square_scalars, n = 10)
     F = if low_rank
         LRO.Factorization{T,SparseVector{T,Int},LRO.One{T}}
     else
-        SparseMatrixCSC{T,Int}
+        SparseMatrixCSC{T,Int64}
     end
     @test b.model.C isa Vector{F}
     @test b.model.A isa Matrix{F}
