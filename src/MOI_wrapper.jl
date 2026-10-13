@@ -369,7 +369,7 @@ function MOI.get(optimizer::Optimizer, ::MOI.SolveTimeSec)
 end
 
 function MOI.get(optimizer::Optimizer, ::MOI.BarrierIterations)
-    return optimizer.solver.stats.iter
+    return Int64(optimizer.solver.stats.iter)
 end
 
 function MOI.get(optimizer::Optimizer, ::MOI.RawStatusString)
