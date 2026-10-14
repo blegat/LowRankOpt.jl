@@ -18,7 +18,7 @@ mutable struct Model{S,T,CT,AT,JTB} <: NLPModels.AbstractNLPModel{T,Vector{T}}
 end
 
 function meta(dim::Dimensions{S}, con::AbstractVector{T}) where {S,T}
-    n = length(dim)
+    n = Int(length(dim))
     ncon = length(con)
     if S
         lvar = fill(typemin(T), n)

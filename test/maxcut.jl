@@ -57,7 +57,7 @@ function test_maxcut(; is_dual, sparse, vector)
     else
         lro_model = unsafe_backend(model).model
         @test lro_model.C isa Vector{
-            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
+            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int64},Base.OneTo{Int64}}},
         }
         @test lro_model.A isa Matrix{SparseMatrixCSC{T,Int64}}
         solver = unsafe_backend(model).solver

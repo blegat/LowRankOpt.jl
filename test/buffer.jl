@@ -24,8 +24,8 @@ function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
     optimize!(model)
     b = _backend(model)
     T = Float64
-    Z = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
-    S = SparseArrays.SparseMatrixCSC{T,Int}
+    Z = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int64},Base.OneTo{Int64}}}
+    S = SparseArrays.SparseMatrixCSC{T,Int64}
     @test b.model.C isa Vector{matrix_in_objective ? S : Z}
     if all_zero
         @test b.model.A isa Matrix{Z}
@@ -78,9 +78,9 @@ function test_sparse_jtprod_buffer()
             A,
             zeros(T, ncon),
             # `schur_test` exercises the scalar block too.
-            SparseArrays.sparsevec([1], T[1], 1),
-            SparseArrays.sparse([1, 2], [1, 1], T[1, 1], ncon, 1),
-            [d],
+            SparseArrays.sparsevec(Int64[1], T[1], 1),
+            SparseArrays.sparse(Int64[1, 2], Int64[1, 1], T[1, 1], ncon, 1),
+            Int64[d],
         )
         i = LRO.MatrixIndex(1)
         buffer = LRO.buffer_for_jtprod(model, i)
@@ -154,9 +154,9 @@ function test_sparse_jtprod_mixed_patterns()
         [SparseArrays.spzeros(d, d)],
         A,
         zeros(4),
-        SparseArrays.sparsevec([1], [1.0], 1),
-        SparseArrays.sparse([1, 2], [1, 1], [1.0, 1.0], 4, 1),
-        [d],
+        SparseArrays.sparsevec(Int64[1], [1.0], 1),
+        SparseArrays.sparse(Int64[1, 2], Int64[1, 1], [1.0, 1.0], 4, 1),
+        Int64[d],
     )
     i = LRO.MatrixIndex(1)
     buf = LRO.BufferedModelForSchur(model, 1)

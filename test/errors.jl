@@ -8,9 +8,9 @@ import LowRankOpt as LRO
         [spdiagm([3.0, 0.0]), spzeros(1, 1)],
         reshape([spzeros(2, 2), spzeros(1, 1)], 2, 1),
         [0.0],
-        sparsevec([1], [4.0], 1),
-        spzeros(1, 1),
-        [2, 1],
+        sparsevec(Int64[1], [4.0], 1),
+        spzeros(Float64, Int64, 1, 1),
+        Int64[2, 1],
     )
     x = LRO.ShapedSolution([1.0], [Matrix{Float64}(I, 2, 2), ones(1, 1)])
     slack =
@@ -51,7 +51,7 @@ end
         (false, true, [2, 3 / 5, 2, 7 / 3, -8 / 3, 7 / 3]),
     )
     for (psd, scalar, expected) in cases
-        dims = psd ? [2, 1] : Int[]
+        dims = psd ? Int64[2, 1] : Int64[]
         C = [
             spdiagm(v) for v in (psd ? [[3.0, 4.0], [12.0]] : Vector{Float64}[])
         ]
@@ -60,8 +60,8 @@ end
             C,
             A,
             [4.0],
-            sparsevec(scalar ? [2.0] : Float64[]),
-            spzeros(1, Int(scalar)),
+            SparseVector{Float64,Int64}(sparsevec(scalar ? [2.0] : Float64[])),
+            spzeros(Float64, Int64, 1, Int(scalar)),
             dims,
         )
         solution(v, blocks) = LRO.ShapedSolution(
