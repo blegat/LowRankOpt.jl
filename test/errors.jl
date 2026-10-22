@@ -3,6 +3,39 @@ module TestErrors
 using Test, LinearAlgebra, SparseArrays
 import LowRankOpt as LRO
 
+# Explicit residuals and objectives isolate the convergence check from setup.
+function buffered_errors(model, x, slack, residual, work, primal_err)
+    return LRO.errors(
+        model,
+        x;
+        primal_err,
+        dual_slack = slack,
+        dual_err = residual,
+        pobj = 1.0,
+        dobj = 2.0,
+        workspace = work,
+    )
+end
+
+function buffered_errors_allocations(
+    model,
+    x,
+    slack,
+    residual,
+    work,
+    primal_err,
+)
+    buffered_errors(model, x, slack, residual, work, primal_err)
+    return @allocated buffered_errors(
+        model,
+        x,
+        slack,
+        residual,
+        work,
+        primal_err,
+    )
+end
+
 @testset "Dual cone feasibility is independent of the equation residual" begin
     model = LRO.Model(
         [spdiagm([3.0, 0.0]), spzeros(1, 1)],
@@ -103,6 +136,31 @@ end
                 workspace = work,
             )
             @test all(isapprox.(buffered, err))
+            primal_err = [10.0]
+            complete = buffered_errors(model, xx, ss, rr, work, primal_err)
+            for residual in (rr, nothing), slack in (ss, nothing)
+                result = buffered_errors(
+                    model,
+                    xx,
+                    slack,
+                    residual,
+                    work,
+                    primal_err,
+                )
+                @test result[1:2] == complete[1:2]
+                @test result[3] == (isnothing(residual) ? 0 : complete[3])
+                @test result[4] == (isnothing(slack) ? 0 : complete[4])
+                @test result[5] == complete[5]
+                @test result[6] == (isnothing(slack) ? 0 : complete[6])
+                @test buffered_errors_allocations(
+                    model,
+                    xx,
+                    slack,
+                    residual,
+                    work,
+                    primal_err,
+                ) == 0
+            end
             for i in LRO.matrix_indices(model)
                 @test xx[i] == original_x[i.value]
                 @test ss[i] == original_s[i.value]

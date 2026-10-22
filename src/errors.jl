@@ -1,3 +1,37 @@
+@inline function block_errors(
+    model,
+    x,
+    i,
+    dual_err,
+    dual_slack,
+    dobj,
+    workspace,
+    inv_b_den,
+    errors,
+)
+    err2, err3, err4, err6, matrix_pobj = errors
+    X = x[i]
+    isempty(X) && return (err2, err3, err4, err6, matrix_pobj)
+    C = grad(model, i)
+    inv_C_den = inv(1 + LinearAlgebra.norm(C))
+    block_pobj = LinearAlgebra.dot(C, X)
+    if i !== ScalarIndex
+        matrix_pobj += block_pobj
+    end
+    min_x = i === ScalarIndex ? minimum(X) : matrix_eigmin(X, i, workspace)
+    err2 += max(0, -min_x * inv_b_den)
+    if !isnothing(dual_err)
+        err3 += LinearAlgebra.norm(dual_err[i]) * inv_C_den
+    end
+    if !isnothing(dual_slack)
+        S = dual_slack[i]
+        min_s = i === ScalarIndex ? minimum(S) : matrix_eigmin(S, i, workspace)
+        err4 += max(0, -min_s * inv_C_den)
+        err6 += LinearAlgebra.dot(S, X) / (1 + abs(block_pobj) + abs(dobj))
+    end
+    return (err2, err3, err4, err6, matrix_pobj)
+end
+
 function matrix_eigmin(A, ::MatrixIndex, ::Nothing)
     return LinearAlgebra.eigmin(LinearAlgebra.Symmetric(A))
 end
@@ -41,30 +75,33 @@ function errors(
     # err4 = max(0, -LinearAlgebra.eigmin(dual_slack)) / C_den
     # Revisit the consistency of the numerator/denominator norms as well.
     inv_b_den = inv(b_den)
-    err2 = err3 = err4 = err6 = zero(b_den)
-    matrix_pobj = zero(pobj)
-    for i in Iterators.flatten((matrix_indices(model), (ScalarIndex,)))
-        X = x[i]
-        isempty(X) && continue
-        C = grad(model, i)
-        inv_C_den = inv(1 + LinearAlgebra.norm(C))
-        block_pobj = LinearAlgebra.dot(C, X)
-        if i !== ScalarIndex
-            matrix_pobj += block_pobj
-        end
-        min_x = i === ScalarIndex ? minimum(X) : matrix_eigmin(X, i, workspace)
-        err2 += max(0, -min_x * inv_b_den)
-        if !isnothing(dual_err)
-            err3 += LinearAlgebra.norm(dual_err[i]) * inv_C_den
-        end
-        if !isnothing(dual_slack)
-            S = dual_slack[i]
-            min_s =
-                i === ScalarIndex ? minimum(S) : matrix_eigmin(S, i, workspace)
-            err4 += max(0, -min_s * inv_C_den)
-            err6 += LinearAlgebra.dot(S, X) / (1 + abs(block_pobj) + abs(dobj))
-        end
+    block_err = (zero(b_den), zero(b_den), zero(b_den), zero(b_den), zero(pobj))
+    # Keep matrix and scalar indices in separate calls so each block's
+    # arithmetic specializes on its solution and objective storage.
+    for i in matrix_indices(model)
+        block_err = block_errors(
+            model,
+            x,
+            i,
+            dual_err,
+            dual_slack,
+            dobj,
+            workspace,
+            inv_b_den,
+            block_err,
+        )
     end
+    err2, err3, err4, err6, matrix_pobj = block_errors(
+        model,
+        x,
+        ScalarIndex,
+        dual_err,
+        dual_slack,
+        dobj,
+        workspace,
+        inv_b_den,
+        block_err,
+    )
     # Loraine main omits the scalar objective from this denominator, even
     # though it includes it in the numerator. Keep this convention temporarily.
     # TODO: Restore obj_den = 1 + abs(pobj) + abs(dobj) after the merge.
