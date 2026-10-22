@@ -426,13 +426,14 @@ function dual_cons!(
     return dual_cons!(model.model, y, res, ScalarIndex)
 end
 
-# TODO If we rename `dual_cons!` to `unsafe_dual_cons`,
-#      we can remove the `copy` and remplace `-B` with a mutation
-
 # Note that we can't use `-` because of https://github.com/JuliaArrays/FillArrays.jl/issues/412
 _sub(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
 # /!\ We don't copy, we warn about it in the docstring.
 _sub(A::AbstractArray, ::FillArrays.Zeros) = A
+function _sub(::FillArrays.Zeros, B::Matrix{T}) where {T}
+    LinearAlgebra.rmul!(B, -one(T))
+    return B
+end
 function _sub(::FillArrays.Zeros, B::AbstractArray{T}) where {T}
     # `B` is an alias to an entry of `jtprod_buffer`
     # so it is safe to modify.
@@ -441,6 +442,11 @@ function _sub(::FillArrays.Zeros, B::AbstractArray{T}) where {T}
     LinearAlgebra.rmul!(B, -one(T))
     return B
 end
+function _sub(A::AbstractArray, B::Matrix)
+    B .= A .- B
+    return B
+end
+# Keep sparse subtraction when merging the objective would change the pattern.
 _sub(A::AbstractArray, B::AbstractArray) = A - B
 
 """

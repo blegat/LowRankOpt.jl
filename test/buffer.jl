@@ -181,6 +181,46 @@ function test_sparse_jtprod_mixed_patterns()
     return
 end
 
+function dual_cons_allocations(model, y, i)
+    return @allocated LRO.unsafe_dual_cons(model, y, i)
+end
+
+function test_dense_dual_cons_reuses_product()
+    d = 3
+    P = SparseArrays.spdiagm([1.0, 2.0, 3.0])
+    Q = SparseArrays.sparse([1, 3], [3, 1], [2.0, 2.0], d, d)
+    # The objective has entries outside the constraint pattern.
+    C = SparseArrays.sparse([1, 2], [2, 1], [4.0, 4.0], d, d)
+    for objective in (C, FillArrays.Zeros(d, d))
+        model = LRO.Model(
+            [objective],
+            reshape([P, Q], 1, 2),
+            zeros(2),
+            SparseArrays.SparseVector{Float64,Int64}(SparseArrays.spzeros(0)),
+            SparseArrays.SparseMatrixCSC{Float64,Int64}(
+                SparseArrays.spzeros(2, 0),
+            ),
+            Int64[d],
+        )
+        original_C, original_A = deepcopy(model.C), deepcopy(model.A)
+        buf = LRO.BufferedModelForSchur(model, 1)
+        i = LRO.MatrixIndex(1)
+        buffer = buf.jtprod_buffer[i.value]
+        @test buffer isa Matrix
+        for y in ([2.0, -3.0], zeros(2), [-1.0, 4.0])
+            expected = objective - y[1] * P - y[2] * Q
+            @test LRO.unsafe_dual_cons(buf, y, i) === buffer
+            @test buffer ≈ expected
+            @test dual_cons_allocations(buf, y, i) == 0
+            # The next product must discard the previous residual.
+            @test LRO.unsafe_jtprod(buf, y, i) ≈ y[1] * P + y[2] * Q
+            @test model.C == original_C
+            @test model.A == original_A
+        end
+    end
+    return
+end
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$name", "test_")
