@@ -88,6 +88,25 @@ end
             for i in 1:6
                 @test err[i] ≈ expected[i]
             end
+            work = LRO.EigenWorkspace{Float64}[
+                LRO.EigenWorkspace(zeros(d, d)) for d in dims
+            ]
+            original_x = [copy(xx[i]) for i in LRO.matrix_indices(model)]
+            original_s = [copy(ss[i]) for i in LRO.matrix_indices(model)]
+            buffered = LRO.errors(
+                model,
+                xx;
+                y = [0.5],
+                primal_err = [10.0],
+                dual_slack = ss,
+                dual_err = rr,
+                workspace = work,
+            )
+            @test all(isapprox.(buffered, err))
+            for i in LRO.matrix_indices(model)
+                @test xx[i] == original_x[i.value]
+                @test ss[i] == original_s[i.value]
+            end
         end
     end
 end

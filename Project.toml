@@ -4,6 +4,7 @@ authors = ["Benoît Legat <benoit.legat@gmail.com>"]
 version = "0.2.3"
 
 [deps]
+FastLapackInterface = "29a986be-02c6-4525-aec4-84b980013641"
 FillArrays = "1a297f60-69ca-5386-bcde-b61e274b549b"
 KrylovKit = "0b1a1467-8014-51b9-945f-bf0ae24f4b77"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -23,6 +24,7 @@ Dualization = "191a621a-6537-11e9-281d-650236a99e60"
 DualizationExt = "Dualization"
 
 [compat]
+FastLapackInterface = "2"
 Dualization = "0.5.10, 0.6, 0.7"
 FillArrays = "1.13"
 KrylovKit = "0.9.5, 0.10"
@@ -35,4 +37,4 @@ SolverCore = "0.3.8"
 SparseArrays = "1.10"
 Test = "1.10"
 UnsafeArrays = "1.0.8"
-julia = "1.10"
+julia = "1.10.7"
