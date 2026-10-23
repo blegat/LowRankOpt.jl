@@ -5,6 +5,7 @@
 
 module LowRankOpt
 
+import FastLapackInterface
 import LinearAlgebra
 import SparseArrays
 import KrylovKit
@@ -22,6 +23,7 @@ include("model.jl")
 include("buffer.jl")
 include("schur.jl")
 include("MOI_wrapper.jl")
+include("eigen_workspace.jl")
 include("errors.jl")
 include("BurerMonteiro/BurerMonteiro.jl")
 

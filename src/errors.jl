@@ -1,9 +1,19 @@
+function matrix_eigmin(A, ::MatrixIndex, ::Nothing)
+    return LinearAlgebra.eigmin(LinearAlgebra.Symmetric(A))
+end
+function matrix_eigmin(A, i::MatrixIndex, workspace::Vector{<:EigenWorkspace})
+    return eigmin!(workspace[i.value], A)
+end
+
 """
     errors(model::Model, x, y)
 
 Return [the six DIMACS errors](https://plato.asu.edu/dimacs/node3.html),
 temporarily using Loraine main's blockwise normalization for comparison
 with its `nlpmodel` branch.
+
+`workspace` may be a vector of `EigenWorkspace`s, one per PSD block, to
+reuse eigensolver storage. The primal and dual solutions are preserved.
 """
 function errors(
     model::AbstractModel,
@@ -14,6 +24,7 @@ function errors(
     dual_err = nothing,
     pobj = NLPModels.obj(model, x),
     dobj = dual_obj(model, y),
+    workspace::Union{Nothing,Vector{<:EigenWorkspace}} = nothing,
 )
     b_den = 1 + LinearAlgebra.norm(cons_constant(model))
     # TODO: Reconsider global normalization after Loraine's `nlpmodel` branch
@@ -41,9 +52,7 @@ function errors(
         if i !== ScalarIndex
             matrix_pobj += block_pobj
         end
-        min_x =
-            i === ScalarIndex ? minimum(X) :
-            LinearAlgebra.eigmin(LinearAlgebra.Symmetric(X))
+        min_x = i === ScalarIndex ? minimum(X) : matrix_eigmin(X, i, workspace)
         err2 += max(0, -min_x * inv_b_den)
         if !isnothing(dual_err)
             err3 += LinearAlgebra.norm(dual_err[i]) * inv_C_den
@@ -51,8 +60,7 @@ function errors(
         if !isnothing(dual_slack)
             S = dual_slack[i]
             min_s =
-                i === ScalarIndex ? minimum(S) :
-                LinearAlgebra.eigmin(LinearAlgebra.Symmetric(S))
+                i === ScalarIndex ? minimum(S) : matrix_eigmin(S, i, workspace)
             err4 += max(0, -min_s * inv_C_den)
             err6 += LinearAlgebra.dot(S, X) / (1 + abs(block_pobj) + abs(dobj))
         end
