@@ -221,6 +221,46 @@ function test_dense_dual_cons_reuses_product()
     return
 end
 
+function test_sparse_dual_cons_reuses_product()
+    d = 40
+    P = SparseArrays.spdiagm(Float64.(1:d))
+    Q = SparseArrays.sparse([1, 3], [3, 1], [2.0, 2.0], d, d)
+    objective = FillArrays.Zeros(d, d)
+    model = LRO.Model(
+        [objective],
+        reshape([P, Q], 1, 2),
+        zeros(2),
+        SparseArrays.SparseVector{Float64,Int64}(SparseArrays.spzeros(0)),
+        SparseArrays.SparseMatrixCSC{Float64,Int64}(SparseArrays.spzeros(2, 0)),
+        Int64[d],
+    )
+    original_A = deepcopy(model.A)
+    buf = LRO.BufferedModelForSchur(model, 1)
+    i = LRO.MatrixIndex(1)
+    buffer = buf.jtprod_buffer[i.value]
+    @test buffer isa SparseArrays.SparseMatrixCSC
+    rows, columns = copy(buffer.rowval), copy(buffer.colptr)
+    values = SparseArrays.nonzeros(buffer)
+    # Both the product and its negation must keep the merged sparse pattern,
+    # including zero weights and subsequent calls with new weights.
+    for y in ([2.0, -3.0], zeros(2), [-1.0, 4.0])
+        product = y[1] * P + y[2] * Q
+        for weights in (y, SparseArrays.sparsevec(y))
+            @test LRO.unsafe_dual_cons(buf, weights, i) === buffer
+            @test buffer ≈ -product
+            @test dual_cons_allocations(buf, weights, i) == 0
+            @test buffer.rowval == rows
+            @test buffer.colptr == columns
+            @test SparseArrays.nonzeros(buffer) === values
+            # Recompute the product to catch accidental sign accumulation.
+            @test LRO.unsafe_jtprod(buf, weights, i) ≈ product
+            @test model.C[1] === objective
+            @test model.A == original_A
+        end
+    end
+    return
+end
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$name", "test_")
