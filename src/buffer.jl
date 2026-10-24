@@ -426,22 +426,26 @@ function dual_cons!(
     return dual_cons!(model.model, y, res, ScalarIndex)
 end
 
-# TODO If we rename `dual_cons!` to `unsafe_dual_cons`,
-#      we can remove the `copy` and remplace `-B` with a mutation
+# Products are zero, dense, or sparse matrices. Returning an alias to C or
+# the product buffer is allowed by unsafe_dual_cons's contract.
+# Avoid subtraction of lazy zeros (FillArrays.jl issue #412).
+_sub(A::AbstractMatrix, ::FillArrays.Zeros{<:Any,2}) = A
 
-# Note that we can't use `-` because of https://github.com/JuliaArrays/FillArrays.jl/issues/412
-_sub(A::FillArrays.Zeros, ::FillArrays.Zeros) = A
-# /!\ We don't copy, we warn about it in the docstring.
-_sub(A::AbstractArray, ::FillArrays.Zeros) = A
-function _sub(::FillArrays.Zeros, B::AbstractArray{T}) where {T}
-    # `B` is an alias to an entry of `jtprod_buffer`
-    # so it is safe to modify.
-    # The fact that we may return an alias to this matrix
-    # since we don't copy is warned in the docstring/`
+function _sub(A::AbstractMatrix, B::Matrix)
+    B .= A .- B
+    return B
+end
+
+function _sub(
+    ::FillArrays.Zeros{<:Any,2},
+    B::SparseArrays.SparseMatrixCSC{T},
+) where {T}
     LinearAlgebra.rmul!(B, -one(T))
     return B
 end
-_sub(A::AbstractArray, B::AbstractArray) = A - B
+
+# Merging the objective may change the sparse product's cached pattern.
+_sub(A::AbstractMatrix, B::SparseArrays.SparseMatrixCSC) = A - B
 
 """
     unsafe_dual_cons(model::BufferedModelForSchur, y, i::MatrixIndex)
