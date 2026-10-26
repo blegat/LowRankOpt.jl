@@ -125,15 +125,20 @@ end;
         Vector(LRO.grad(b.model, LRO.ScalarIndex));
         LRO.grad(b.model, LRO.MatrixIndex(1))[:]
     ]
-    for xx in [x, X]
-        err = LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx)
+    # The objective has eight nonzero entries, all with absolute value 1.
+    # pobj = 4, dobj = -7.5. The slack is x, so complementarity is dot(x, x).
+    for p in (1, 2, Inf), xx in [x, X]
+        b_den = 1 + norm([4.5, -2.5, 1.5, -3.5, 0, 2, -3, -0.5, -0.5, 2], p)
+        C_den = 1 + norm(ones(8), p)
+        err =
+            LRO.errors(b.solver.model, xx; y, dual_slack = xx, dual_err = xx, p)
         @test length(err) == 6
-        @test err[1] ≈ 10.089041685524935
-        @test err[2] ≈ 0.7727306013872245 rtol = 1e-6
-        @test err[3] ≈ sqrt(204) / (1 + sqrt(8)) + sqrt(4696)
-        @test err[4] ≈ 6.682983224222843
-        @test err[5] ≈ 23 / 17
-        @test err[6] ≈ 204 / 12.5 + 4696 / 8.5
+        @test err[1] ≈ sqrt(7613.5) / b_den
+        @test err[2] ≈ 6.682983224222843 / b_den rtol = 1e-6
+        @test err[3] ≈ (sqrt(204) + sqrt(4696)) / C_den
+        @test err[4] ≈ 6.682983224222843 / C_den
+        @test err[5] ≈ 23 / 25
+        @test err[6] ≈ (204 + 4696) / 12.5
     end
     schur_test(b.model, 0)
     schur_test(b.model, 1)
