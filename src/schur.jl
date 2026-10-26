@@ -160,13 +160,27 @@ function add_schur_complement!(
     return H
 end
 
+# Keep sparse output on the sparse-product path: repeated sparse axpy! updates
+# would search its index structure once per contribution.
 function add_schur_complement!(
     model::BufferedModelForSchur,
-    w,
+    w::StridedVector,
     ::Type{ScalarIndex},
-    H,
+    H::StridedMatrix,
 )
-    H .+= model.model.C_lin * SparseArrays.spdiagm(w) * model.model.C_lin'
+    C = model.model.C_lin
+    # C * Diagonal(w) * C'
+    # = sum_k w[k] * c_k * c_k'.
+    # = sum_k sum_j w[k] * c_k * (conj(c_{jk}) * e_j')
+    # Sparse `axpy!` visits only stored entries and needs no intermediate matrix.
+    rows, values = SparseArrays.rowvals(C), SparseArrays.nonzeros(C)
+    for k in axes(C, 2)
+        column = view(C, :, k)
+        for p in SparseArrays.nzrange(C, k)
+            j = Int(rows[p])
+            LinearAlgebra.axpy!(w[k] * conj(values[p]), column, view(H, :, j))
+        end
+    end
     return H
 end
 
