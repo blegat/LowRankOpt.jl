@@ -82,8 +82,8 @@ end
     # cancelling objective contributions distinguish global from blockwise
     # normalization. Expected values follow the DIMACS definition by hand.
     cases = (
-        (true, true, (3, 24, 7, -27 / 28, 47 / 28)),
-        (true, false, (2, 18, 6, -21 / 22, 13 / 11)),
+        (true, true, (3, sqrt(230), 7, -27 / 28, 47 / 28)),
+        (true, false, (2, sqrt(194), 6, -21 / 22, 13 / 11)),
         (false, true, (3, 6, 7, -8 / 9, 7 / 3)),
     )
     for T in (Float32, Float64),

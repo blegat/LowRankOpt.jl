@@ -135,7 +135,7 @@ end;
         @test length(err) == 6
         @test err[1] ≈ sqrt(7613.5) / b_den
         @test err[2] ≈ 6.682983224222843 / b_den rtol = 1e-6
-        @test err[3] ≈ (sqrt(204) + sqrt(4696)) / C_den
+        @test err[3] ≈ sqrt(204 + 4696) / C_den
         @test err[4] ≈ 6.682983224222843 / C_den
         @test err[5] ≈ 23 / 25
         @test err[6] ≈ (204 + 4696) / 12.5

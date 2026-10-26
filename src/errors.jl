@@ -16,7 +16,7 @@
     min_x = i === ScalarIndex ? minimum(X) : matrix_eigmin(X, i, workspace)
     err2 = max(err2, -min_x)
     if !isnothing(dual_err)
-        err3 += LinearAlgebra.norm(dual_err[i])
+        err3 = hypot(err3, LinearAlgebra.norm(dual_err[i]))
     end
     if !isnothing(dual_slack)
         S = dual_slack[i]
@@ -37,10 +37,11 @@ end
 """
     errors(model::AbstractModel, x; y = nothing, p = 2, ...)
 
-Return [the six DIMACS errors](https://plato.asu.edu/dimacs/node3.html).
+Return [the six DIMACS-style errors](https://plato.asu.edu/dimacs/node3.html).
 
-Residual norms sum the PSD blocks' Frobenius norms and the scalar vector's
-Euclidean norm. Cone violations use the worst eigenvalue or scalar across
+Residual norms are global Euclidean norms. The dual residual combines the
+PSD blocks' Frobenius norms and the scalar vector's Euclidean norm in
+quadrature. Cone violations use the worst eigenvalue or scalar across
 all blocks. `p` selects the entrywise norm in the data denominators
 `1 + norm(b, p)` and `1 + norm(C, p)`. The latter combines all PSD matrix
 entries and scalar objective coefficients into one norm. Thus `p = 2`
@@ -49,16 +50,45 @@ entries, and `p = Inf` takes their maximum. Residual numerators keep the
 norms above regardless of `p`.
 
 The linked DIMACS description labels the data norm as a 1-norm but defines
-it as the largest absolute component, which is the infinity norm. Solver
-implementations differ:
-[SeDuMi](https://github.com/sqlp/sedumi/blob/master/sedumi.m)
-uses the 1-norm for its DIMACS errors, whereas
-[SDPT3](https://github.com/sqlp/sdpt3/blob/master/Solver/sqlpmain.m) and
-[CSDP](https://github.com/coin-or/Csdp/blob/master/lib/easysdp.c) report
-DIMACS errors with infinity-norm scaling. Their internal stopping tests
-can use different norms. The default `p = 2` retains Loraine's Euclidean
-data scaling. For fixed residuals, larger data norms yield smaller errors,
-so tolerances should be compared using the same `p`.
+it as the largest absolute component, which is the infinity norm. Reported
+DIMACS errors and internal stopping criteria also differ between solvers:
+
+- [SeDuMi](https://github.com/sqlp/sedumi/blob/master/sedumi.m) reports
+  DIMACS errors with 1-norm data denominators. Its main stopping test uses
+  homogeneous-embedding precision measures built from weighted
+  infinity-norm residuals, initialized in
+  [sdinit.m](https://github.com/sqlp/sedumi/blob/master/sdinit.m).
+- [SDPT3](https://github.com/sqlp/sdpt3/blob/master/Solver/sqlpmain.m) uses
+  Euclidean/Frobenius norms for both residuals and data in its feasibility
+  stopping tests, but infinity-norm data denominators in its DIMACS report.
+- [CSDP](https://github.com/coin-or/Csdp/blob/master/lib/psd_feas.c) uses
+  Euclidean/Frobenius norms for both residuals and data in its feasibility
+  stopping tests. Its DIMACS report uses infinity-norm data denominators;
+  its reported dual residual sums block Frobenius norms (`Knorm`), unlike
+  the global Frobenius norm used internally (`Fnorm`).
+- [MOSEK](https://docs.mosek.com/latest/capi/solving-conic.html) documents
+  conic feasibility tests with infinity-norm residuals divided by
+  `1 + norm(b, Inf)` and `1 + norm(c, Inf)`.
+- [Clarabel](https://github.com/oxfordcontrol/Clarabel.jl/blob/main/src/info.jl)
+  uses Euclidean residuals divided by
+  `max(1, norm(b, Inf) + norm(x, 2) + norm(s, 2))` on the primal side and
+  `max(1, norm(q, Inf) + norm(x, 2) + norm(z, 2))` on the dual side.
+  The data infinity norms are computed in `problemdata.jl`:
+  <https://github.com/oxfordcontrol/Clarabel.jl/blob/main/src/problemdata.jl>.
+- [SCS](https://www.cvxgrp.org/scs/algorithm/index.html) defaults to
+  infinity-norm residuals with absolute-plus-relative tolerances. Its
+  relative scales take the maximum of the data and equation-term infinity
+  norms, such as `max(norm(b, Inf), norm(A*x, Inf), norm(s, Inf))`.
+- [COPT](https://guide.coap.online/copt/en-doc/logging.html) documents
+  absolute/relative infeasibility output and feasibility tolerances, but
+  the reviewed public documentation does not specify the conic residual
+  norms or normalization formulas.
+
+The default `p = 2` matches the Euclidean/Frobenius residual/data scaling
+used by SDPT3 and CSDP internally. Selecting `p = Inf` only changes our data
+denominators; it does not reproduce another solver's full stopping test.
+For fixed residuals, larger data norms yield smaller errors, so tolerances
+should be compared using the same normalization.
 
 The signed duality gap and complementarity share the denominator
 `1 + abs(pobj) + abs(dobj)`, including the scalar objective.
