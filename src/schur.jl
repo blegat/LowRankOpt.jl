@@ -160,32 +160,19 @@ function add_schur_complement!(
     return H
 end
 
-function add_schur_complement!(
-    model::BufferedModelForSchur,
-    w,
-    ::Type{ScalarIndex},
-    H,
-)
-    H .+= model.model.C_lin * SparseArrays.spdiagm(w) * model.model.C_lin'
-    return H
-end
-
 # Keep sparse output on the sparse-product path: repeated sparse axpy! updates
 # would search its index structure once per contribution.
 function add_schur_complement!(
     model::BufferedModelForSchur,
-    w,
+    w::StridedVector,
     ::Type{ScalarIndex},
     H::StridedMatrix,
 )
     C = model.model.C_lin
-    length(w) == size(C, 2) ||
-        throw(DimensionMismatch("one weight per scalar is required"))
-    size(H) == (size(C, 1), size(C, 1)) || throw(
-        DimensionMismatch("the Schur matrix must have one row per constraint"),
-    )
-    # C * Diagonal(w) * C' = sum_k w[k] * c_k * c_k'. Sparse axpy!
-    # visits only stored entries and needs no intermediate matrix.
+    # C * Diagonal(w) * C'
+    # = sum_k w[k] * c_k * c_k'.
+    # = sum_k sum_j w[k] * c_k * (conj(c_{jk}) * e_j')
+    # Sparse `axpy!` visits only stored entries and needs no intermediate matrix.
     rows, values = SparseArrays.rowvals(C), SparseArrays.nonzeros(C)
     for k in axes(C, 2)
         column = view(C, :, k)
