@@ -4,16 +4,17 @@ using Test, LinearAlgebra, SparseArrays
 import LowRankOpt as LRO
 
 # Explicit residuals and objectives isolate the convergence check from setup.
-function buffered_errors(model, x, slack, residual, work, primal_err)
+function buffered_errors(model, x, slack, residual, work, primal_err; p = 2)
     return LRO.errors(
         model,
         x;
         primal_err,
         dual_slack = slack,
         dual_err = residual,
-        pobj = 1.0,
-        dobj = 2.0,
+        pobj = one(eltype(primal_err)),
+        dobj = 2 * one(eltype(primal_err)),
         workspace = work,
+        p,
     )
 end
 
@@ -24,15 +25,17 @@ function buffered_errors_allocations(
     residual,
     work,
     primal_err,
+    p = 2,
 )
-    buffered_errors(model, x, slack, residual, work, primal_err)
+    buffered_errors(model, x, slack, residual, work, primal_err; p)
     return @allocated buffered_errors(
         model,
         x,
         slack,
         residual,
         work,
-        primal_err,
+        primal_err;
+        p,
     )
 end
 
@@ -55,51 +58,72 @@ end
     )
     for convert_solution in (identity, vectorized)
         xx, ss, rr = convert_solution.((x, slack, residual))
-        # The first PSD block uses 1 + norm(C[1]) = 4; its smallest
+        # The default global C scale is 1 + sqrt(3^2 + 4^2) = 6. The smallest
         # slack eigenvalue is -2 even though the equation residual is zero.
         err = LRO.errors(model, xx; y = [0.0], dual_slack = ss, dual_err = rr)
         @test err[3] == 0
-        @test err[4] == 1 / 2
+        @test err[4] == 1 / 3
         err = LRO.errors(model, xx; y = [0.0], dual_slack = ss)
         @test err[3] == 0
-        @test err[4] == 1 / 2
+        @test err[4] == 1 / 3
 
         # A nonzero equation residual does not make a feasible slack infeasible.
         rr[LRO.ScalarIndex] .= 6
         err = LRO.errors(model, xx; y = [0.0], dual_slack = xx, dual_err = rr)
-        @test err[3] ≈ 6 / 5
+        @test err[3] ≈ 1
         @test err[4] == 0
         # `identity` aliases the original residual; restore it for the next case.
         rr[LRO.ScalarIndex] .= 0
     end
 end
 
-@testset "Loraine main normalization" begin
+@testset "Global DIMACS normalization" begin
     # Different block scales, negative eigenvalues in every block, and
     # cancelling objective contributions distinguish global from blockwise
-    # normalization. Expected values are computed by hand from Loraine main.
+    # normalization. Expected values follow the DIMACS definition by hand.
     cases = (
-        (true, true, [2, 6 / 5, 23 / 6, 45 / 13, -27 / 22, 163 / 36]),
-        (true, false, [2, 3 / 5, 11 / 6, 44 / 39, -21 / 22, 79 / 36]),
-        (false, true, [2, 3 / 5, 2, 7 / 3, -8 / 3, 7 / 3]),
+        (true, true, (3, sqrt(230), 7, -27 / 28, 47 / 28)),
+        (true, false, (2, sqrt(194), 6, -21 / 22, 13 / 11)),
+        (false, true, (3, 6, 7, -8 / 9, 7 / 3)),
     )
-    for (psd, scalar, expected) in cases
+    for T in (Float32, Float64),
+        (psd, scalar, numerators) in cases,
+        p in (1, 2, Inf)
+
+        C_entries = psd ? T[3, 4, 12] : T[]
+        scalar && push!(C_entries, T(2))
+        b_den = 1 + norm(T[3, 4], p)
+        C_den = 1 + norm(C_entries, p)
+        primal_cone, dual_residual, dual_cone, gap, complementarity = numerators
+        expected = (
+            10 / b_den,
+            primal_cone / b_den,
+            dual_residual / C_den,
+            dual_cone / C_den,
+            gap,
+            complementarity,
+        )
         dims = psd ? Int64[2, 1] : Int64[]
-        C = [
-            spdiagm(v) for v in (psd ? [[3.0, 4.0], [12.0]] : Vector{Float64}[])
+        C = SparseMatrixCSC{T,Int64}[
+            spdiagm(T.(v)) for v in (psd ? [[3, 4], [12]] : Vector{Int}[])
         ]
-        A = reshape([spzeros(d, d) for d in dims], length(dims), 1)
+        A = SparseMatrixCSC{T,Int64}[
+            spzeros(T, Int64, d, d) for d in dims, _ in 1:2
+        ]
         model = LRO.Model(
             C,
             A,
-            [4.0],
-            SparseVector{Float64,Int64}(sparsevec(scalar ? [2.0] : Float64[])),
-            spzeros(Float64, Int64, 1, Int(scalar)),
+            T[3, 4],
+            SparseVector{T,Int64}(sparsevec(scalar ? T[2] : T[])),
+            spzeros(T, Int64, 2, Int(scalar)),
             dims,
         )
         solution(v, blocks) = LRO.ShapedSolution(
-            scalar ? [v] : Float64[],
-            [Matrix(Diagonal(b)) for b in (psd ? blocks : Vector{Float64}[])],
+            scalar ? T[v] : T[],
+            Matrix{T}[
+                Matrix(Diagonal(T.(b))) for
+                b in (psd ? blocks : Vector{Float64}[])
+            ],
         )
         x = solution(-3.0, [[-1.0, 2.0], [-2.0]])
         slack = solution(-7.0, [[-4.0, 5.0], [-6.0]])
@@ -113,31 +137,51 @@ end
             err = LRO.errors(
                 model,
                 xx;
-                y = [0.5],
-                primal_err = [10.0],
+                y = T[0, 0.5],
+                primal_err = T[6, 8],
                 dual_slack = ss,
                 dual_err = rr,
+                p,
             )
             for i in 1:6
                 @test err[i] ≈ expected[i]
             end
-            work = LRO.EigenWorkspace{Float64}[
-                LRO.EigenWorkspace(zeros(d, d)) for d in dims
+            work = LRO.EigenWorkspace{T}[
+                LRO.EigenWorkspace(zeros(T, d, d)) for d in dims
             ]
             original_x = [copy(xx[i]) for i in LRO.matrix_indices(model)]
             original_s = [copy(ss[i]) for i in LRO.matrix_indices(model)]
             buffered = LRO.errors(
                 model,
                 xx;
-                y = [0.5],
-                primal_err = [10.0],
+                y = T[0, 0.5],
+                primal_err = T[6, 8],
                 dual_slack = ss,
                 dual_err = rr,
+                p,
                 workspace = work,
             )
             @test all(isapprox.(buffered, err))
-            primal_err = [10.0]
-            complete = buffered_errors(model, xx, ss, rr, work, primal_err)
+            if p == 2
+                default = LRO.errors(
+                    model,
+                    xx;
+                    y = T[0, 0.5],
+                    primal_err = T[6, 8],
+                    dual_slack = ss,
+                    dual_err = rr,
+                    workspace = work,
+                )
+                @test default == buffered
+                @test_throws ArgumentError LRO.errors(
+                    model,
+                    xx;
+                    y = T[0, 0.5],
+                    p = 0,
+                )
+            end
+            primal_err = T[6, 8]
+            complete = buffered_errors(model, xx, ss, rr, work, primal_err; p)
             for residual in (rr, nothing), slack in (ss, nothing)
                 result = buffered_errors(
                     model,
@@ -145,7 +189,8 @@ end
                     slack,
                     residual,
                     work,
-                    primal_err,
+                    primal_err;
+                    p,
                 )
                 @test result[1:2] == complete[1:2]
                 @test result[3] == (isnothing(residual) ? 0 : complete[3])
@@ -159,6 +204,7 @@ end
                     residual,
                     work,
                     primal_err,
+                    p,
                 ) == 0
             end
             for i in LRO.matrix_indices(model)
