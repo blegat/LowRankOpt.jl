@@ -39,50 +39,73 @@ end
 
 Return [the six DIMACS-style errors](https://plato.asu.edu/dimacs/node3.html).
 
-Residual norms are global Euclidean norms. The dual residual combines the
-PSD blocks' Frobenius norms and the scalar vector's Euclidean norm in
-quadrature. Cone violations use the worst eigenvalue or scalar across
-all blocks. `p` selects the entrywise norm in the data denominators
-`1 + norm(b, p)` and `1 + norm(C, p)`. The latter combines all PSD matrix
-entries and scalar objective coefficients into one norm. Thus `p = 2`
-(the default) uses Euclidean/Frobenius scaling, `p = 1` sums absolute
-entries, and `p = Inf` takes their maximum. Residual numerators keep the
-norms above regardless of `p`.
+For a collection `v = (v_scalar, V_1, ..., V_k)` of scalar variables and
+matrix blocks, distinguish these entrywise norms:
+
+- `F(v) = sqrt(norm(v_scalar, 2)^2 + sum(norm(V_i)^2))`: the global
+  Euclidean/Frobenius norm, called `Fnorm` in CSDP.
+- `K(v) = norm(v_scalar, 2) + sum(norm(V_i))`: the sum of the block
+  Euclidean/Frobenius norms, called `Knorm` in CSDP.
+- `L1(v)`: the sum of the absolute values of all scalar and matrix entries.
+- `Linf(v)`: the largest absolute value among those entries.
+
+For a single vector, `F` and `K` both reduce to its Euclidean norm. For
+matrix blocks `[3]` and `[4]`, `F = 5` while `K = 7`. Matrix norms here are
+entrywise norms, not induced operator norms.
+
+This function uses `F` for both equation-residual numerators. The dual
+residual combines all block norms in quadrature. Cone violations use the
+worst eigenvalue or scalar across all blocks. `p` selects only the data
+denominators `1 + norm(b, p)` and `1 + norm(C, p)`, combining all objective
+entries into one norm. Thus `p = 2` (the default) uses `F`, `p = 1` uses
+`L1`, and `p = Inf` uses `Linf` for the data.
 
 The linked DIMACS description labels the data norm as a 1-norm but defines
-it as the largest absolute component, which is the infinity norm. Reported
-DIMACS errors and internal stopping criteria also differ between solvers:
+it as the largest absolute component, which is `Linf`. The following table
+separates internal feasibility measures from reported equation residuals.
+It does not describe cone errors, gap tests, or infeasibility certificates.
 
-- [SeDuMi](https://github.com/sqlp/sedumi/blob/master/sedumi.m) reports
-  DIMACS errors with 1-norm data denominators. Its main stopping test uses
-  homogeneous-embedding precision measures built from weighted
-  infinity-norm residuals, initialized in
-  [sdinit.m](https://github.com/sqlp/sedumi/blob/master/sdinit.m).
-- [SDPT3](https://github.com/sqlp/sdpt3/blob/master/Solver/sqlpmain.m) uses
-  Euclidean/Frobenius norms for both residuals and data in its feasibility
-  stopping tests, but infinity-norm data denominators in its DIMACS report.
-- [CSDP](https://github.com/coin-or/Csdp/blob/master/lib/psd_feas.c) uses
-  Euclidean/Frobenius norms for both residuals and data in its feasibility
-  stopping tests. Its DIMACS report uses infinity-norm data denominators;
-  its reported dual residual sums block Frobenius norms (`Knorm`), unlike
-  the global Frobenius norm used internally (`Fnorm`).
-- [MOSEK](https://docs.mosek.com/latest/capi/solving-conic.html) documents
-  conic feasibility tests with infinity-norm residuals divided by
-  `1 + norm(b, Inf)` and `1 + norm(c, Inf)`.
-- [Clarabel](https://github.com/oxfordcontrol/Clarabel.jl/blob/main/src/info.jl)
-  uses Euclidean residuals divided by
-  `max(1, norm(b, Inf) + norm(x, 2) + norm(s, 2))` on the primal side and
-  `max(1, norm(q, Inf) + norm(x, 2) + norm(z, 2))` on the dual side.
-  The data infinity norms are computed in `problemdata.jl`:
-  <https://github.com/oxfordcontrol/Clarabel.jl/blob/main/src/problemdata.jl>.
-- [SCS](https://www.cvxgrp.org/scs/algorithm/index.html) defaults to
-  infinity-norm residuals with absolute-plus-relative tolerances. Its
-  relative scales take the maximum of the data and equation-term infinity
-  norms, such as `max(norm(b, Inf), norm(A*x, Inf), norm(s, Inf))`.
-- [COPT](https://guide.coap.online/copt/en-doc/logging.html) documents
-  absolute/relative infeasibility output and feasibility tolerances, but
-  the reviewed public documentation does not specify the conic residual
-  norms or normalization formulas.
+In the table, `r` is the equation residual and `d` is its data: `b` on the
+primal side and `C` (or `c`/`q`) on the dual side. A single norm applies on
+both sides; `P / D` distinguishes primal and dual choices. `1` denotes an
+unnormalized reported residual. The less common scales are:
+
+- Clarabel: `Dcl_p = max(1, Linf(b) + F(x) + F(s))` and
+  `Dcl_d = max(1, Linf(q) + F(x) + F(z))`.
+- SCS: `T_p = max(Linf(b), Linf(A*x), Linf(s))` and
+  `T_d = max(Linf(c), Linf(P*x), Linf(A'*y))`.
+  `Dsc = eps_abs + eps_rel * T` is the full residual bound; SCS compares
+  `Linf(r)` directly against this bound, rather than a separate tolerance.
+
+| Solver | Internal numerator | Internal denominator | Report numerator | Report denominator |
+| :--- | :--- | :--- | :--- | :--- |
+| Loraine (`p = 2`) | `F(r)` | `1 + F(d)` | `F(r)` | `1 + F(d)` |
+| [SeDuMi](https://github.com/sqlp/sedumi/blob/master/sedumi.m) | `weighted Linf` | `1 + Linf(d)` | `F(r) / 0` | `1 + L1(b) / —` |
+| [SDPT3](https://github.com/sqlp/sdpt3/blob/master/Solver/sqlpmain.m) | `F(r)` | `1 + F(d)` | `F(r)` | `1 + Linf(d)` |
+| [CSDP](https://github.com/coin-or/Csdp/blob/master/lib/psd_feas.c) | `F(r)` | `1 + F(d)` | `F(r) / K(r)` | `1 + Linf(d)` |
+| [MOSEK](https://docs.mosek.com/latest/capi/solving-conic.html) | `Linf(r)` | `1 + Linf(d)` | `Linf(r_h)` | `1` |
+| [Clarabel](https://github.com/oxfordcontrol/Clarabel.jl/blob/main/src/info.jl) | `F(r)` | `Dcl_p / Dcl_d` | `F(r)` | `Dcl_p / Dcl_d` |
+| [SCS](https://www.cvxgrp.org/scs/algorithm/index.html) (default) | `Linf(r)` | `Dsc` | `Linf(r)` | `1` |
+| [COPT](https://guide.coap.online/copt/en-doc/logging.html) | unknown | unknown | unknown | unknown |
+
+"Report" means the optional DIMACS report for SeDuMi, SDPT3, and CSDP;
+Clarabel's printed residuals; SCS's returned residuals; and MOSEK's
+`PFEAS`/`DFEAS` log fields. These are different outputs:
+
+- SeDuMi's internal row describes the weighted residual terms used in its
+  homogeneous-embedding precision tests, not the complete stopping test.
+  Its DIMACS `err[3]` is always zero because it is not maintained explicitly.
+  Its cone-error denominators still use `1 + L1(b)` and `1 + L1(c)`.
+- MOSEK's log uses homogeneous residuals `r_h`, such as `A*x - b*tau`.
+  Its internal tests use the recovered solution, such as `A*(x/tau) - b`.
+- COPT's public documentation describes absolute/relative infeasibility
+  output and tolerances but does not establish these normalization formulas.
+
+Additional norm definitions are in SeDuMi's
+[sdinit.m](https://github.com/sqlp/sedumi/blob/master/sdinit.m), CSDP's
+[Fnorm.c](https://github.com/coin-or/Csdp/blob/master/lib/Fnorm.c), and
+Clarabel's `problemdata.jl` and `utils/mathutils.jl`:
+<https://github.com/oxfordcontrol/Clarabel.jl/tree/main/src>.
 
 The default `p = 2` matches the Euclidean/Frobenius residual/data scaling
 used by SDPT3 and CSDP internally. Selecting `p = Inf` only changes our data
