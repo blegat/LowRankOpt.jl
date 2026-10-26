@@ -4,32 +4,26 @@
     i,
     dual_err,
     dual_slack,
-    dobj,
     workspace,
-    inv_b_den,
     errors,
 )
-    err2, err3, err4, err6, matrix_pobj = errors
+    err2, err3, err4, err6, C_norm = errors
     X = x[i]
-    isempty(X) && return (err2, err3, err4, err6, matrix_pobj)
+    isempty(X) && return (err2, err3, err4, err6, C_norm)
     C = grad(model, i)
-    inv_C_den = inv(1 + LinearAlgebra.norm(C))
-    block_pobj = LinearAlgebra.dot(C, X)
-    if i !== ScalarIndex
-        matrix_pobj += block_pobj
-    end
+    C_norm = max(C_norm, LinearAlgebra.norm(C, Inf))
     min_x = i === ScalarIndex ? minimum(X) : matrix_eigmin(X, i, workspace)
-    err2 += max(0, -min_x * inv_b_den)
+    err2 = max(err2, -min_x)
     if !isnothing(dual_err)
-        err3 += LinearAlgebra.norm(dual_err[i]) * inv_C_den
+        err3 += LinearAlgebra.norm(dual_err[i])
     end
     if !isnothing(dual_slack)
         S = dual_slack[i]
         min_s = i === ScalarIndex ? minimum(S) : matrix_eigmin(S, i, workspace)
-        err4 += max(0, -min_s * inv_C_den)
-        err6 += LinearAlgebra.dot(S, X) / (1 + abs(block_pobj) + abs(dobj))
+        err4 = max(err4, -min_s)
+        err6 += LinearAlgebra.dot(S, X)
     end
-    return (err2, err3, err4, err6, matrix_pobj)
+    return (err2, err3, err4, err6, C_norm)
 end
 
 function matrix_eigmin(A, ::MatrixIndex, ::Nothing)
@@ -42,9 +36,13 @@ end
 """
     errors(model::Model, x, y)
 
-Return [the six DIMACS errors](https://plato.asu.edu/dimacs/node3.html),
-temporarily using Loraine main's blockwise normalization for comparison
-with its `nlpmodel` branch.
+Return [the six DIMACS errors](https://plato.asu.edu/dimacs/node3.html).
+
+Residual norms sum the PSD blocks' Frobenius norms and the scalar vector's
+Euclidean norm. Cone violations use the worst eigenvalue or scalar across
+all blocks. Data scales use the largest absolute entry of `b` and `C`.
+The signed duality gap and complementarity share the denominator
+`1 + abs(pobj) + abs(dobj)`, including the scalar objective.
 
 `workspace` may be a vector of `EigenWorkspace`s, one per PSD block, to
 reuse eigensolver storage. The primal and dual solutions are preserved.
@@ -60,22 +58,9 @@ function errors(
     dobj = dual_obj(model, y),
     workspace::Union{Nothing,Vector{<:EigenWorkspace}} = nothing,
 )
-    b_den = 1 + LinearAlgebra.norm(cons_constant(model))
-    # TODO: Reconsider global normalization after Loraine's `nlpmodel` branch
-    # is merged. For now, match main's check_convergence so benchmark stopping
-    # tolerances have the same meaning. In particular, the standard DIMACS
-    # complementarity uses the total objective, not a separate block objective:
-    # obj_den = 1 + abs(pobj) + abs(dobj)
-    # err6 = LinearAlgebra.dot(x, dual_slack) / obj_den
-    # The previous global residual/cone formulas were:
-    # C_den = 1 + LinearAlgebra.norm(grad(model, ScalarIndex)) +
-    #     sum(i -> LinearAlgebra.norm(grad(model, i)), matrix_indices(model))
-    # err2 = max(0, -LinearAlgebra.eigmin(x)) / b_den
-    # err3 = LinearAlgebra.norm(dual_err) / C_den
-    # err4 = max(0, -LinearAlgebra.eigmin(dual_slack)) / C_den
-    # Revisit the consistency of the numerator/denominator norms as well.
-    inv_b_den = inv(b_den)
-    block_err = (zero(b_den), zero(b_den), zero(b_den), zero(b_den), zero(pobj))
+    b_den = 1 + LinearAlgebra.norm(cons_constant(model), Inf)
+    block_err =
+        (zero(b_den), zero(b_den), zero(b_den), zero(b_den), zero(b_den))
     # Keep matrix and scalar indices in separate calls so each block's
     # arithmetic specializes on its solution and objective storage.
     for i in matrix_indices(model)
@@ -85,44 +70,27 @@ function errors(
             i,
             dual_err,
             dual_slack,
-            dobj,
             workspace,
-            inv_b_den,
             block_err,
         )
     end
-    err2, err3, err4, err6, matrix_pobj = block_errors(
+    err2, err3, err4, err6, C_norm = block_errors(
         model,
         x,
         ScalarIndex,
         dual_err,
         dual_slack,
-        dobj,
         workspace,
-        inv_b_den,
         block_err,
     )
-    # Loraine main omits the scalar objective from this denominator, even
-    # though it includes it in the numerator. Keep this convention temporarily.
-    # TODO: Restore obj_den = 1 + abs(pobj) + abs(dobj) after the merge.
-    obj_den = 1 + abs(matrix_pobj) + abs(dobj)
+    C_den = 1 + C_norm
+    obj_den = 1 + abs(pobj) + abs(dobj)
     return (
         LinearAlgebra.norm(primal_err) / b_den,
-        err2,
-        err3,
-        err4,
+        err2 / b_den,
+        err3 / C_den,
+        err4 / C_den,
         (pobj - dobj) / obj_den,
-        err6,
+        err6 / obj_den,
     )
 end
-
-# TODO: Revisit this helper with global normalization after the nlpmodel merge.
-# As defined in https://plato.asu.edu/dimacs/node3.html
-# function LinearAlgebra.eigmin(x::AbstractSolution{T}) where {T}
-#     return min(
-#         minimum(x[ScalarIndex], init = zero(T)) +
-#         minimum(matrix_indices(x), init = zero(T)) do i
-#             return LinearAlgebra.eigmin(LinearAlgebra.Symmetric(x[i]))
-#         end,
-#     )
-# end
