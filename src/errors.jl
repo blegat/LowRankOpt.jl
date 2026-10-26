@@ -53,9 +53,9 @@ For a single vector, `F` and `K` both reduce to its Euclidean norm. For
 matrix blocks `[3]` and `[4]`, `F = 5` while `K = 7`. Matrix norms here are
 entrywise norms, not induced operator norms.
 
-This function uses `F` for both equation-residual numerators. The dual
-residual combines all block norms in quadrature. Cone violations use the
-worst eigenvalue or scalar across all blocks. `p` selects only the data
+This function uses `Fnorm` (`F` above) for both equation-residual
+numerators. Cone violations use the worst eigenvalue or scalar across all
+blocks. `p` selects only the data
 denominators `1 + norm(b, p)` and `1 + norm(C, p)`, combining all objective
 entries into one norm. Thus `p = 2` (the default) uses `F`, `p = 1` uses
 `L1`, and `p = Inf` uses `Linf` for the data.
