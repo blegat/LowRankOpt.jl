@@ -84,9 +84,12 @@ function test_detect_rank_one_all()
     arr = [sparse([j], [j], [1.0], 4, 4) for i in 1:1, j in 1:4]
     R = LRO.detect_rank_one(arr)
     @test !isnothing(R)
-    @test isconcretetype(eltype(R))
-    @test eltype(R) <: LRO.Factorization
-    @test all(i -> Matrix(R[i]) == Matrix(arr[i]), eachindex(arr))
+    @test isconcretetype(eltype(only(R).values))
+    @test eltype(only(R).values) <: LRO.Factorization
+    @test all(
+        j -> Matrix(only(R).values[j, 1]) == Matrix(arr[1, j]),
+        axes(arr, 2),
+    )
     return
 end
 
@@ -94,7 +97,13 @@ function test_detect_rank_one_mixed()
     arr = Matrix{SparseMatrixCSC{Float64,Int}}(undef, 1, 2)
     arr[1, 1] = sparse([1], [1], [1.0], 2, 2)
     arr[1, 2] = sparse([2.0 1.0; 1.0 2.0]) # rank 2
-    @test isnothing(LRO.detect_rank_one(arr))
+    components = LRO.detect_rank_one(arr)
+    @test length(components) == 2
+    @test all(
+        j ->
+            sum(component.values[j, 1] for component in components) ≈ arr[1, j],
+        1:2,
+    )
     return
 end
 
@@ -106,8 +115,8 @@ function test_detect_rank_one_with_zeros()
     arr[1, 2] = S
     R = LRO.detect_rank_one(arr)
     @test !isnothing(R)
-    @test iszero(Matrix(R[1, 1]))
-    @test Matrix(R[1, 2]) == Matrix(S)
+    @test iszero(Matrix(only(R).values[1, 1]))
+    @test Matrix(only(R).values[2, 1]) == Matrix(S)
     return
 end
 
@@ -149,21 +158,23 @@ end
 
 function test_option_default_keeps_sparse()
     model = _build(false)
-    @test eltype(model.A) <: SparseMatrixCSC
+    @test eltype(only(model.A).values) <: SparseMatrixCSC
     return
 end
 
 function test_option_converts_to_rank_one()
     sparse_model = _build(false)
     rank_one_model = _build(true)
-    @test eltype(rank_one_model.A) <: LRO.Factorization
+    @test eltype(only(rank_one_model.A).values) <: LRO.Factorization
     # `C` (the objective block) is not rank one, so it stays as is.
     @test eltype(rank_one_model.C) <: SparseMatrixCSC
     # The conversion is exact: same matrices, different representation.
-    @test size(rank_one_model.A) == size(sparse_model.A)
+    @test size(only(rank_one_model.A)) == size(only(sparse_model.A))
     @test all(
-        i -> Matrix(rank_one_model.A[i]) == Matrix(sparse_model.A[i]),
-        eachindex(sparse_model.A),
+        j ->
+            Matrix(LRO.jac(rank_one_model, j, LRO.MatrixIndex(1))) ==
+            Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
+        1:sparse_model.meta.ncon,
     )
     return
 end

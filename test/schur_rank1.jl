@@ -39,9 +39,9 @@ function _rank1_model(::Type{T}, sizes::Vector{Int}, n::Int; seed = 0) where {T}
         LRO.Factorization(zeros(T, m), reshape(T[zero(T)], ())) for m in sizes
     ]
     b = randn(rng, T, n)
-    d_lin = sparsevec(Int[], T[], 0)
-    C_lin = sparse(zeros(T, n, 0))
-    return LRO.Model(C, A, b, d_lin, C_lin, sizes), Us, weights
+    d_lin = sparsevec(Int64[], T[], 0)
+    C_lin = spzeros(T, Int64, n, 0)
+    return LRO.Model(C, A, b, d_lin, C_lin, Int64.(sizes)), Us, weights
 end
 
 # Brute-force: H[j,k] = Σ_i ⟨A_{i,j}, W_i A_{i,k} W_i⟩, no rank-1 trick.
@@ -53,8 +53,8 @@ function _brute_force_H(model, W_blocks::Vector{<:AbstractMatrix})
         i = idx.value
         Wi = W_blocks[i]
         for j in 1:n, k in 1:n
-            Aj = Matrix(model.A[i, j])
-            Ak = Matrix(model.A[i, k])
+            Aj = Matrix(LRO.jac(model, j, idx))
+            Ak = Matrix(LRO.jac(model, k, idx))
             H[j, k] += tr(Aj * Wi * Ak * Wi)
         end
     end

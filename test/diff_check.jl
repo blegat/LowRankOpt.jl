@@ -190,7 +190,8 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
         # may also alias `C` itself, which is sparse.
         @test ret isa
               Union{Matrix,SparseArrays.SparseMatrixCSC,FillArrays.Zeros}
-        Aty = sum(model.model.A[i.value, j] * y[j] for j in 1:(model.meta.ncon))
+        Aty =
+            sum(LRO.jac(model.model, j, i) * y[j] for j in 1:(model.meta.ncon))
         @test ret ≈ model.model.C[i.value] - Aty
         if Aty isa FillArrays.Zeros
             @test ret === model.model.C[i.value]

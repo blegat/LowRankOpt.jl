@@ -155,19 +155,12 @@ function test_trace()
     nlp = unsafe_backend(model).model
     @test nlp.C isa Vector{SparseMatrixCSC{T,Int64}}
     @test nlp.C[1] == [3 1; 1 4]
-    @test nlp.A isa Matrix{
-        Union{
-            LRO.FillArrays.Zeros{
-                T,
-                2,
-                Tuple{Base.OneTo{Int64},Base.OneTo{Int64}},
-            },
-            LRO.Factorization{T,Matrix{T},Vector{T}},
-        },
-    }
-    @test nlp.A[1].factor == Matrix(I, 2, 2)
-    @test nlp.A[1].scaling == [1, 1]
-    @test nlp.A[2] === LRO.FillArrays.Zeros{T}(Int64(2), Int64(2))
+    @test only(nlp.A).values isa
+          Matrix{LRO.Factorization{T,Matrix{T},Vector{T}}}
+    @test only(nlp.A).block_ids == [1]
+    @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)).factor == Matrix(I, 2, 2)
+    @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)).scaling == [1, 1]
+    @test iszero(LRO.jac(nlp, 2, LRO.MatrixIndex(1)))
     return
 end
 
@@ -242,9 +235,9 @@ function test_different_factor_ranks()
     MT = LRO.Factorization{T,Matrix{T},LRO.Ones{T}}
     @test nlp.C isa Vector{MT}
     @test nlp.C[] == factors[1]
-    @test nlp.A isa Matrix{MT}
-    @test nlp.A[1] == factors[2]
-    @test nlp.A[2] == factors[3]
+    @test only(nlp.A).values isa Matrix{MT}
+    @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)) == factors[2]
+    @test LRO.jac(nlp, 2, LRO.MatrixIndex(1)) == factors[3]
     return
 end
 

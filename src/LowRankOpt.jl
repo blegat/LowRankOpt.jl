@@ -19,6 +19,7 @@ include("Test/Test.jl")
 include("Bridges/Bridges.jl")
 
 include("solution.jl")
+include("block_columns.jl")
 include("model.jl")
 include("buffer.jl")
 include("schur.jl")

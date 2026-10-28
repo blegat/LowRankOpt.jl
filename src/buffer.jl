@@ -1,7 +1,7 @@
 mutable struct BufferedModelForSchur{
     T,
     C<:AbstractMatrix{T},
-    A<:AbstractMatrix{T},
+    A<:Tuple,
     JB,
     JTB,
     SB,
@@ -118,23 +118,31 @@ Optimization Methods and Software 39.6 (2024): 1185-1215.
 semidefinite programming." Mathematical Programming 79 (1997): 235-253.
 """
 function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
-    nnz = sum(1:(model.meta.ncon); init = 0) do j
-        return _nnz(model.A[i.value, j])
+    return _jacobian_buffer(
+        model.A,
+        i.value,
+        side_dimension(model, i),
+        model.meta.ncon,
+        T,
+    )
+end
+
+function _jacobian_buffer(components, i, d, ncon, ::Type{T}) where {T}
+    nnz = _sum_columns(components, i, 0) do column
+        return sum(_nnz, column; init = 0)
     end
     I = zeros(Int64, nnz)
     J = zeros(Int64, nnz)
     V = zeros(T, nnz)
     offset = 0
-    for j in 1:(model.meta.ncon)
-        offset = _add_vec!(I, J, V, j, offset, model.A[i.value, j])
+    # Components contribute to the same sparse columns; `sparse` adds
+    # duplicate entries, including overlaps between representations.
+    _foreach_column(components, i) do values, slot
+        for j in axes(values, 1)
+            offset = _add_vec!(I, J, V, j, offset, values[j, slot])
+        end
     end
-    A = SparseArrays.sparse(
-        I,
-        J,
-        V,
-        side_dimension(model, i)^2,
-        model.meta.ncon,
-    )
+    A = SparseArrays.sparse(I, J, V, d^2, ncon)
     return A
 end
 
@@ -299,7 +307,9 @@ function buffer_for_jtprod(
     ncon = model.meta.ncon
     # If every `Aᵢⱼ` is zero then so is the product, and callers rely on
     # getting a `Zeros` back (`_sub` then aliases `C` instead of copying).
-    nnz_A = sum(j -> _nnz(model.A[mat_idx.value, j]), 1:ncon; init = 0)
+    nnz_A = _sum_columns(model.A, mat_idx.value, 0) do column
+        return sum(_nnz, column; init = 0)
+    end
     if iszero(nnz_A)
         return FillArrays.Zeros{T}(d, d)
     end
@@ -309,11 +319,23 @@ function buffer_for_jtprod(
     max_nnz =
         min(density * d^2, (work_ratio * float(d)^3 - float(ncon) * d) / nnz_A)
     pattern = FillArrays.Zeros{T}(d, d)
-    for j in 1:ncon
-        pattern = _merge_sparsity(pattern, _abs(model.A[mat_idx.value, j]))
-        if _nnz(pattern) > max_nnz
-            return zeros(T, d, d)
+    dense = false
+    _foreach_column(model.A, mat_idx.value) do values, slot
+        for j in axes(values, 1)
+            A = values[j, slot]
+            if !(A isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros})
+                dense = true
+                break
+            end
+            pattern = _merge_sparsity(pattern, _abs(A))
+            if _nnz(pattern) > max_nnz
+                dense = true
+                break
+            end
         end
+    end
+    if dense
+        return zeros(T, d, d)
     end
     return pattern
 end
@@ -397,10 +419,32 @@ function _jtprod!(
     i::MatrixIndex,
 )
     _zero!(buffer)
-    for j in eachindex(y)
-        _add_mul!(buffer, model.model.A[i.value, j], y[j])
+    _foreach_column(model.model.A, i.value) do values, slot
+        return _add_sparse_jtprod!(buffer, values, slot, y)
     end
     return buffer
+end
+
+function _add_sparse_jtprod!(buffer, values, slot, y)
+    for j in eachindex(y)
+        _add_mul!(buffer, values[j, slot], y[j])
+    end
+    return nothing
+end
+
+# Setup fallback for arbitrary matrix representations. Specializations for
+# sparse and rank-one matrices avoid visiting their implicit zeros.
+function _add_vec!(I, J, V, j, offset, A::AbstractMatrix)
+    for col in axes(A, 2), row in axes(A, 1)
+        value = A[row, col]
+        if !iszero(value)
+            offset += 1
+            I[offset] = row + (col - 1) * size(A, 1)
+            J[offset] = j
+            V[offset] = value
+        end
+    end
+    return offset
 end
 
 """

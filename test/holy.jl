@@ -47,7 +47,7 @@ function _test_holy(; is_dual, low_rank, square_scalars, n = 10)
         SparseMatrixCSC{T,Int64}
     end
     @test b.model.C isa Vector{F}
-    @test b.model.A isa Matrix{F}
+    @test only(b.model.A).values isa Matrix{F}
 end
 
 function test_holy()

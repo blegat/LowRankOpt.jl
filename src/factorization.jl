@@ -155,14 +155,16 @@ function positive_semidefinite_factorization(
     return Factorization(factor, Ones{T}(Base.OneTo(size(factor, 2))))
 end
 
-# The uniform rank-one type produced by `rank_one` so that a whole constraint
-# array can be stored as a concrete `Matrix{<:Factorization}` (and hence hit
-# the rank-1 Schur specialization in `schur.jl`).
+# A uniform rank-one type lets detected coefficients share a concrete
+# BlockColumns component without widening another component's element type.
 const _SparseRankOne{T} =
-    Factorization{T,SparseArrays.SparseVector{T,Int},Array{T,0}}
+    Factorization{T,SparseArrays.SparseVector{T,Int64},Array{T,0}}
 
 function _sparse_rank_one(factor::SparseArrays.SparseVector{T}, s::T) where {T}
-    return Factorization(factor, s)::_SparseRankOne{T}
+    return Factorization(
+        SparseArrays.SparseVector{T,Int64}(factor),
+        s,
+    )::_SparseRankOne{T}
 end
 
 """
@@ -221,25 +223,27 @@ rank_one(::AbstractMatrix; kws...) = nothing
 """
     detect_rank_one(A::AbstractMatrix{<:AbstractMatrix}; kws...)
 
-Try to convert every entry of the constraint-matrix array `A` to a rank-one
-[`Factorization`](@ref) via [`rank_one`](@ref). Return the converted
-`Matrix{<:Factorization}` if **all** entries are rank one (or zero), so that the
-result hits the rank-1 Schur specialization; otherwise return `nothing` (leaving
-the caller to keep the original sparse representation, since a per-block mix of
-rank-one and sparse blocks is not supported yet).
+Convert entries recognized by [`rank_one`](@ref), keeping other matrix
+representations. Return a tuple of [`BlockColumns`](@ref) components grouped
+by concrete matrix type. A PSD block missing from one component contributes
+zero there; components may overlap and their contributions are summed.
+Return `nothing` if no entries are convertible or the array is empty.
 """
 function detect_rank_one(
     A::AbstractMatrix{<:AbstractMatrix{T}};
     kws...,
 ) where {T}
     isempty(A) && return nothing
-    R = Matrix{_SparseRankOne{T}}(undef, size(A))
-    for i in eachindex(IndexCartesian(), A)
-        f = rank_one(A[i]; kws...)
-        isnothing(f) && return nothing
-        R[i] = f
+    changed = false
+    converted = map(A) do coefficient
+        factor = rank_one(coefficient; kws...)
+        if isnothing(factor)
+            return coefficient
+        end
+        changed = true
+        return factor
     end
-    return R
+    return changed ? _matrix_components(converted) : nothing
 end
 
 struct AsymmetricFactorization{
@@ -389,6 +393,13 @@ function _abs2!!(a::AbstractArray)
     return a
 end
 
+# Rank-one coefficients detected from ordinary matrices carry a 0-D Array
+# scaling, unlike the unit FillArrays scalings used by PSD factorizations.
+_lmul_diag!!(s::Array{<:Any,0}, value::Number) = s[] * value
+_lmul_diag!!(s::Array{<:Any,0}, values) = LinearAlgebra.lmul!(s[], values)
+_rmul_diag!!(value::Number, s::Array{<:Any,0}) = value * s[]
+_rmul_diag!!(values, s::Array{<:Any,0}) = LinearAlgebra.rmul!(values, s[])
+
 _lmul_diag!!(::FillArrays.Ones, VtU) = VtU
 _rmul_diag!!(VtU, ::FillArrays.Ones) = VtU
 
@@ -449,8 +460,11 @@ function _dot_mat_fact(
     res = zero(MA.promote_sum_mul(T, U))
     for i in axes(left_factor(b), 2)
         res +=
-            b.scaling[i] *
-            LinearAlgebra.dot(left_factor(b)[:, i], a, right_factor(b)[:, i])
+            b.scaling[i] * LinearAlgebra.dot(
+                view(left_factor(b), :, i),
+                a,
+                view(right_factor(b), :, i),
+            )
     end
     return res
 end
