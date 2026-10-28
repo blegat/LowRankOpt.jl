@@ -118,6 +118,10 @@ Optimization Methods and Software 39.6 (2024): 1185-1215.
 semidefinite programming." Mathematical Programming 79 (1997): 235-253.
 """
 function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
+    J = _rank_one_jacobian(model, i)
+    if !isnothing(J)
+        return J
+    end
     return _jacobian_buffer(
         model.A,
         i.value,
@@ -147,9 +151,88 @@ function _jacobian_buffer(components, i, d, ncon, ::Type{T}) where {T}
 end
 
 function buffer_for_jprod(model::Model{T}) where {T}
-    return SparseArrays.SparseMatrixCSC{T,Int64}[
+    buffers = Union{SparseArrays.SparseMatrixCSC{T,Int64},RankOneJacobian{T}}[
         buffer_for_jprod(model, i) for i in matrix_indices(model)
     ]
+    # Loraine accesses the sparse `𝐀ᵢ` directly so keep the concrete
+    # element type when no block is rank-one.
+    if all(J -> J isa SparseArrays.SparseMatrixCSC, buffers)
+        return convert(Vector{SparseArrays.SparseMatrixCSC{T,Int64}}, buffers)
+    end
+    return buffers
+end
+
+"""
+    struct RankOneJacobian{T}
+        U::Vector{Matrix{T}}
+        weights::Vector{Vector{T}}
+    end
+
+Replaces the sparse `𝐀ᵢ` of `buffer_for_jprod` for a PSD block whose
+constraint matrices are all sums of rank-one matrices
+`Aᵢⱼ = ∑ₚ weights[p][j] * U[p][j, :] * U[p][j, :]'`, with one `p` per
+component. The sparse `𝐀ᵢ` would have `nnz(U[p][j, :])²` entries for each
+constraint `j` while this stores the `m × d` factors `U[p]`. The products
+are computed with dense BLAS calls on the factors:
+
+* `jprod`: `⟨Aᵢⱼ, V⟩ = ∑ₚ weights[p][j] * (U[p] * V)[j, :] ⋅ U[p][j, :]`,
+* `jtprod`: `∑ⱼ yⱼ Aᵢⱼ = ∑ₚ U[p]' * Diagonal(weights[p] .* y) * U[p]`.
+"""
+struct RankOneJacobian{T}
+    U::Vector{Matrix{T}}
+    weights::Vector{Vector{T}}
+    # Workspaces of size `m × d` and `m`
+    scaled::Matrix{T}
+    coef::Vector{T}
+end
+
+function _rank_one_jacobian(model::Model{T}, i::MatrixIndex) where {T}
+    d = side_dimension(model, i)
+    U = Matrix{T}[]
+    weights = Vector{T}[]
+    rank_one = true
+    _foreach_column(model.A, i.value) do values, slot
+        if values isa AbstractMatrix{<:_RankOneOrZeros{T}}
+            Ui, wi = _rank_one_factors(values, slot, d)
+            push!(U, Ui)
+            push!(weights, wi)
+        else
+            rank_one = false
+        end
+        return
+    end
+    if !rank_one || isempty(U)
+        return
+    end
+    m = model.meta.ncon
+    return RankOneJacobian(U, weights, zeros(T, m, d), zeros(T, m))
+end
+
+function _add_jprod!(V, Jv::AbstractVector, J::RankOneJacobian)
+    for (U, w) in zip(J.U, J.weights)
+        LinearAlgebra.mul!(J.scaled, U, V)
+        for k in axes(U, 2), j in eachindex(Jv)
+            Jv[j] += w[j] * J.scaled[j, k] * U[j, k]
+        end
+    end
+    return Jv
+end
+
+# `vec(buffer) = 𝐀ᵢ * y`
+function _mul_jacobian!(buffer, A::SparseArrays.SparseMatrixCSC, y)
+    return LinearAlgebra.mul!(_vec(buffer), A, y)
+end
+function _mul_jacobian!(buffer, J::RankOneJacobian, y)
+    for (p, (U, w)) in enumerate(zip(J.U, J.weights))
+        # `y` may be a `SparseVector`, compute `w .* y` once before
+        # broadcasting it on the rows of `U`
+        for j in eachindex(J.coef)
+            J.coef[j] = w[j] * y[j]
+        end
+        J.scaled .= J.coef .* U
+        LinearAlgebra.mul!(buffer, U', J.scaled, true, !isone(p))
+    end
+    return buffer
 end
 
 _vec(x::AbstractVector) = x
@@ -405,7 +488,7 @@ function _jtprod!(
     y::AbstractVector,
     i::MatrixIndex,
 )
-    LinearAlgebra.mul!(_vec(buffer), model.jprod_buffer[i.value], y)
+    _mul_jacobian!(buffer, model.jprod_buffer[i.value], y)
     return buffer
 end
 

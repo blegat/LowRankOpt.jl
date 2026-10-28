@@ -101,6 +101,32 @@ end
 const _ZerosMatrix{T} =
     FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
 
+const _RankOneFactorization{T} =
+    Factorization{T,<:AbstractVector{T},<:AbstractArray{T,0}}
+
+# Entries of a component whose nonzero matrices are all rank-one.
+const _RankOneOrZeros{T} = Union{_RankOneFactorization{T},_ZerosMatrix{T}}
+
+# Return `U` and `w` such that `values[j, slot] = w[j] * U[j, :] * U[j, :]'`.
+# `Zeros` entries get a zero row in `U` and a zero weight.
+function _rank_one_factors(
+    values::AbstractMatrix{<:_RankOneOrZeros{T}},
+    slot,
+    d,
+) where {T}
+    n = size(values, 1)
+    U = zeros(T, n, d)
+    w = zeros(T, n)
+    for j in 1:n
+        A = values[j, slot]
+        if !(A isa FillArrays.Zeros)
+            U[j, :] = A.factor
+            w[j] = only(A.scaling)
+        end
+    end
+    return U, w
+end
+
 _matrix_iszero(A::AbstractMatrix) = iszero(A)
 function _matrix_iszero(A::Factorization)
     return all(iszero, A.factor) || all(iszero, A.scaling)
