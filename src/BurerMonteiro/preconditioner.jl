@@ -6,6 +6,12 @@ Inverse metric preconditioner for the Burer--Monteiro factors. After
 to each matrix block, leaving scalar variables unchanged. `ldiv!` applies
 the metric itself. The regularization must be finite and strictly positive.
 
+This is a regularized inverse of the factor-space metric `g²` studied by
+Shixin Zheng, Wen Huang, Bart Vandereycken, and Xiangxiong Zhang in
+"Riemannian optimization using three different metrics for Hermitian PSD
+fixed-rank constraints: an extended version"
+([arXiv:2204.07830](https://arxiv.org/abs/2204.07830)).
+
 For JSOSolvers' `trunk`, pass `M = M` and a callback
 `(nlp, solver, stats) -> update!(M, solver.x)`. The constructor initializes
 at `model.meta.x0`; call `update!(M, x0)` before solving if using another
