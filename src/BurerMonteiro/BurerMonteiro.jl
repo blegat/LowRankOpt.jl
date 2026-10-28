@@ -10,6 +10,7 @@ import LowRankOpt as LRO
 
 include("solution.jl")
 include("model.jl")
+include("preconditioner.jl")
 include("solver.jl")
 
 end
