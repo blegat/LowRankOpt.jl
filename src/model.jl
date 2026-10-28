@@ -280,6 +280,9 @@ function _coefficient_dot(A::LinearAlgebra.Diagonal, V::AbstractMatrix)
         return conj(A.diag[k]) * V[k, k]
     end
 end
+function _coefficient_dot(::FillArrays.Zeros{T}, V) where {T}
+    return zero(promote_type(T, eltype(V)))
+end
 function _coefficient_dot(A::AbstractFactorization, V::AbstractMatrix)
     return LinearAlgebra.dot(V, A)
 end

@@ -30,7 +30,7 @@ function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
     if all_zero
         @test isempty(b.model.A)
     else
-        @test only(b.model.A).values isa Matrix{S}
+        @test only(b.model.A).values isa Matrix{Union{S,Z}}
     end
     i = LRO.MatrixIndex(1)
     @test iszero(LRO.jac(b.model, 1, i))

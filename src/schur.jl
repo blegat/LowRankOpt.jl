@@ -308,21 +308,24 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
     )
 end
 
+# `Zeros` entries get a zero row in `U` and a zero weight.
 function _schur_component(
-    component::BlockColumns{<:_RankOneFactorization{T}},
+    component::BlockColumns{<:Union{_RankOneFactorization{T},_ZerosMatrix{T}}},
     model::Model{T},
     _,
 ) where {T}
     n, p = size(component.values)
     U = Matrix{T}[]
     UW = Matrix{T}[]
-    weights = Matrix{T}(undef, n, p)
+    weights = zeros(T, n, p)
     for (slot, i) in enumerate(component.block_ids)
-        Ui = Matrix{T}(undef, n, model.msizes[i])
+        Ui = zeros(T, n, model.msizes[i])
         for j in 1:n
             A = component.values[j, slot]
-            Ui[j, :] = A.factor
-            weights[j, slot] = only(A.scaling)
+            if !(A isa FillArrays.Zeros)
+                Ui[j, :] = A.factor
+                weights[j, slot] = only(A.scaling)
+            end
         end
         push!(U, Ui)
         push!(UW, similar(Ui))
@@ -449,6 +452,9 @@ function _add_schur_pair!(
 end
 
 _quadratic_form(u, A::AbstractMatrix) = LinearAlgebra.dot(u, A, u)
+function _quadratic_form(u, ::FillArrays.Zeros{T}) where {T}
+    return zero(promote_type(eltype(u), T))
+end
 function _quadratic_form(
     u,
     A::AbstractFactorization{T,<:AbstractVector},

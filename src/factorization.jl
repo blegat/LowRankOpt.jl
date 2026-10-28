@@ -236,6 +236,8 @@ function detect_rank_one(
     isempty(A) && return nothing
     changed = false
     converted = map(A) do coefficient
+        # Keep `Zeros` so that `_matrix_components` stores them as such
+        coefficient isa FillArrays.Zeros && return coefficient
         factor = rank_one(coefficient; kws...)
         if isnothing(factor)
             return coefficient

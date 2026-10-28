@@ -8,6 +8,7 @@ module TestComponents
 using Test, LinearAlgebra, SparseArrays, Random
 import LowRankOpt as LRO
 import NLPModels
+import FillArrays
 
 function _rank_component(rng, ::Type{T}, ids, dims, n) where {T}
     values = [
@@ -173,6 +174,68 @@ end
         model.C_lin,
         model.msizes,
     )
+end
+
+@testset "Legacy matrix with Zeros entries" begin
+    T = Float64
+    rng = MersenneTwister(7)
+    dims, n = Int64[3, 2, 2], 3
+    Z(d) = FillArrays.Zeros{T}(d, d)
+    R(d) = LRO.Factorization(randn(rng, T, d), T(0.5))
+    S(d) = sparse(Symmetric(sprandn(rng, T, d, d, 0.7) + I))
+    # Block 1 mixes all three types, block 2 has no rank-one entry and
+    # block 3 has no sparse entry.
+    A = Matrix{Union{typeof(Z(1)),typeof(R(1)),typeof(S(1))}}(undef, 3, n)
+    A[1, :] = [R(3), S(3), Z(3)]
+    A[2, :] = [Z(2), S(2), S(2)]
+    A[3, :] = [R(2), Z(2), R(2)]
+    full = Matrix.(A)
+    C = [spdiagm(fill(T(i), d)) for (i, d) in enumerate(dims)]
+    b = T[1, -2, 3]
+    scalars = sparsevec(Int64[], T[], 0)
+    scalar_jacobian = spzeros(T, Int64, n, 0)
+    model = LRO.Model(C, A, b, scalars, scalar_jacobian, dims)
+    rank_one, sparse_component = model.A
+    @test rank_one.block_ids == [1, 3]
+    @test sparse_component.block_ids == [1, 2]
+    @test eltype(rank_one.values) == Union{typeof(R(1)),typeof(Z(1))}
+    @test eltype(sparse_component.values) == Union{typeof(S(1)),typeof(Z(1))}
+    W = LRO.ShapedSolution(T[], [
+        let R = randn(rng, T, d, d)
+            R * R' + I
+        end for d in dims
+    ])
+    x = LRO.ShapedSolution(
+        T[],
+        [Matrix(Symmetric(randn(rng, T, d, d))) for d in dims],
+    )
+    y = randn(rng, T, n)
+    buffer = LRO.BufferedModelForSchur(model, 1)
+    H = zeros(T, n, n)
+    Hy = zeros(T, n)
+    Jv = zeros(T, n)
+    Jty = LRO.ShapedSolution(T[], similar.(x.matrices))
+    _iteration!(buffer, W, x, y, H, Hy, Jv, Jty)
+    expected_H = [
+        sum(
+            dot(full[i.value, j], W[i] * full[i.value, k] * W[i]) for
+            i in LRO.matrix_indices(model)
+        ) for j in 1:n, k in 1:n
+    ]
+    @test H ≈ expected_H
+    @test Hy ≈ expected_H * y
+    @test Jv ≈ [
+        sum(dot(full[i.value, j], x[i]) for i in LRO.matrix_indices(model)) for
+        j in 1:n
+    ]
+    @test NLPModels.jprod!(model, x, x, similar(Jv)) ≈ Jv
+    for i in LRO.matrix_indices(model)
+        @test Jty[i] ≈ sum(y[j] * full[i.value, j] for j in 1:n)
+        for j in 1:n
+            @test LRO.jac(model, j, i) ≈ full[i.value, j]
+        end
+    end
+    @test _allocations(buffer, W, x, y, H, Hy, Jv, Jty) == 0
 end
 
 @testset "Burer-Monteiro with sparse plus low-rank components" begin

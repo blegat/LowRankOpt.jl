@@ -93,10 +93,14 @@ end
     return _sum_columns(f, Base.tail(components), i, value)
 end
 
-# Construction runs once. Split a heterogeneous legacy array into concrete
+# Construction runs once. Split a heterogeneous legacy array into
 # components, omitting blocks that contribute nothing to that component.
-_component_zero(A::AbstractMatrix) = zero(A)
-_component_zero(A::Factorization) = Factorization(zero(A.factor), A.scaling)
+# Within a stored block, the entries belonging to other components are
+# `Zeros`, so the element type is the small `Union{M,_ZerosMatrix{T}}` only
+# when such entries exist. This avoids storing one zero matrix per entry.
+const _ZerosMatrix{T} =
+    FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
+
 _matrix_iszero(A::AbstractMatrix) = iszero(A)
 function _matrix_iszero(A::Factorization)
     return all(iszero, A.factor) || all(iszero, A.scaling)
@@ -109,11 +113,17 @@ function _typed_component(::Type{M}, A) where {M<:AbstractMatrix}
             push!(ids, i)
         end
     end
-    values = Matrix{M}(undef, size(A, 2), length(ids))
+    T = eltype(M)
+    E =
+        all(i -> all(j -> A[i, j] isa M, axes(A, 2)), ids) ? M :
+        Union{M,_ZerosMatrix{T}}
+    values = Matrix{E}(undef, size(A, 2), length(ids))
     for (k, i) in enumerate(ids)
-        template = A[i, findfirst(j -> A[i, j] isa M, axes(A, 2))]
+        d = LinearAlgebra.checksquare(
+            A[i, findfirst(j -> A[i, j] isa M, axes(A, 2))],
+        )
         for j in axes(A, 2)
-            values[j, k] = A[i, j] isa M ? A[i, j] : _component_zero(template)
+            values[j, k] = A[i, j] isa M ? A[i, j] : FillArrays.Zeros{T}(d, d)
         end
     end
     return BlockColumns(ids, values, size(A, 1))
