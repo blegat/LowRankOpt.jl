@@ -30,7 +30,10 @@ function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
     if all_zero
         @test isempty(b.model.A)
     else
-        @test only(b.model.A).values isa Matrix{Union{S,Z}}
+        # Missing entries of a component use `Int` axes, unlike the `Int64`
+        # ones built by the MOI wrapper, which differ on 32-bit systems.
+        ZInt = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
+        @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
     end
     i = LRO.MatrixIndex(1)
     @test iszero(LRO.jac(b.model, 1, i))

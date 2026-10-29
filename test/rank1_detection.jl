@@ -120,6 +120,39 @@ function test_detect_rank_one_with_zeros()
     return
 end
 
+function test_rank_one_unsupported_type()
+    @test isnothing(LRO.rank_one(Diagonal([1.0, 2.0])))
+    return
+end
+
+# Detected rank-one matrices have sparse factors, they are used both by the
+# rank-one Schur kernel and by the sparse Jacobian buffer.
+function test_detected_schur_complement()
+    d, n = 4, 3
+    us = [sparsevec([j, j + 1], [1.0, j], d) for j in 1:n]
+    arr = [sparse(u * u') for _ in 1:1, u in us]
+    C = [spzeros(d, d)]
+    b = zeros(n)
+    d_lin = sparsevec(Int64[], Float64[], 0)
+    C_lin = spzeros(Float64, Int64, n, 0)
+    model = LRO.Model(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, [d])
+    @test eltype(only(model.A).values) <: LRO.Factorization
+    reference = LRO.Model(C, arr, b, d_lin, C_lin, [d])
+    buffer = LRO.BufferedModelForSchur(model, 0)
+    reference_buffer = LRO.BufferedModelForSchur(reference, 0)
+    W = Matrix(Symmetric(ones(d, d) + d * I))
+    i = LRO.MatrixIndex(1)
+    H = zeros(n, n)
+    LRO.add_schur_complement!(buffer, i, W, H)
+    expected = zeros(n, n)
+    LRO.add_schur_complement!(reference_buffer, i, W, expected)
+    @test H ≈ expected
+    y = [1.0, -2.0, 3.0]
+    @test LRO.unsafe_jtprod(buffer, y, i) ≈
+          LRO.unsafe_jtprod(reference_buffer, y, i)
+    return
+end
+
 function test_detect_rank_one_empty()
     @test isnothing(
         LRO.detect_rank_one(Matrix{SparseMatrixCSC{Float64,Int}}(undef, 0, 0)),

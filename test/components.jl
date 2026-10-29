@@ -238,6 +238,69 @@ end
     @test _allocations(buffer, W, x, y, H, Hy, Jv, Jty) == 0
 end
 
+@testset "Vector factors outside the rank-one kernel" begin
+    T = Float64
+    rng = MersenneTwister(11)
+    d, n = 3, 3
+    # A symmetric `AsymmetricFactorization` with vector factors is not a
+    # `Factorization` so it uses the general Schur kernel, also when paired
+    # with a rank-one component.
+    asym = LRO.BlockColumns(
+        [1],
+        reshape(
+            [
+                let u = randn(rng, T, d)
+                    LRO.AsymmetricFactorization(u, u, fill(T(j)))
+                end for j in 1:n
+            ],
+            n,
+            1,
+        ),
+        1,
+    )
+    @test size(asym, 1) == n
+    @test size(asym, 2) == 1
+    rank_one = LRO.BlockColumns(
+        [1],
+        reshape(
+            [LRO.Factorization(randn(rng, T, d), T(-j)) for j in 1:n],
+            n,
+            1,
+        ),
+        1,
+    )
+    # Tuple entries can also be in the legacy block-by-constraint layout.
+    legacy = reshape([sparse(T(j) * I, d, d) for j in 1:n], 1, n)
+    full = [
+        Matrix(asym.values[j, 1]) +
+        Matrix(rank_one.values[j, 1]) +
+        Matrix(legacy[1, j]) for _ in 1:1, j in 1:n
+    ]
+    model = LRO.Model(
+        [spzeros(T, d, d)],
+        (asym, rank_one, legacy),
+        zeros(T, n),
+        sparsevec(Int64[], T[], 0),
+        spzeros(T, Int64, n, 0),
+        Int64[d],
+    )
+    @test model.A[3] == LRO.BlockColumns(legacy)
+    buffer = LRO.BufferedModelForSchur(model, 0)
+    W = let R = randn(rng, T, d, d)
+        R * R' + I
+    end
+    y = randn(rng, T, n)
+    i = LRO.MatrixIndex(1)
+    H = zeros(T, n, n)
+    LRO.add_schur_complement!(buffer, i, W, H)
+    expected_H = [dot(full[j], W * full[k] * W) for j in 1:n, k in 1:n]
+    @test H ≈ expected_H
+    Hy = zeros(T, n)
+    LRO.eval_schur_complement!(buffer, LRO.ShapedSolution(T[], [W]), y, Hy)
+    @test Hy ≈ expected_H * y
+    @test LRO.unsafe_jtprod(buffer, y, i) ≈ sum(y[j] * full[j] for j in 1:n)
+end
+
 @testset "Burer-Monteiro with sparse plus low-rank components" begin
     model, reference, _, _, _, y = _fixture(Float64, :mixed)
     ranks = Int64[1, 2, 1]
