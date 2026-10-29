@@ -167,7 +167,7 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     Hy = similar(y)
     LRO.eval_schur_complement!(model, w, y, Hy)
     @test Hy ≈ H * y
-    if iszero(LRO.num_scalars(model)) && T == Float64
+    if T == Float64
         @test 0 == @allocated LRO.eval_schur_complement!(model, w, y, Hy)
     end
     # Reuse the workspaces for a different right-hand side, then assemble H again.
@@ -190,7 +190,8 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
         # may also alias `C` itself, which is sparse.
         @test ret isa
               Union{Matrix,SparseArrays.SparseMatrixCSC,FillArrays.Zeros}
-        Aty = sum(model.model.A[i.value, j] * y[j] for j in 1:(model.meta.ncon))
+        Aty =
+            sum(LRO.jac(model.model, j, i) * y[j] for j in 1:(model.meta.ncon))
         @test ret ≈ model.model.C[i.value] - Aty
         if Aty isa FillArrays.Zeros
             @test ret === model.model.C[i.value]

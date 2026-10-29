@@ -155,6 +155,99 @@ function positive_semidefinite_factorization(
     return Factorization(factor, Ones{T}(Base.OneTo(size(factor, 2))))
 end
 
+# A uniform rank-one type lets detected coefficients share a concrete
+# BlockColumns component without widening another component's element type.
+const _SparseRankOne{T} =
+    Factorization{T,SparseArrays.SparseVector{T,Int64},Array{T,0}}
+
+function _sparse_rank_one(factor::SparseArrays.SparseVector{T}, s::T) where {T}
+    return Factorization(
+        SparseArrays.SparseVector{T,Int64}(factor),
+        s,
+    )::_SparseRankOne{T}
+end
+
+"""
+    rank_one(A::AbstractMatrix{T}; atol = 0, rtol = √eps)
+
+If the symmetric matrix `A` is rank one (or zero), return an equivalent
+[`Factorization`](@ref) `s * b * b'`; otherwise return `nothing`. The zero
+matrix maps to a zero-scaling factorization so that an array mixing zeros and
+rank-one matrices can still be converted uniformly (see [`detect_rank_one`](@ref)).
+
+No eigen/SVD is used: if `A = s b b'` then for any `p` with `A[p,p] ≠ 0`,
+column `p` is `A[:,p] = (s b_p) b`, so `b ∝ A[:,p]` and
+`A = A[:,p] A[:,p]' / A[p,p]`. We pick such a pivot `p` and verify the identity.
+"""
+function rank_one end
+
+function rank_one(
+    A::SparseArrays.SparseMatrixCSC{T};
+    atol = zero(real(T)),
+    rtol = sqrt(eps(real(float(T)))),
+) where {T}
+    n = LinearAlgebra.checksquare(A)
+    if iszero(A)
+        return _sparse_rank_one(SparseArrays.spzeros(T, n), zero(T))
+    end
+    p = findfirst(j -> !iszero(A[j, j]), 1:n)
+    isnothing(p) && return nothing # nonzero but zero diagonal ⇒ not rank one
+    u = A[:, p]
+    s = inv(A[p, p])
+    ui, uv = SparseArrays.findnz(u)
+    # A rank-one `s u u'` has exactly `length(ui)^2` nonzeros, all on `ui × ui`.
+    SparseArrays.nnz(A) == length(ui)^2 || return nothing
+    for a in eachindex(ui), b in eachindex(ui)
+        if !isapprox(A[ui[a], ui[b]], s * uv[a] * uv[b]; atol, rtol)
+            return nothing
+        end
+    end
+    return _sparse_rank_one(u, s)
+end
+
+function rank_one(A::FillArrays.Zeros{T}; kws...) where {T}
+    n = LinearAlgebra.checksquare(A)
+    return _sparse_rank_one(SparseArrays.spzeros(T, n), zero(T))
+end
+
+# Already rank one (vector factor): just coerce to the uniform sparse type.
+function rank_one(
+    A::Factorization{T,<:AbstractVector{T},<:AbstractArray{T,0}};
+    kws...,
+) where {T}
+    return _sparse_rank_one(SparseArrays.sparse(A.factor), only(A.scaling))
+end
+
+rank_one(::AbstractMatrix; kws...) = nothing
+
+"""
+    detect_rank_one(A::AbstractMatrix{<:AbstractMatrix}; kws...)
+
+Convert entries recognized by [`rank_one`](@ref), keeping other matrix
+representations. Return a tuple of [`BlockColumns`](@ref) components grouped
+by concrete matrix type. A PSD block missing from one component contributes
+zero there; components may overlap and their contributions are summed.
+Return `nothing` if no entries are convertible or the array is empty.
+"""
+function detect_rank_one(
+    A::AbstractMatrix{<:AbstractMatrix{T}};
+    kws...,
+) where {T}
+    isempty(A) && return nothing
+    changed = false
+    converted = map(A) do coefficient
+        # Keep `Zeros` so that `_matrix_components` stores them as such
+        coefficient isa FillArrays.Zeros && return coefficient
+        factor = rank_one(coefficient; kws...)
+        if isnothing(factor)
+            return coefficient
+        end
+        changed = true
+        return factor
+    end
+    return changed ? _matrix_components(converted) : nothing
+end
+
 struct AsymmetricFactorization{
     T,
     F<:Union{AbstractVector{T},AbstractMatrix{T}},
@@ -302,6 +395,13 @@ function _abs2!!(a::AbstractArray)
     return a
 end
 
+# Rank-one coefficients detected from ordinary matrices carry a 0-D Array
+# scaling, unlike the unit FillArrays scalings used by PSD factorizations.
+_lmul_diag!!(s::Array{<:Any,0}, value::Number) = s[] * value
+_lmul_diag!!(s::Array{<:Any,0}, values) = LinearAlgebra.lmul!(s[], values)
+_rmul_diag!!(value::Number, s::Array{<:Any,0}) = value * s[]
+_rmul_diag!!(values, s::Array{<:Any,0}) = LinearAlgebra.rmul!(values, s[])
+
 _lmul_diag!!(::FillArrays.Ones, VtU) = VtU
 _rmul_diag!!(VtU, ::FillArrays.Ones) = VtU
 
@@ -362,8 +462,11 @@ function _dot_mat_fact(
     res = zero(MA.promote_sum_mul(T, U))
     for i in axes(left_factor(b), 2)
         res +=
-            b.scaling[i] *
-            LinearAlgebra.dot(left_factor(b)[:, i], a, right_factor(b)[:, i])
+            b.scaling[i] * LinearAlgebra.dot(
+                view(left_factor(b), :, i),
+                a,
+                view(right_factor(b), :, i),
+            )
     end
     return res
 end

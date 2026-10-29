@@ -28,25 +28,26 @@ function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
     S = SparseArrays.SparseMatrixCSC{T,Int64}
     @test b.model.C isa Vector{matrix_in_objective ? S : Z}
     if all_zero
-        @test b.model.A isa Matrix{Z}
+        @test isempty(b.model.A)
     else
-        @test b.model.A isa Matrix{Union{Z,S}}
+        # Missing entries of a component use `Int` axes, unlike the `Int64`
+        # ones built by the MOI wrapper, which differ on 32-bit systems.
+        ZInt = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
+        @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
     end
-    @test b.model.A[1] isa Z
-    @test b.model.A[2] isa Z
-    if all_zero
-        @test b.model.A[3] isa Z
-    else
-        @test b.model.A[3] isa S
-        @test b.model.A[4] isa Z
+    i = LRO.MatrixIndex(1)
+    @test iszero(LRO.jac(b.model, 1, i))
+    @test iszero(LRO.jac(b.model, 2, i))
+    @test iszero(LRO.jac(b.model, 3, i)) == all_zero
+    if !all_zero
+        @test LRO.jac(b.model, 3, i) isa S
+        @test iszero(LRO.jac(b.model, 4, i))
     end
     buf = LRO.BufferedModelForSchur(b.model, 1)
-    for A in b.model.A
-        if all_zero
-            @test buf.jtprod_buffer[] isa LRO.FillArrays.Zeros
-        else
-            @test buf.jtprod_buffer[] !== A
-        end
+    if all_zero
+        @test buf.jtprod_buffer[] isa LRO.FillArrays.Zeros
+    else
+        @test all(A -> buf.jtprod_buffer[] !== A, only(b.model.A).values)
     end
     for κ in 0:5
         schur_test(model, κ)

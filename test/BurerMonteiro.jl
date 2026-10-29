@@ -3,10 +3,13 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE.md file or at https://opensource.org/licenses/MIT.
 
+module TestBurerMonteiro
+
 using Test
 using LinearAlgebra
 using SparseArrays
 using JuMP
+import FillArrays
 import LowRankOpt as LRO
 using Dualization
 import SolverCore
@@ -14,8 +17,7 @@ import Percival
 
 include("diff_check.jl")
 
-@testset "Simple LP $opt" for opt in
-                              [LRO.Optimizer, dual_optimizer(LRO.Optimizer)]
+function _test_simple_lp(opt)
     model = Model(opt)
     @variable(model, x)
     @constraint(model, con_ref, 1 - x in Nonnegatives())
@@ -53,12 +55,18 @@ include("diff_check.jl")
         @test abs(sol[1]) < 1e-6
     end
     diff_check(model)
-end;
+    return
+end
 
-@testset "Simple SDP $opt" for (is_dual, opt) in [
-    (false, LRO.Optimizer),
-    (true, dual_optimizer(LRO.Optimizer)),
-]
+function test_simple_lp()
+    @testset "Simple LP $opt" for opt in
+                                  [LRO.Optimizer, dual_optimizer(LRO.Optimizer)]
+        _test_simple_lp(opt)
+    end
+    return
+end
+
+function _test_simple_sdp(is_dual, opt)
     model = Model(opt)
     @variable(model, x)
     @constraint(model, con_ref, Symmetric((1 - x) * ones(1, 1)) in PSDCone())
@@ -113,9 +121,20 @@ end;
     @test objective_value(model) ≈ 1
     @test dual_objective_value(model) ≈ 1
     diff_check(model)
-end;
+    return
+end
 
-@testset "Trace" begin
+function test_simple_sdp()
+    @testset "Simple SDP $opt" for (is_dual, opt) in [
+        (false, LRO.Optimizer),
+        (true, dual_optimizer(LRO.Optimizer)),
+    ]
+        _test_simple_sdp(is_dual, opt)
+    end
+    return
+end
+
+function test_trace()
     T = Float64
     model = Model(LRO.Optimizer)
     cone = MOI.PositiveSemidefiniteConeTriangle(2)
@@ -137,29 +156,28 @@ end;
     nlp = unsafe_backend(model).model
     @test nlp.C isa Vector{SparseMatrixCSC{T,Int64}}
     @test nlp.C[1] == [3 1; 1 4]
-    @test nlp.A isa Matrix{
+    @test only(nlp.A).values isa Matrix{
         Union{
-            LRO.FillArrays.Zeros{
-                T,
-                2,
-                Tuple{Base.OneTo{Int64},Base.OneTo{Int64}},
-            },
             LRO.Factorization{T,Matrix{T},Vector{T}},
+            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
         },
     }
-    @test nlp.A[1].factor == Matrix(I, 2, 2)
-    @test nlp.A[1].scaling == [1, 1]
-    @test nlp.A[2] === LRO.FillArrays.Zeros{T}(Int64(2), Int64(2))
-end;
+    @test only(nlp.A).block_ids == [1]
+    @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)).factor == Matrix(I, 2, 2)
+    @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)).scaling == [1, 1]
+    @test iszero(LRO.jac(nlp, 2, LRO.MatrixIndex(1)))
+    return
+end
 
-@testset "ResultCount" begin
+function test_result_count()
     model = LRO.Optimizer()
     @test MOI.get(model, MOI.ResultCount()) == 0
     @test MOI.get(model, MOI.PrimalStatus()) == MOI.NO_SOLUTION
     @test MOI.get(model, MOI.DualStatus()) == MOI.NO_SOLUTION
+    return
 end
 
-@testset "MOI runtests" begin
+function test_moi_runtests()
     model = LRO.Optimizer()
     MOI.set(
         model,
@@ -173,9 +191,10 @@ end
     )
     config = MOI.Test.Config()
     MOI.Test.runtests(model, config; include = ["Silent"])
-end;
+    return
+end
 
-@testset "No constraints" begin
+function test_no_constraints()
     model = LRO.Model(
         [spzeros(1, 1)],
         [ones(1, 1) for _ in 1:1, _ in 1:0],
@@ -188,13 +207,15 @@ end;
     @test LRO.norm_jac(model, LRO.MatrixIndex(1)) == 0
     @test LRO.buffer_for_jtprod(model, LRO.MatrixIndex(1)) isa
           LRO.FillArrays.Zeros
-end;
-
-@testset "Fallback" begin
-    @test LRO.Optimizer() isa LRO.Optimizer{Float64}
+    return
 end
 
-@testset "Different factor ranks" begin
+function test_fallback()
+    @test LRO.Optimizer() isa LRO.Optimizer{Float64}
+    return
+end
+
+function test_different_factor_ranks()
     T = Float64
     model = Model(LRO.Optimizer)
     cone = MOI.PositiveSemidefiniteConeTriangle(2)
@@ -219,7 +240,22 @@ end
     MT = LRO.Factorization{T,Matrix{T},LRO.Ones{T}}
     @test nlp.C isa Vector{MT}
     @test nlp.C[] == factors[1]
-    @test nlp.A isa Matrix{MT}
-    @test nlp.A[1] == factors[2]
-    @test nlp.A[2] == factors[3]
-end;
+    @test only(nlp.A).values isa Matrix{MT}
+    @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)) == factors[2]
+    @test LRO.jac(nlp, 2, LRO.MatrixIndex(1)) == factors[3]
+    return
+end
+
+function runtests()
+    for name in names(@__MODULE__; all = true)
+        if startswith("$name", "test_")
+            @testset "$(name)" begin
+                getfield(@__MODULE__, name)()
+            end
+        end
+    end
+end
+
+end
+
+TestBurerMonteiro.runtests()

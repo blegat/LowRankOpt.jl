@@ -59,14 +59,17 @@ The fields of the `struct` as related to the arrays of the above formulation as 
 
 * The ``i``th PSD constraint is of size `msize[i] × msisze[i]`
 * The matrix ``C_i`` is given by `C[i]`.
-* The matrix ``A_{i,j}`` is given by `A[i,j]`.
+* `A` is a tuple of [`BlockColumns`](@ref) components. The matrix
+  ``A_{i,j}`` is the sum of their entries for PSD block `i` and constraint
+  `j`. A dense outer matrix in the original block-by-constraint layout is
+  accepted and split into homogeneous components. Tuple entries can also
+  use dense outer matrices in that layout.
 """
-mutable struct Model{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T}} <:
-               AbstractModel{T}
+mutable struct Model{T,C<:AbstractMatrix{T},A<:Tuple} <: AbstractModel{T}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     dim::Dimensions
     C::Vector{C}
-    A::Matrix{A}
+    A::A
     b::Vector{T}
     d_lin::SparseArrays.SparseVector{T,Int64}
     C_lin::SparseArrays.SparseMatrixCSC{T,Int64}
@@ -74,15 +77,38 @@ mutable struct Model{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T}} <:
 
     function Model(
         C::Vector{CT},
-        A::Matrix{AT},
+        A::Tuple,
         b::Vector{T},
         d_lin::SparseArrays.SparseVector{T,Int64},
         C_lin::SparseArrays.SparseMatrixCSC{T,Int64},
         msizes::Vector{Int64},
-    ) where {T,CT<:AbstractMatrix{T},AT<:AbstractMatrix{T}}
-        model = new{T,CT,AT}()
+    ) where {T,CT<:AbstractMatrix{T}}
+        components = map(_as_component, A)
+        for component in components
+            size(component) == (length(b), length(C)) || throw(
+                DimensionMismatch(
+                    "constraint components must have one row per constraint and one logical column per PSD block",
+                ),
+            )
+            for (k, i) in enumerate(component.block_ids),
+                j in axes(component.values, 1)
+
+                coefficient = component.values[j, k]
+                coefficient isa AbstractMatrix{T} || throw(
+                    ArgumentError(
+                        "constraint coefficients must have element type $T",
+                    ),
+                )
+                size(coefficient) == (msizes[i], msizes[i]) || throw(
+                    DimensionMismatch(
+                        "constraint matrix has the wrong size for PSD block $i",
+                    ),
+                )
+            end
+        end
+        model = new{T,CT,typeof(components)}()
         model.C = C
-        model.A = A
+        model.A = components
         model.b = b
         model.d_lin = d_lin
         model.C_lin = C_lin
@@ -96,6 +122,11 @@ mutable struct Model{T,C<:AbstractMatrix{T},A<:AbstractMatrix{T}} <:
         model.dim = Dimensions(n, msizes, offsets)
         return model
     end
+end
+
+# Preserve the existing constructor for one dense outer matrix of matrices.
+function Model(C, A::Matrix{<:AbstractMatrix}, b, d_lin, C_lin, msizes)
+    return Model(C, _matrix_components(A), b, d_lin, C_lin, msizes)
 end
 
 function NLPModels.unconstrained(model::Model)
@@ -182,16 +213,41 @@ cons_constant(model::Model) = model.b
 # Should be only used with `norm`
 jac(model::Model, ::Type{ScalarIndex}) = model.C_lin
 function jac(model::Model, j::Integer, i::MatrixIndex)
-    return model.A[i.value, j]
+    return _coefficient_sum(
+        model.A,
+        j,
+        i.value,
+        side_dimension(model, i),
+        eltype(model.b),
+    )
 end
+
+function _coefficient_sum(::Tuple{}, j, i, d, ::Type{T}) where {T}
+    return FillArrays.Zeros{T}(d, d)
+end
+@inline function _coefficient_sum(
+    components::Tuple,
+    j,
+    i,
+    d,
+    ::Type{T},
+) where {T}
+    column = _block_column(first(components), i)
+    tail = _coefficient_sum(Base.tail(components), j, i, d, T)
+    if isnothing(column)
+        return tail
+    elseif tail isa FillArrays.Zeros
+        return column[j]
+    end
+    return column[j] + tail
+end
+
 function jac(model::Model, j::Integer, ::Type{ScalarIndex})
     return model.C_lin[j, :]
 end
 function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
-    if isempty(model.A)
-        return zero(T)
-    end
-    return LinearAlgebra.norm(model.A[i.value, :])
+    iszero(model.meta.ncon) && return zero(T)
+    return LinearAlgebra.norm((jac(model, j, i) for j in 1:model.meta.ncon))
 end
 
 #######################
@@ -204,9 +260,40 @@ function add_jprod!(
     Jv::AbstractVector,
     i::MatrixIndex,
 )
-    for j in 1:(model.meta.ncon)
-        Jv[j] += LinearAlgebra.dot(model.A[i.value, j], V)
+    _foreach_column(model.A, i.value) do values, slot
+        return _add_column_jprod!(values, slot, V, Jv)
     end
+    return Jv
+end
+
+function _coefficient_dot(A, V)
+    return LinearAlgebra.dot(A, V)
+end
+# `dot(Diagonal, Matrix)` copies the matrix diagonal on supported Julia
+# versions. Contract the entries directly to keep the generic Schur path
+# allocation-free for diagonal coefficients too.
+function _coefficient_dot(A::LinearAlgebra.Diagonal, V::AbstractMatrix)
+    return sum(
+        eachindex(A.diag);
+        init = zero(promote_type(eltype(A), eltype(V))),
+    ) do k
+        return conj(A.diag[k]) * V[k, k]
+    end
+end
+function _coefficient_dot(::FillArrays.Zeros{T}, V) where {T}
+    return zero(promote_type(T, eltype(V)))
+end
+function _coefficient_dot(A::AbstractFactorization, V::AbstractMatrix)
+    return LinearAlgebra.dot(V, A)
+end
+function _coefficient_dot(A::AbstractFactorization, V::AbstractFactorization)
+    return LinearAlgebra.dot(A, V)
+end
+function _add_column_jprod!(values, slot, V, Jv)
+    for j in eachindex(Jv)
+        Jv[j] += _coefficient_dot(values[j, slot], V)
+    end
+    return nothing
 end
 
 function jprod!(

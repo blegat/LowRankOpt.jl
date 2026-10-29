@@ -165,7 +165,11 @@ function buffer_for_jtprod(
     dim::Dimensions,
     i::LRO.MatrixIndex,
 ) where {T}
-    row = view(model.A, i.value, :)
+    # Buffer selection runs only at setup; inspect every active component.
+    row = AbstractMatrix{T}[]
+    LRO._foreach_column(model.A, i.value) do values, slot
+        return append!(row, view(values, :, slot))
+    end
     C = model.C[i.value]
     if any(A -> A isa _LowRank, row) || C isa _LowRank
         ncols = maximum(row; init = 0) do A
@@ -191,6 +195,9 @@ end
 
 _buffer(_, ::AbstractMatrix, _) = nothing
 _buffer(buffer::AbstractVector, ::_RankOne, ::AbstractMatrix) = buffer
+function _buffer(buffer::AbstractMatrix, ::_RankOne, ::AbstractMatrix)
+    return view(buffer, :, 1)
+end
 function _buffer(buffer::AbstractMatrix, A::_LowRank, ::AbstractMatrix)
     # FIXME with this if-else, we return a small Union but the compiler
     #       since to forget about this Union and allocates later
@@ -211,11 +218,27 @@ function add_jtprod!(
     i::LRO.MatrixIndex,
     α = 2,
 )
+    LRO._foreach_column(model.model.A, i.value) do values, slot
+        return _add_column_jtprod!(
+            values,
+            slot,
+            model.jtprod_buffer[i.value],
+            X,
+            y,
+            JtV,
+            α,
+        )
+    end
+    return nothing
+end
+
+function _add_column_jtprod!(values, slot, workspace, X, y, JtV, α)
     for j in eachindex(y)
-        A = LRO.jac(model.model, j, i)
-        buffer = _buffer(model.jtprod_buffer[i.value], A, X.factor)
+        A = values[j, slot]
+        buffer = _buffer(workspace, A, X.factor)
         LRO.buffered_mul!(JtV.factor, A, X.factor, α * y[j], true, buffer)
     end
+    return nothing
 end
 
 function jtprod!(

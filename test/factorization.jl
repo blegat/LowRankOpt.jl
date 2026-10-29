@@ -75,6 +75,16 @@ function test_dot()
     end
 end
 
+# Rank-one factorizations with a 0-dimensional `Array` scaling, as built by
+# `LRO.rank_one`.
+function test_dot_rank_one_array_scaling()
+    u, v = [1.0, 2.0], [3.0, -1.0]
+    A = LRO.Factorization(u, 2.0)
+    B = LRO.Factorization(v, 3.0)
+    @test A.scaling isa Array{Float64,0}
+    @test dot(A, B) ≈ dot(Matrix(A), Matrix(B))
+end
+
 function _test_mul(A, B, α, β)
     if B isa AbstractVector
         res = ones(length(B))
