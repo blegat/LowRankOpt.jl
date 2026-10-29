@@ -245,13 +245,11 @@ function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
             _add_component_matvec!(components, i.value, y, result)
         end
     end
-    # In the future, we'd want to allocate intermediate buffers for this operations
-    # to make it allocation-free. In the short-term, we just add this `if`
-    # to be allocation-free when there are no scalars to prevent a regerssion
-    # in https://github.com/kocvara/Loraine.jl/pull/29
-    if !iszero(num_scalars(model))
-        result .+=
-            model.model.C_lin * (W[ScalarIndex] .* (model.model.C_lin' * y))
+    C = model.model.C_lin
+    for k in axes(C, 2)
+        column = view(C, :, k)
+        weight = W[ScalarIndex][k] * LinearAlgebra.dot(column, y)
+        LinearAlgebra.axpy!(weight, column, result)
     end
     return result
 end

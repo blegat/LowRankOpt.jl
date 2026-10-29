@@ -167,7 +167,7 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     Hy = similar(y)
     LRO.eval_schur_complement!(model, w, y, Hy)
     @test Hy ≈ H * y
-    if iszero(LRO.num_scalars(model)) && T == Float64
+    if T == Float64
         @test 0 == @allocated LRO.eval_schur_complement!(model, w, y, Hy)
     end
     # Reuse the workspaces for a different right-hand side, then assemble H again.

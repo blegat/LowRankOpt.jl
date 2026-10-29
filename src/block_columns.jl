@@ -123,7 +123,8 @@ function _typed_component(::Type{M}, A) where {M<:AbstractMatrix}
             A[i, findfirst(j -> A[i, j] isa M, axes(A, 2))],
         )
         for j in axes(A, 2)
-            values[j, k] = A[i, j] isa M ? A[i, j] : FillArrays.Zeros{T}(d, d)
+            values[j, k] =
+                A[i, j] isa M ? A[i, j] : FillArrays.Zeros{T}(Int(d), Int(d))
         end
     end
     return BlockColumns(ids, values, size(A, 1))
