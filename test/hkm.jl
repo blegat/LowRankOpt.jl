@@ -83,7 +83,9 @@ end
 function _model(C, A, b; scalars = 0)
     T = eltype(b)
     m = length(b)
-    d_lin = sparsevec(collect(1:scalars), ones(T, scalars), scalars)
+    d_lin = SparseVector{T,Int64}(
+        sparsevec(collect(1:scalars), ones(T, scalars), scalars),
+    )
     C_lin = sparse(
         T[iszero(scalars) ? 0 : (j + l) % 2 for j in 1:m, l in 1:scalars],
     )
@@ -163,10 +165,14 @@ end
 function test_component_pairs()
     rng = MersenneTwister(3)
     dims, m = [3, 4], 4
+    # `Int32` indices, as `sparsevec` gives on 32-bit systems.
     one_hot = _block_columns(
         [1, 2],
         [
-            LRO.Factorization(sparsevec([mod1(j, d)], [1.0], d), Float64(j)) for j in 1:m, d in dims
+            LRO.Factorization(
+                sparsevec(Int32[mod1(j, d)], [1.0], d),
+                Float64(j),
+            ) for j in 1:m, d in dims
         ],
         2,
     )
