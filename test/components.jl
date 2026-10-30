@@ -88,6 +88,12 @@ end
         model, reference, full, W, x, y = _fixture(T, kind)
         buffer = LRO.BufferedModelForSchur(model, κ)
         reference_buffer = LRO.BufferedModelForSchur(reference, κ)
+        if kind == :rank_one
+            @test all(J -> J isa LRO.RankOneJacobian, buffer.jprod_buffer)
+        else
+            @test buffer.jprod_buffer[2] isa SparseMatrixCSC
+        end
+        @test reference_buffer.jprod_buffer isa Vector{<:SparseMatrixCSC}
         H = zeros(T, 3, 3)
         Hy = zeros(T, 3)
         Jv = zeros(T, 3)
@@ -211,6 +217,9 @@ end
     )
     y = randn(rng, T, n)
     buffer = LRO.BufferedModelForSchur(model, 1)
+    @test buffer.jprod_buffer[1] isa SparseMatrixCSC
+    @test buffer.jprod_buffer[2] isa SparseMatrixCSC
+    @test buffer.jprod_buffer[3] isa LRO.RankOneJacobian
     H = zeros(T, n, n)
     Hy = zeros(T, n)
     Jv = zeros(T, n)

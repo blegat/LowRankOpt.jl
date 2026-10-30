@@ -256,9 +256,6 @@ end
 
 # Schur workspaces follow individual components, not the type of the whole
 # model. A rank-one component can coexist with arbitrary other components.
-const _RankOneFactorization{T} =
-    Factorization{T,<:AbstractVector{T},<:AbstractArray{T,0}}
-
 _nnz(A::AbstractMatrix) = count(!iszero, A)
 
 struct _GeneralSchurComponent{C,J}
@@ -306,9 +303,8 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
     )
 end
 
-# `Zeros` entries get a zero row in `U` and a zero weight.
 function _schur_component(
-    component::BlockColumns{<:Union{_RankOneFactorization{T},_ZerosMatrix{T}}},
+    component::BlockColumns{<:_RankOneOrZeros{T}},
     model::Model{T},
     _,
 ) where {T}
@@ -317,14 +313,8 @@ function _schur_component(
     UW = Matrix{T}[]
     weights = zeros(T, n, p)
     for (slot, i) in enumerate(component.block_ids)
-        Ui = zeros(T, n, model.msizes[i])
-        for j in 1:n
-            A = component.values[j, slot]
-            if !(A isa FillArrays.Zeros)
-                Ui[j, :] = A.factor
-                weights[j, slot] = only(A.scaling)
-            end
-        end
+        Ui, weights[:, slot] =
+            _rank_one_factors(component.values, slot, model.msizes[i])
         push!(U, Ui)
         push!(UW, similar(Ui))
     end
