@@ -205,6 +205,15 @@ function _rank_one_jacobian(model::Model{T}, i::MatrixIndex) where {T}
         return
     end
     m = model.meta.ncon
+    # The products cost `Θ(nnz)` with the sparse `𝐀ᵢ` and `Θ(m d²)` with the
+    # factors so we only use the factors if `𝐀ᵢ` has at least `m d`
+    # nonzeros. This excludes, e.g., one-hot factors.
+    nnz = _sum_columns(model.A, i.value, 0) do column
+        return sum(_nnz, column; init = 0)
+    end
+    if nnz < m * d
+        return
+    end
     return RankOneJacobian(U, weights, zeros(T, m, d), zeros(T, m))
 end
 
