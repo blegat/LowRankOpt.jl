@@ -251,9 +251,12 @@ function _add_constraints(
     return
 end
 
-# Whether each variable of `func` appears in only one entry of the matrix
-# and this entry is on the diagonal.
-function _is_one_hot(func::VAF, ::PSD)
+# Whether `set` is a PSD cone and each variable of `func` appears in only
+# one entry of the matrix and this entry is on the diagonal.
+function _is_one_hot(func::VAF, set)
+    if !(set isa PSD)
+        return false
+    end
     rows = Set{MOI.VariableIndex}()
     for term in func.terms
         i, j = MOI.Utilities.inverse_trimap(term.output_index)
@@ -264,7 +267,6 @@ function _is_one_hot(func::VAF, ::PSD)
     end
     return true
 end
-_is_one_hot(_, _) = false
 
 # Adds the same `one_hot` factorization as the one of a
 # `LinearCombinationInSet` constraint with explicit one-hot structure.

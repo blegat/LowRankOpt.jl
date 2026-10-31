@@ -672,6 +672,39 @@ end
 _mul_to!(::Nothing, A, B) = A * B
 _mul_to!(buffer, A, B) = LinearAlgebra.mul!(buffer, A, B)
 
+# The fallbacks of `LinearAlgebra` for `FillArrays.OneElement` allocate on
+# Julia v1.10, so we use the fact that only one entry is nonzero.
+
+# `buffer = B * u`
+function _mul_to!(
+    buffer::AbstractVector,
+    B::AbstractMatrix,
+    u::FillArrays.OneElement{<:Any,1},
+)
+    i = only(u.ind)
+    for k in eachindex(buffer)
+        buffer[k] = B[k, i] * u.val
+    end
+    return buffer
+end
+
+# `res = α * u * C + β * res`
+function _mul!(res, u::FillArrays.OneElement{<:Any,1}, C, α, β)
+    # Same as for sparse `A`, see `_mul!` above
+    if iszero(β)
+        fill!(res, zero(eltype(res)))
+    else
+        @assert isone(β)
+    end
+    i, γ = only(u.ind), α * u.val
+    for j in axes(res, 2)
+        res[i, j] += γ * _row_entry(C, j)
+    end
+    return res
+end
+_row_entry(C::Number, _) = C
+_row_entry(C::AbstractMatrix, j) = C[1, j]
+
 @inline function buffered_mul!(
     res::AbstractVecOrMat,
     A::AbstractFactorization,
