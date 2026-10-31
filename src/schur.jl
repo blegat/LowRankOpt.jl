@@ -54,9 +54,6 @@ function _dot(
     return result
 end
 
-# Computes `⟨A * W, W * B⟩` for symmetric sparse matrices `A` and `B`
-_dot(A, B, W::AbstractMatrix) = _dot(A, B, W, W)
-
 _nnz(::FillArrays.Zeros) = 0
 _nnz(A::SparseArrays.SparseMatrixCSC) = SparseArrays.nnz(A)
 
