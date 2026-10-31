@@ -20,7 +20,13 @@ include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
 
 weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0]
 
-function _test_maxcut(; is_dual, sparse, vector, one_hot = false)
+function _test_maxcut(;
+    is_dual,
+    sparse,
+    vector,
+    one_hot = false,
+    detect_rank_one = false,
+)
     # The Burer-Monteiro starting point is `rand`-based (see
     # `BurerMonteiro.meta`)
     Random.seed!(0)
@@ -33,6 +39,8 @@ function _test_maxcut(; is_dual, sparse, vector, one_hot = false)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
     set_attribute(model, "ranks", [is_dual ? 2 : 3])
     set_attribute(model, "verbose", 2)
+    # The explicit structure is kept by the detection
+    set_attribute(model, "detect_rank_one", detect_rank_one)
 
     set_attribute(model, "max_iter", 0)
     optimize!(model)
@@ -106,12 +114,14 @@ function test_maxcut()
             end
         end
     end
-    @testset "One-hot" begin
+    @testset "One-hot detect rank one ? $detect_rank_one" for detect_rank_one in
+                                                              [false, true]
         _test_maxcut(;
             is_dual = true,
             sparse = true,
             vector = true,
             one_hot = true,
+            detect_rank_one,
         )
     end
     return

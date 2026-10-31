@@ -275,6 +275,23 @@ function _add_one_hot!(A::_MatrixBuilder{T}, row, coef, ::PSD) where {T}
     return _add!(A, Factorization(one_hot(T, i, A.d), coef))
 end
 
+# Replaces the sparse matrix of `A` by a rank-one `Factorization` if it is
+# rank one. The matrices given as factorizations already have an explicit
+# structure so they are not modified.
+function _detect_rank_one!(A::_MatrixBuilder)
+    if !isnothing(A.fact) || isempty(A.I)
+        return
+    end
+    f = rank_one(_instantiate(A))
+    if !isnothing(f)
+        empty!(A.I)
+        empty!(A.J)
+        empty!(A.V)
+        A.fact = f
+    end
+    return
+end
+
 function _add_constraints(
     dest::Optimizer{T},
     src,
@@ -314,6 +331,14 @@ function _add_constraints(
                 _add_one_hot!(A[lmi_id, col], row, coef, set)
             else
                 _add!(A[lmi_id, col], row, coef, set)
+            end
+        end
+        # Same as for `one_hot`, the rank-one structure is then the same as
+        # if the matrices were given as rank-one factorizations, see the
+        # "Explicit structure" section of the docstring of `one_hot`.
+        if !one_hot && get(dest.options, "detect_rank_one", false)
+            for col in axes(A, 2)[2:end]
+                _detect_rank_one!(A[lmi_id, col])
             end
         end
     end
@@ -357,16 +382,9 @@ function MOI.copy_to(
     end
     b = dest.max_sense ? b0 : -b0
 
-    A_con = _instantiate(A[:, 2:end])
-    if get(dest.options, "detect_rank_one", false)
-        rank_one_A = detect_rank_one(A_con)
-        if !isnothing(rank_one_A)
-            A_con = rank_one_A
-        end
-    end
     dest.model = Model(
         _instantiate(A[:, 1]),
-        A_con,
+        _instantiate(A[:, 2:end]),
         b,
         convert(
             SparseArrays.SparseVector{T,Int64},
