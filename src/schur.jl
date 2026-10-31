@@ -412,43 +412,27 @@ function _RankOneSchurComponent(
     )
 end
 
-# Returns `(index, weight)` such that `A = weight * e_index * e_index'` or
-# `nothing` if `A` is not of this form. Zero matrices have index `0`.
-_one_hot(::AbstractMatrix) = nothing
-_one_hot(::FillArrays.Zeros{T}) where {T} = (0, zero(T))
-function _one_hot(A::SparseArrays.SparseMatrixCSC{T}) where {T}
-    I, J, V = SparseArrays.findnz(A)
-    if isempty(V)
-        return 0, zero(T)
-    elseif length(V) == 1 && only(I) == only(J)
-        return only(I), only(V)
-    end
-    return
-end
-function _one_hot(A::_RankOneFactorization{T}) where {T}
-    bi, bv = _rank_one_nz(A.factor)
-    if isempty(bi)
-        return 0, zero(T)
-    elseif length(bi) == 1
-        return only(bi), only(A.scaling) * abs2(only(bv))
-    end
-    return
+# `(index, weight)` such that `A = weight * e_index * e_index'`. Zero
+# matrices have index `0`.
+_one_hot(::_ZerosMatrix{T}) where {T} = (0, zero(T))
+function _one_hot(A::_OneHotFactorization)
+    return only(A.factor.ind), only(A.scaling) * abs2(A.factor.val)
 end
 
-# Returns a `_RankOneSchurComponent` with `_Selection` factors if all
-# entries of `component` are one-hot and `nothing` otherwise.
-function _one_hot_schur_component(component, model::Model{T}) where {T}
+# The one-hot structure is given explicitly by the type of the factor, see
+# [`one_hot`](@ref).
+function _schur_component(
+    component::BlockColumns{<:Union{_OneHotFactorization{T},_ZerosMatrix{T}}},
+    model::Model{T},
+    _,
+) where {T}
     n, p = size(component.values)
     indices = Vector{Int}[]
     weights = zeros(T, n, p)
     for (slot, i) in enumerate(component.block_ids)
         index = zeros(Int, n)
         for j in 1:n
-            one_hot = _one_hot(component.values[j, slot])
-            if isnothing(one_hot)
-                return
-            end
-            k, weights[j, slot] = one_hot
+            k, weights[j, slot] = _one_hot(component.values[j, slot])
             # The index of zero entries does not matter as their weight is
             # zero, we choose it so that it does not prevent `Base.OneTo`.
             index[j] = iszero(k) ? (j <= model.msizes[i] ? j : 1) : k
@@ -464,10 +448,6 @@ function _one_hot_schur_component(component, model::Model{T}) where {T}
 end
 
 function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T}
-    one_hot = _one_hot_schur_component(component, model)
-    if !isnothing(one_hot)
-        return one_hot
-    end
     n, p = size(component.values)
     permutation = Matrix{Int}(undef, n, p)
     last_dense = zeros(Int, p)
@@ -501,10 +481,6 @@ function _schur_component(
     model::Model{T},
     _,
 ) where {T}
-    one_hot = _one_hot_schur_component(component, model)
-    if !isnothing(one_hot)
-        return one_hot
-    end
     n, p = size(component.values)
     U = Matrix{T}[]
     weights = zeros(T, n, p)
@@ -892,6 +868,7 @@ end
 # Nonzero (index, value) pairs of a rank-one factor, for both sparse and dense
 # factor vectors (dense factors are used e.g. by the SOS rank-one batch).
 _rank_one_nz(b::SparseArrays.SparseVector) = SparseArrays.findnz(b)
+_rank_one_nz(b::FillArrays.OneElement{T,1}) where {T} = (b.ind, (b.val,))
 _rank_one_nz(b::AbstractVector) = (eachindex(b), b)
 
 # `vec(s b b')` has `nnz(b)²` nonzeros at `support(b) × support(b)`.

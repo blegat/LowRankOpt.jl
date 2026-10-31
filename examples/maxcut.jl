@@ -6,8 +6,11 @@
 using LinearAlgebra, SparseArrays, JuMP, LowRankOpt
 import LowRankOpt as LRO
 
-function e_i(T, i, n; sparse, vector)
-    if sparse
+function e_i(T, i, n; sparse, vector, one_hot = false)
+    if one_hot
+        # Explicit one-hot structure, see the docstring of `LRO.one_hot`
+        return LRO.one_hot(T, i, n)
+    elseif sparse
         if vector
             return sparsevec([i], [one(T)], n)
         else
@@ -29,22 +32,28 @@ function maxcut_objective(weights)
     return L / 4
 end
 
-function maxcut_set(N; sparse = true, T = Float64, vector = true)
+function maxcut_set(
+    N;
+    sparse = true,
+    T = Float64,
+    vector = true,
+    one_hot = false,
+)
     cone = MOI.PositiveSemidefiniteConeTriangle(N)
     factors = LRO.TriangleVectorization.(
         LRO.positive_semidefinite_factorization.(
-            e_i.(T, 1:N, N; sparse, vector),
+            e_i.(T, 1:N, N; sparse, vector, one_hot),
         ),
     )
     return LRO.SetDotProducts{LRO.WITH_SET}(cone, factors)
 end
 
-function maxcut(weights, solver; sparse = true, vector = true)
+function maxcut(weights, solver; sparse = true, vector = true, one_hot = false)
     T = float(eltype(weights))
     N = LinearAlgebra.checksquare(weights)
     model = GenericModel{T}(solver)
     LRO.Bridges.add_all_bridges(backend(model).optimizer, T)
-    set = maxcut_set(N; sparse, T, vector)
+    set = maxcut_set(N; sparse, T, vector, one_hot)
     @variable(model, dot_prod_set[1:MOI.dimension(set)] in set)
     dot_prod = dot_prod_set[1:length(set.vectors)]
     X = reshape_vector(

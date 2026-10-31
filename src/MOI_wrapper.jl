@@ -133,7 +133,7 @@ const SOLVER_OPTIONS = ["solver", "sub_solver", "ranks", "square_scalars"]
 
 # Options consumed while building the `Model` in `copy_to`; they must not be
 # forwarded to the solver constructor nor to `solve!`.
-const MODEL_OPTIONS = ["detect_rank_one"]
+const MODEL_OPTIONS = ["detect_rank_one", "detect_one_hot"]
 
 function MOI.optimize!(model::Optimizer)
     options = Dict{Symbol,Any}(
@@ -251,6 +251,28 @@ function _add_constraints(
     return
 end
 
+# Whether each variable of `func` appears in only one entry of the matrix
+# and this entry is on the diagonal.
+function _is_one_hot(func::VAF, ::PSD)
+    rows = Set{MOI.VariableIndex}()
+    for term in func.terms
+        i, j = MOI.Utilities.inverse_trimap(term.output_index)
+        if i != j || term.scalar_term.variable in rows
+            return false
+        end
+        push!(rows, term.scalar_term.variable)
+    end
+    return true
+end
+_is_one_hot(_, _) = false
+
+# Adds the same `one_hot` factorization as the one of a
+# `LinearCombinationInSet` constraint with explicit one-hot structure.
+function _add_one_hot!(A::_MatrixBuilder{T}, row, coef, ::PSD) where {T}
+    i, _ = MOI.Utilities.inverse_trimap(row)
+    return _add!(A, Factorization(one_hot(T, i, A.d), coef))
+end
+
 function _add_constraints(
     dest::Optimizer{T},
     src,
@@ -276,10 +298,21 @@ function _add_constraints(
                 _add!(A[lmi_id, 1], row, func.constants[row], set)
             end
         end
+        # If the structure is one-hot, we treat the constraint as if it was
+        # given explicitly as `LinearCombinationInSet` with `one_hot`
+        # factors, see the "Explicit structure" section of the docstring of
+        # `one_hot`.
+        one_hot =
+            get(dest.options, "detect_one_hot", true) && _is_one_hot(func, set)
         for term in func.terms
             scalar = term.scalar_term
             col = 1 + scalar.variable.value
-            _add!(A[lmi_id, col], term.output_index, -scalar.coefficient, set)
+            row, coef = term.output_index, -scalar.coefficient
+            if one_hot
+                _add_one_hot!(A[lmi_id, col], row, coef, set)
+            else
+                _add!(A[lmi_id, col], row, coef, set)
+            end
         end
     end
     return

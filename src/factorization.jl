@@ -155,6 +155,37 @@ function positive_semidefinite_factorization(
     return Factorization(factor, Ones{T}(Base.OneTo(size(factor, 2))))
 end
 
+"""
+    one_hot(::Type{T}, i::Integer, d::Integer) where {T}
+
+Return the vector `eᵢ` of length `d` as a `FillArrays.OneElement` so that
+`positive_semidefinite_factorization(one_hot(T, i, d))` is the matrix
+`eᵢ eᵢ'` whose only nonzero is the diagonal entry `(i, i)`.
+
+## Explicit structure
+
+The structure of the constraints of an LMI is given explicitly by the
+types of the matrices of the `LinearCombinationInSet` set. If all the
+matrices of a PSD block are rank-one with a `one_hot` factor, i.e., each
+constraint only involves one diagonal entry of `X`, the Schur complement
+of this block is the Hadamard product
+`H[j, k] = wⱼ wₖ L[iⱼ, iₖ] R[iⱼ, iₖ]`, which needs no matrix product.
+This is the case for instance of the MAX-CUT constraints `Xᵢᵢ = 1`.
+Giving these matrices as a `MOI.VectorAffineFunction` in
+`MOI.PositiveSemidefiniteConeTriangle` instead uses the generic sparse
+representation, unless they are detected by the `"detect_one_hot"`
+option of `LowRankOpt.Optimizer`, which is `true` by default.
+
+The constraints are currently given one by one. Ideally, the group of
+constraints, e.g., `Xᵢᵢ = 1` for `i in Base.OneTo(d)`, would be given at
+once with GenOpt. The structure would then be given explicitly as well,
+including the fact that the indices form a `Base.OneTo` which allows
+contiguous views. This is currently detected from the indices.
+"""
+function one_hot(::Type{T}, i::Integer, d::Integer) where {T}
+    return FillArrays.OneElement(one(T), Int(i), Int(d))
+end
+
 # A uniform rank-one type lets detected coefficients share a concrete
 # BlockColumns component without widening another component's element type.
 const _SparseRankOne{T} =

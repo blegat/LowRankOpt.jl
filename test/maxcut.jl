@@ -20,7 +20,7 @@ include(joinpath(dirname(@__DIR__), "examples", "maxcut.jl"))
 
 weights = [0 5 7 6; 5 0 0 1; 7 0 0 1; 6 1 1 0]
 
-function _test_maxcut(; is_dual, sparse, vector)
+function _test_maxcut(; is_dual, sparse, vector, one_hot = false)
     # The Burer-Monteiro starting point is `rand`-based (see
     # `BurerMonteiro.meta`)
     Random.seed!(0)
@@ -28,7 +28,7 @@ function _test_maxcut(; is_dual, sparse, vector)
     if is_dual
         opt = dual_optimizer(opt)
     end
-    model = maxcut(weights, opt; sparse, vector)
+    model = maxcut(weights, opt; sparse, vector, one_hot)
     set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
     set_attribute(model, "sub_solver", Percival.PercivalSolver)
     set_attribute(model, "ranks", [is_dual ? 2 : 3])
@@ -52,7 +52,9 @@ function _test_maxcut(; is_dual, sparse, vector)
         lro_model = unsafe_model.model
         solver = unsafe_model.solver
         @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
-        F = if sparse
+        F = if one_hot
+            typeof(LRO.one_hot(T, 1, 4))
+        elseif sparse
             if vector
                 SparseVector{T,Int}
             else
@@ -103,6 +105,14 @@ function test_maxcut()
                 _test_maxcut(; is_dual, sparse, vector)
             end
         end
+    end
+    @testset "One-hot" begin
+        _test_maxcut(;
+            is_dual = true,
+            sparse = true,
+            vector = true,
+            one_hot = true,
+        )
     end
     return
 end

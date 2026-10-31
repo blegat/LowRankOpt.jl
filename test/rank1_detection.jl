@@ -5,7 +5,8 @@
 #
 # Tests for `rank_one`/`detect_rank_one` and the `detect_rank_one` Optimizer
 # option that converts sparse rank-one constraint matrices to rank-one
-# `Factorization`s (so they hit the rank-1 Schur specialization in `schur.jl`).
+# `Factorization`s (so they hit the rank-1 Schur specialization in `schur.jl`)
+# and for the `detect_one_hot` Optimizer option.
 
 module TestRank1Detection
 
@@ -174,7 +175,7 @@ const _SDPA = """
 2 1 2 2 1.0
 """
 
-function _build(detect)
+function _build(detect; detect_one_hot = false)
     path = tempname() * ".dat-s"
     write(path, _SDPA)
     src = MOI.FileFormats.SDPA.Model{Float64}()
@@ -185,6 +186,9 @@ function _build(detect)
     MOI.copy_to(backend(model), src)
     set_attribute(model, "solver", ConvexSolver)
     set_attribute(model, "detect_rank_one", detect)
+    if !isnothing(detect_one_hot)
+        set_attribute(model, "detect_one_hot", detect_one_hot)
+    end
     optimize!(model) # `ConvexSolver` is a no-op: this just triggers `copy_to`
     return unsafe_backend(model).model
 end
@@ -209,6 +213,38 @@ function test_option_converts_to_rank_one()
             Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
         1:sparse_model.meta.ncon,
     )
+    return
+end
+
+# The constraint matrices `eⱼeⱼ'` are one-hot so they are detected by default.
+function test_option_default_detects_one_hot()
+    sparse_model = _build(false)
+    model = _build(false; detect_one_hot = nothing)
+    @test eltype(only(model.A).values) <: LRO._OneHotFactorization
+    @test eltype(model.C) <: SparseMatrixCSC
+    @test all(
+        j ->
+            Matrix(LRO.jac(model, j, LRO.MatrixIndex(1))) ==
+            Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
+        1:sparse_model.meta.ncon,
+    )
+    buffer = LRO.BufferedModelForSchur(model, 1)
+    @test only(only(buffer.schur_buffer[3]).U) == LRO._Selection(Base.OneTo(2))
+    return
+end
+
+# An off-diagonal entry or a variable in two diagonal entries is not
+# one-hot.
+function test_not_one_hot()
+    x = MOI.VariableIndex.(1:2)
+    F = MOI.ScalarAffineFunction{Float64}
+    f(a...) = MOI.Utilities.vectorize([convert(F, ai) for ai in a])
+    psd = MOI.PositiveSemidefiniteConeTriangle(2)
+    # Rows of the triangle: (1, 1), (1, 2), (2, 2)
+    @test LRO._is_one_hot(f(x[1], 0.0, x[2]), psd)
+    @test !LRO._is_one_hot(f(x[1], x[2], 0.0), psd)
+    @test !LRO._is_one_hot(f(x[1], 0.0, x[1]), psd)
+    @test !LRO._is_one_hot(f(x[1], 0.0, x[2]), MOI.Nonnegatives(3))
     return
 end
 
