@@ -310,6 +310,37 @@ end
     @test LRO.unsafe_jtprod(buffer, y, i) ≈ sum(y[j] * full[j] for j in 1:n)
 end
 
+@testset "Rank-one Jacobian only for dense enough factors" begin
+    T, d = Float64, 4
+    one_hot = LRO.BlockColumns(
+        [1],
+        reshape(
+            [
+                LRO.Factorization(sparsevec(Int64[j], T[1], d), T(j)) for
+                j in 1:d
+            ],
+            d,
+            1,
+        ),
+        1,
+    )
+    model = LRO.Model(
+        [spzeros(T, d, d)],
+        (one_hot,),
+        ones(T, d),
+        sparsevec(Int64[], T[], 0),
+        spzeros(T, Int64, d, 0),
+        Int64[d],
+    )
+    # The `d` one-hot factors have `d < m * d` nonzeros so the dense
+    # `m × d` factor of `RankOneJacobian` would be wasteful.
+    buffer = LRO.BufferedModelForSchur(model, 1)
+    @test only(buffer.jprod_buffer) isa SparseMatrixCSC
+    y = randn(MersenneTwister(4), T, d)
+    @test LRO.unsafe_jtprod(buffer, y, LRO.MatrixIndex(1)) ≈
+          Diagonal(y .* (1:d))
+end
+
 @testset "Burer-Monteiro with sparse plus low-rank components" begin
     model, reference, _, _, _, y = _fixture(Float64, :mixed)
     ranks = Int64[1, 2, 1]
