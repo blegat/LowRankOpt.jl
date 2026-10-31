@@ -4,17 +4,26 @@
 # [HKS24] Habibi, Soodeh, Michal Kočvara, and Michael Stingl. "Loraine -- an interior-point solver for low-rank semidefinite programming." Optimization Methods and Software 39.6 (2024): 1185-1215.
 # It was adapted from dapted from Michal Kocvara's code in
 # https://github.com/kocvara/Loraine.jl/blob/bd2821ba830786a78f04081d7e8f5cac25e56cac/src/makeBBBB.jl
+#
+# The Schur complement of a PSD block is `H[j, k] = ⟨Aⱼ, L Aₖ R⟩` for
+# symmetric scaling matrices `L` and `R`. It is symmetric in `j` and `k`
+# since `⟨Aⱼ, L Aₖ R⟩ = tr(Aⱼ L Aₖ R) = tr(Aₖ R Aⱼ L) = ⟨Aₖ, L Aⱼ R⟩`.
+# The Nesterov-Todd (NT) direction uses `L = R = W` while the
+# Helmberg-Kojima-Monteiro (HKM) direction uses `L = S⁻¹` and `R = X`.
+# The methods taking a single `W` are the NT special case.
 
-# Computes `⟨A * W, W * B⟩` for symmetric sparse matrices `A` and `B`
+# Computes `tr(A L B R)` for symmetric sparse matrices `A` and `B`
 function _dot(
     A::SparseArrays.SparseMatrixCSC,
     B::SparseArrays.SparseMatrixCSC,
-    W::AbstractMatrix,
+    L::AbstractMatrix,
+    R::AbstractMatrix,
 )
-    @assert LinearAlgebra.checksquare(W) ==
+    @assert LinearAlgebra.checksquare(L) ==
+            LinearAlgebra.checksquare(R) ==
             LinearAlgebra.checksquare(A) ==
             LinearAlgebra.checksquare(B)
-    # After these asserts, we know that `A`, `B` and `W` are square and
+    # After these asserts, we know that `A`, `B`, `L` and `R` are square and
     # have the same sizes so we can safely use `@inbounds`
     result = zero(eltype(A))
     @inbounds for i in axes(A, 2)
@@ -23,25 +32,30 @@ function _dot(
             for j in axes(B, 2)
                 nzB = SparseArrays.nzrange(B, j)
                 if !isempty(nzB)
-                    AW = zero(result)
+                    # `(A R)[i, j]`
+                    AR = zero(result)
                     for k in nzA
-                        AW +=
+                        AR +=
                             SparseArrays.nonzeros(A)[k] *
-                            W[SparseArrays.rowvals(A)[k], j]
+                            R[SparseArrays.rowvals(A)[k], j]
                     end
-                    WB = zero(result)
+                    # `(L B)[i, j]`
+                    LB = zero(result)
                     for k in nzB
-                        WB +=
-                            W[i, SparseArrays.rowvals(B)[k]] *
+                        LB +=
+                            L[i, SparseArrays.rowvals(B)[k]] *
                             SparseArrays.nonzeros(B)[k]
                     end
-                    result += AW * WB
+                    result += AR * LB
                 end
             end
         end
     end
     return result
 end
+
+# Computes `⟨A * W, W * B⟩` for symmetric sparse matrices `A` and `B`
+_dot(A, B, W::AbstractMatrix) = _dot(A, B, W, W)
 
 _nnz(::FillArrays.Zeros) = 0
 _nnz(A::SparseArrays.SparseMatrixCSC) = SparseArrays.nnz(A)
@@ -61,18 +75,31 @@ function add_schur_complement!(
     return H
 end
 
-# Adds one sparse component's contribution `𝐀ᵢᵀ (W ⊗ W) 𝐀ᵢ` to `H`.
+function add_schur_complement!(
+    model::BufferedModelForSchur,
+    L,
+    R,
+    ::Type{MatrixIndex},
+    H,
+)
+    for i in matrix_indices(model)
+        add_schur_complement!(model, i, L[i], R[i], H)
+    end
+    return H
+end
+
+# Adds one sparse component's contribution `𝐀ᵢᵀ (R ⊗ L) 𝐀ᵢ` to `H`.
 # Its Jacobian cache follows the layout documented in `buffer_for_jprod`.
 # `H` is assembled column by column. For a constraint `i` in the dense
 # regime, that is, one of the `last_dense[ilmi]` first entries of the
 # permutation `σ` sorting the constraints by decreasing number of nonzeros,
-# the dense matrix `W Aᵢ W` is formed once and all the remaining inner
-# products `⟨Aⱼ, W Aᵢ W⟩`, `j ∈ I`, are then obtained with the single
-# sparse matrix-vector product `𝐀ᵢ[:, I]ᵀ vec(W Aᵢ W)` of
+# the dense matrix `L Aᵢ R` is formed once and all the remaining inner
+# products `⟨Aⱼ, L Aᵢ R⟩`, `j ∈ I`, are then obtained with the single
+# sparse matrix-vector product `𝐀ᵢ[:, I]ᵀ vec(L Aᵢ R)` of
 # `add_sub_jprod!`. The constraints with at most one nonzero use the
 # dedicated low-nnz paths below, also following [FKN97].
-# /!\ W needs to be symmetric
-function _add_sparse_component!(workspace, slot, W, AW, WAW, H)
+# /!\ L and R need to be symmetric
+function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
     σ, last_dense = workspace.permutation, workspace.last_dense
     column = view(workspace.component.values, :, slot)
     n = length(column)
@@ -82,8 +109,8 @@ function _add_sparse_component!(workspace, slot, W, AW, WAW, H)
         Ai = column[i]
         if _nnz(Ai) > 0
             if ii <= last_dense[slot]
-                LinearAlgebra.mul!(AW, W, Ai)
-                LinearAlgebra.mul!(WAW, AW, W)
+                LinearAlgebra.mul!(AW, L, Ai)
+                LinearAlgebra.mul!(WAW, AW, R)
                 I = view(σ, ii:n, slot)
                 _add_jprod!(
                     WAW,
@@ -100,7 +127,7 @@ function _add_sparse_component!(workspace, slot, W, AW, WAW, H)
                         j = σ[jj, slot]
                         Aj = column[j]
                         if !iszero(_nnz(Aj))
-                            ttt = _dot(Ai, Aj, W)
+                            ttt = _dot(Ai, Aj, L, R)
                             H[i, j] += ttt
                             if i != j
                                 H[j, i] += ttt
@@ -122,8 +149,8 @@ function _add_sparse_component!(workspace, slot, W, AW, WAW, H)
                             vvvj = only(SparseArrays.nonzeros(Ajjj))
                             ttt =
                                 vvvi *
-                                W[iiiiAi, iiijAj] *
-                                W[jjjiAi, jjjjAj] *
+                                L[iiiiAi, iiijAj] *
+                                R[jjjjAj, jjjiAi] *
                                 vvvj
                             H[i, j] += ttt
                             if i != j
@@ -146,6 +173,14 @@ function add_schur_complement!(
     ::Type{ScalarIndex},
     H::StridedMatrix,
 )
+    return _add_scalar_schur_complement!(model, k -> w[k], H)
+end
+
+function _add_scalar_schur_complement!(
+    model::BufferedModelForSchur,
+    weight::F,
+    H,
+) where {F<:Function}
     C = model.model.C_lin
     # C * Diagonal(w) * C'
     # = sum_k w[k] * c_k * c_k'.
@@ -154,19 +189,20 @@ function add_schur_complement!(
     rows, values = SparseArrays.rowvals(C), SparseArrays.nonzeros(C)
     for k in axes(C, 2)
         column = view(C, :, k)
+        wk = weight(k)
         for p in SparseArrays.nzrange(C, k)
             j = Int(rows[p])
-            LinearAlgebra.axpy!(w[k] * conj(values[p]), column, view(H, :, j))
+            LinearAlgebra.axpy!(wk * conj(values[p]), column, view(H, :, j))
         end
     end
     return H
 end
 
-function _add_sparse_eval_column!(result, values, slot, Ay, W)
+function _add_sparse_eval_column!(result, values, slot, Ay, L, R)
     for k in eachindex(result)
         A = values[k, slot]
         if !iszero(_nnz(A))
-            result[k] += _dot(A, Ay, W)
+            result[k] += _dot(A, Ay, L, R)
         end
     end
     return nothing
@@ -178,33 +214,59 @@ end
 # [HKS24, (5b)] is stated for a single PSD block; summing over the blocks
 # and adding the contribution of the scalar block gives
 # H = ∑ᵢ 𝐀ᵢᵀ (Wᵢ ⊗ Wᵢ) 𝐀ᵢ + C_lin * Diagonal(w) * C_linᵀ
+# where the scalar block `w = W[ScalarIndex]` is the weight itself.
 function schur_complement!(model::BufferedModelForSchur, W::AbstractVector, H)
+    return _schur_complement!(model, W, W, k -> W[ScalarIndex][k], H)
+end
+
+"""
+    schur_complement!(model::BufferedModelForSchur, L, R, H)
+
+Computes the Schur complement
+`H[j, k] = ∑ᵢ ⟨Aᵢⱼ, Lᵢ Aᵢₖ Rᵢ⟩ + ∑ₗ C_lin[j, l] L[l] R[l] C_lin[k, l]`
+for symmetric `Lᵢ` and `Rᵢ`, where `Lᵢ = L[MatrixIndex(i)]` and
+`L[l]` is the `l`th entry of `L[ScalarIndex]`. The Nesterov-Todd direction
+is obtained with `Lᵢ = Rᵢ = Wᵢ` and the Helmberg-Kojima-Monteiro direction
+with `Lᵢ = Sᵢ⁻¹` and `Rᵢ = Xᵢ`.
+"""
+function schur_complement!(
+    model::BufferedModelForSchur,
+    L::AbstractVector,
+    R::AbstractVector,
+    H,
+)
+    weight = k -> L[ScalarIndex][k] * R[ScalarIndex][k]
+    return _schur_complement!(model, L, R, weight, H)
+end
+
+function _schur_complement!(model, L, R, scalar_weight::F, H) where {F}
     fill!(H, zero(eltype(H)))
     if num_matrices(model) > 0
-        add_schur_complement!(model, W, MatrixIndex, H)
+        add_schur_complement!(model, L, R, MatrixIndex, H)
     end
     if num_scalars(model) > 0
-        add_schur_complement!(model, W[ScalarIndex], ScalarIndex, H)
+        _add_scalar_schur_complement!(model, scalar_weight, H)
     end
     return H
 end
 
-# Add `⟨Aᵢₖ, W A(y) W⟩` to `result[k]`, where `Ay` is `A(y) = ∑ⱼ Aᵢⱼ yⱼ` as
+# Add `⟨Aᵢₖ, L A(y) R⟩` to `result[k]`, where `Ay` is `A(y) = ∑ⱼ Aᵢⱼ yⱼ` as
 # returned by `unsafe_jtprod`.
 #
-# `A(y)` dense: form `W A(y) W` and contract it against `𝐀ᵢ` with one sparse
+# `A(y)` dense: form `L A(y) R` and contract it against `𝐀ᵢ` with one sparse
 # matrix-vector product. Two `d×d` products, so `Θ(d³)` however sparse the
 # `Aᵢₖ` are.
 function _add_eval_schur_complement!(
     model::BufferedModelForSchur,
-    W::AbstractMatrix,
+    L::AbstractMatrix,
+    R::AbstractMatrix,
     Ay::AbstractMatrix,
     result,
     i::MatrixIndex,
 )
     AW, WAW, _, _ = model.schur_buffer
-    LinearAlgebra.mul!(AW[i.value], W, Ay)
-    LinearAlgebra.mul!(WAW[i.value], AW[i.value], W)
+    LinearAlgebra.mul!(AW[i.value], L, Ay)
+    LinearAlgebra.mul!(WAW[i.value], AW[i.value], R)
     return add_jprod!(model, WAW[i.value], result, i)
 end
 
@@ -214,13 +276,14 @@ end
 # here made once for `A(y)`.
 function _add_eval_schur_complement!(
     model::BufferedModelForSchur,
-    W::AbstractMatrix,
+    L::AbstractMatrix,
+    R::AbstractMatrix,
     Ay::SparseArrays.SparseMatrixCSC,
     result,
     i::MatrixIndex,
 )
     _foreach_column(model.model.A, i.value) do values, slot
-        return _add_sparse_eval_column!(result, values, slot, Ay, W)
+        return _add_sparse_eval_column!(result, values, slot, Ay, L, R)
     end
     return result
 end
@@ -229,26 +292,50 @@ end
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
 function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
+    weight = k -> W[ScalarIndex][k]
+    return _eval_schur_complement!(model, W, W, weight, y, result)
+end
+
+"""
+    eval_schur_complement!(model::BufferedModelForSchur, L, R, y, result)
+
+Computes the product `H * y` of the Schur complement `H` computed by
+[`schur_complement!(model, L, R, H)`](@ref) with `y` without forming `H`.
+"""
+function eval_schur_complement!(model::BufferedModelForSchur, L, R, y, result)
+    weight = k -> L[ScalarIndex][k] * R[ScalarIndex][k]
+    return _eval_schur_complement!(model, L, R, weight, y, result)
+end
+
+function _eval_schur_complement!(
+    model,
+    L,
+    R,
+    scalar_weight::F,
+    y,
+    result,
+) where {F}
     fill!(result, zero(eltype(result)))
     components = model.schur_buffer[3]
     for i in matrix_indices(model)
         if _has_general_component(components, i.value)
             _add_eval_schur_complement!(
                 model,
-                W[i],
+                L[i],
+                R[i],
                 unsafe_jtprod(model, y, i),
                 result,
                 i,
             )
         else
-            _prepare_components!(components, i.value, W[i])
-            _add_component_matvec!(components, i.value, y, result)
+            _prepare_components!(components, i.value, L[i], R[i])
+            _add_component_matvec!(components, i.value, L[i], R[i], y, result)
         end
     end
     C = model.model.C_lin
     for k in axes(C, 2)
         column = view(C, :, k)
-        weight = W[ScalarIndex][k] * LinearAlgebra.dot(column, y)
+        weight = scalar_weight(k) * LinearAlgebra.dot(column, y)
         LinearAlgebra.axpy!(weight, column, result)
     end
     return result
@@ -266,12 +353,34 @@ struct _GeneralSchurComponent{C,J}
     sparse::Vector{Bool}
 end
 
+# Component `Aⱼ = wⱼ * U[j, :] * U[j, :]'`. The rows `U * L` and `U * R`
+# are stored in `UL` and `UR` and `gram` and `gram_right` are `n × n`
+# workspaces.
 struct _RankOneSchurComponent{T,C}
     component::C
     U::Vector{Matrix{T}}
     weights::Matrix{T}
-    UW::Vector{Matrix{T}}
+    UL::Vector{Matrix{T}}
+    UR::Vector{Matrix{T}}
     gram::Matrix{T}
+    gram_right::Matrix{T}
+end
+
+function _RankOneSchurComponent(
+    component,
+    U::Vector{Matrix{T}},
+    weights::Matrix{T},
+) where {T}
+    n = size(weights, 1)
+    return _RankOneSchurComponent(
+        component,
+        U,
+        weights,
+        similar.(U),
+        similar.(U),
+        zeros(T, n, n),
+        zeros(T, n, n),
+    )
 end
 
 function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T}
@@ -310,15 +419,13 @@ function _schur_component(
 ) where {T}
     n, p = size(component.values)
     U = Matrix{T}[]
-    UW = Matrix{T}[]
     weights = zeros(T, n, p)
     for (slot, i) in enumerate(component.block_ids)
         Ui, weights[:, slot] =
             _rank_one_factors(component.values, slot, model.msizes[i])
         push!(U, Ui)
-        push!(UW, similar(Ui))
     end
-    return _RankOneSchurComponent(component, U, weights, UW, zeros(T, n, n))
+    return _RankOneSchurComponent(component, U, weights)
 end
 
 function buffer_for_schur_complement(model::Model{T}, κ) where {T}
@@ -339,52 +446,68 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
     return AW, WAW, components, factor_work
 end
 
-_prepare_schur!(::_GeneralSchurComponent, _, _) = nothing
-function _prepare_schur!(workspace::_RankOneSchurComponent, i, W)
+# `U * L` and `U * R`, the latter is not computed if `R === L`
+_left_rows(a::_RankOneSchurComponent, slot, _) = a.UL[slot]
+function _right_rows(a::_RankOneSchurComponent, slot, L, R)
+    if R === L
+        return _left_rows(a, slot, L)
+    end
+    return a.UR[slot]
+end
+
+_prepare_schur!(::_GeneralSchurComponent, _, _, _) = nothing
+function _prepare_schur!(workspace::_RankOneSchurComponent, i, L, R)
     slot = _block_slot(workspace.component, i)
     if !iszero(slot)
-        LinearAlgebra.mul!(workspace.UW[slot], workspace.U[slot], W)
+        LinearAlgebra.mul!(workspace.UL[slot], workspace.U[slot], L)
+        if R !== L
+            LinearAlgebra.mul!(workspace.UR[slot], workspace.U[slot], R)
+        end
     end
     return nothing
 end
 
-@inline _prepare_components!(::Tuple{}, i, W) = nothing
-@inline function _prepare_components!(components::Tuple, i, W)
-    _prepare_schur!(first(components), i, W)
-    _prepare_components!(Base.tail(components), i, W)
+@inline _prepare_components!(::Tuple{}, i, L, R) = nothing
+@inline function _prepare_components!(components::Tuple, i, L, R)
+    _prepare_schur!(first(components), i, L, R)
+    _prepare_components!(Base.tail(components), i, L, R)
     return nothing
 end
 
-function _sandwich!(WAW, AW, W, A::AbstractMatrix, _)
-    LinearAlgebra.mul!(AW, W, A)
-    return LinearAlgebra.mul!(WAW, AW, W)
+# `WAW = L * A * R`
+function _sandwich!(WAW, AW, L, R, A::AbstractMatrix, _)
+    LinearAlgebra.mul!(AW, L, A)
+    return LinearAlgebra.mul!(WAW, AW, R)
 end
 function _sandwich!(
     WAW,
     AW,
-    W,
+    L,
+    R,
     A::AbstractFactorization{T,<:AbstractVector},
     work,
 ) where {T}
-    buffered_mul!(AW, A, W, true, false, view(work, :, 1))
-    return LinearAlgebra.mul!(WAW, W, AW)
+    buffered_mul!(AW, A, R, true, false, view(work, :, 1))
+    return LinearAlgebra.mul!(WAW, L, AW)
 end
 function _sandwich!(
     WAW,
     AW,
-    W,
+    L,
+    R,
     A::AbstractFactorization{T,<:AbstractMatrix},
     work,
 ) where {T}
-    buffered_mul!(AW, A, W, true, false, view(work, :, 1:max_rank(A)))
-    return LinearAlgebra.mul!(WAW, W, AW)
+    buffered_mul!(AW, A, R, true, false, view(work, :, 1:max_rank(A)))
+    return LinearAlgebra.mul!(WAW, L, AW)
 end
 
 function _add_schur_pair!(
     a::_GeneralSchurComponent,
     b::_GeneralSchurComponent,
     i,
-    W,
+    L,
+    R,
     AW,
     WAW,
     work,
@@ -394,13 +517,13 @@ function _add_schur_pair!(
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
     if same && a.sparse[ia]
-        _add_sparse_component!(a, ia, W, AW, WAW, H)
+        _add_sparse_component!(a, ia, L, R, AW, WAW, H)
         return nothing
     end
     ca, cb = view(a.component.values, :, ia), view(b.component.values, :, ib)
     for j in eachindex(ca)
         iszero(_nnz(ca[j])) && continue
-        _sandwich!(WAW, AW, W, ca[j], work)
+        _sandwich!(WAW, AW, L, R, ca[j], work)
         for k in (same ? j : 1):length(cb)
             value = _coefficient_dot(cb[k], WAW)
             H[k, j] += value
@@ -412,14 +535,17 @@ function _add_schur_pair!(
     return nothing
 end
 
-# For A_j = d_j b_j b_j', the pair contraction is
-# d_j e_k (b_j' W c_k)^2. Distinct components contribute this matrix
-# AND its transpose; omitting the transpose would lose cross terms.
+# For Aⱼ = aⱼ uⱼ uⱼ' and Bₖ = bₖ vₖ vₖ', the pair contraction is
+# ⟨Aⱼ, L Bₖ R⟩ = aⱼ bₖ (uⱼ' L vₖ) (uⱼ' R vₖ). The `n × n` matrices of
+# `uⱼ' L vₖ` and `uⱼ' R vₖ` are `U L V'` and `U R V'`. Distinct components
+# contribute this matrix AND its transpose; omitting the transpose would
+# lose cross terms.
 function _add_schur_pair!(
     a::_RankOneSchurComponent,
     b::_RankOneSchurComponent,
     i,
-    W,
+    L,
+    R,
     AW,
     WAW,
     work,
@@ -428,9 +554,9 @@ function _add_schur_pair!(
 )
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
-    LinearAlgebra.mul!(a.gram, a.UW[ia], b.U[ib]')
+    left, right = _rank_one_grams(a, ia, b, ib, L, R)
     for k in axes(H, 2), j in axes(H, 1)
-        value = a.weights[j, ia] * b.weights[k, ib] * abs2(a.gram[j, k])
+        value = a.weights[j, ia] * b.weights[k, ib] * left[j, k] * right[j, k]
         H[j, k] += value
         if !same
             H[k, j] += value
@@ -439,37 +565,52 @@ function _add_schur_pair!(
     return nothing
 end
 
-_quadratic_form(u, A::AbstractMatrix) = LinearAlgebra.dot(u, A, u)
-function _quadratic_form(u, ::FillArrays.Zeros{T}) where {T}
-    return zero(promote_type(eltype(u), T))
+# `U L V'` and `U R V'` where `U` and `V` are the factors of `a` and `b`
+function _rank_one_grams(a, ia, b, ib, L, R)
+    left = LinearAlgebra.mul!(a.gram, _left_rows(a, ia, L), b.U[ib]')
+    if R === L
+        return left, left
+    end
+    right = LinearAlgebra.mul!(a.gram_right, _right_rows(a, ia, L, R), b.U[ib]')
+    return left, right
 end
-function _quadratic_form(
+
+# Computes `u' * A * v`
+_bilinear_form(u, A::AbstractMatrix, v) = LinearAlgebra.dot(u, A, v)
+function _bilinear_form(u, ::FillArrays.Zeros{T}, v) where {T}
+    return zero(promote_type(eltype(u), T, eltype(v)))
+end
+function _bilinear_form(
     u,
     A::AbstractFactorization{T,<:AbstractVector},
+    v,
 ) where {T}
     return only(A.scaling) *
            LinearAlgebra.dot(u, left_factor(A)) *
-           LinearAlgebra.dot(right_factor(A), u)
+           LinearAlgebra.dot(right_factor(A), v)
 end
-function _quadratic_form(
+function _bilinear_form(
     u,
     A::AbstractFactorization{T,<:AbstractMatrix},
+    v,
 ) where {T}
     result = zero(T)
     for k in eachindex(A.scaling)
         result +=
             A.scaling[k] *
             LinearAlgebra.dot(u, view(left_factor(A), :, k)) *
-            LinearAlgebra.dot(view(right_factor(A), :, k), u)
+            LinearAlgebra.dot(view(right_factor(A), :, k), v)
     end
     return result
 end
 
+# For Aⱼ = aⱼ uⱼ uⱼ', `⟨Bₖ, L Aⱼ R⟩ = aⱼ (R uⱼ)' Bₖ (L uⱼ)`.
 function _add_schur_pair!(
     a::_RankOneSchurComponent,
     b::_GeneralSchurComponent,
     i,
-    W,
+    L,
+    R,
     AW,
     WAW,
     work,
@@ -478,11 +619,12 @@ function _add_schur_pair!(
 )
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
+    left, right = _left_rows(a, ia, L), _right_rows(a, ia, L, R)
     column = view(b.component.values, :, ib)
     for j in axes(H, 1)
-        u = view(a.UW[ia], j, :)
+        u, v = view(right, j, :), view(left, j, :)
         for k in eachindex(column)
-            value = a.weights[j, ia] * _quadratic_form(u, column[k])
+            value = a.weights[j, ia] * _bilinear_form(u, column[k], v)
             H[j, k] += value
             H[k, j] += value
         end
@@ -493,14 +635,15 @@ function _add_schur_pair!(
     a::_GeneralSchurComponent,
     b::_RankOneSchurComponent,
     i,
-    W,
+    L,
+    R,
     AW,
     WAW,
     work,
     H,
     same,
 )
-    return _add_schur_pair!(b, a, i, W, AW, WAW, work, H, same)
+    return _add_schur_pair!(b, a, i, L, R, AW, WAW, work, H, same)
 end
 
 @inline _add_cross_pairs!(a, ::Tuple{}, args...) = nothing
@@ -524,12 +667,34 @@ function add_schur_complement!(
     W::AbstractMatrix,
     H,
 )
+    return add_schur_complement!(model, i, W, W, H)
+end
+
+"""
+    add_schur_complement!(
+        model::BufferedModelForSchur,
+        i::MatrixIndex,
+        L::AbstractMatrix,
+        R::AbstractMatrix,
+        H,
+    )
+
+Adds `⟨Aᵢⱼ, L Aᵢₖ R⟩` to `H[j, k]` for symmetric matrices `L` and `R`.
+"""
+function add_schur_complement!(
+    model::BufferedModelForSchur,
+    i::MatrixIndex,
+    L::AbstractMatrix,
+    R::AbstractMatrix,
+    H,
+)
     AW, WAW, components, work = model.schur_buffer
-    _prepare_components!(components, i.value, W)
+    _prepare_components!(components, i.value, L, R)
     _add_component_pairs!(
         components,
         i.value,
-        W,
+        L,
+        R,
         AW[i.value],
         WAW[i.value],
         work[i.value],
@@ -550,15 +715,17 @@ function _add_rank_one_matvec!(
     a::_RankOneSchurComponent,
     b::_RankOneSchurComponent,
     i,
+    L,
+    R,
     y,
     result,
     same,
 )
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
-    LinearAlgebra.mul!(a.gram, a.UW[ia], b.U[ib]')
+    left, right = _rank_one_grams(a, ia, b, ib, L, R)
     for k in eachindex(y), j in eachindex(result)
-        value = a.weights[j, ia] * b.weights[k, ib] * abs2(a.gram[j, k])
+        value = a.weights[j, ia] * b.weights[k, ib] * left[j, k] * right[j, k]
         result[j] += value * y[k]
         if !same
             result[k] += value * y[j]
