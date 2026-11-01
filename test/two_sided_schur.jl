@@ -5,7 +5,7 @@
 
 # Scope: the Schur complement `H[j, k] = ∑ᵢ ⟨Aᵢⱼ, Lᵢ Aᵢₖ Rᵢ⟩` with two
 # different scalings `L` and `R`, as for the HKM direction, for every
-# component kind.
+# component kind, including one-hot components.
 
 module TestTwoSidedSchur
 
@@ -121,20 +121,66 @@ function test_sparse_regimes()
     end
 end
 
-# Every pair of component kinds on the same PSD blocks: rank-one with
-# sparse and dense factors, sparse, diagonal and low-rank.
+_one_hot(i, d, s) = LRO.Factorization(LRO.one_hot(Float64, i, d), s)
+
+# The max-cut constraints `Xⱼⱼ = 1` are one-hot with the identity index.
+function test_one_hot_identity()
+    d = 5
+    entries = [_one_hot(j, d, 1.0) for j in 1:d]
+    model = _model([spzeros(d, d)], reshape(entries, 1, d), ones(d))
+    buffer = _test_schur(model)
+    component = only(buffer.schur_buffer[3])
+    @test component isa LRO._RankOneSchurComponent
+    @test only(component.U) == LRO._Selection(Base.OneTo(d))
+end
+
+# More constraints than the side dimension so the index repeats.
+function test_one_hot_vector_index()
+    d, m = 3, 7
+    entries = AbstractMatrix{Float64}[
+        _one_hot(mod1(j, d), d, Float64(j)) for j in 1:m
+    ]
+    entries[2] = FillArrays.Zeros{Float64}(d, d)
+    model =
+        _model([spzeros(d, d)], reshape(entries, 1, m), zeros(m); scalars = 1)
+    buffer = _test_schur(model; nscalars = 1)
+    component = only(buffer.schur_buffer[3])
+    @test only(component.U).index isa Vector{Int}
+end
+
+# The weight of `s * v² * eᵢ eᵢ'` where `v` is the value of the one-hot
+# vector.
+function test_one_hot_value()
+    d = 3
+    entries =
+        [LRO.Factorization(FillArrays.OneElement(2.0, j, d), -1.5) for j in 1:d]
+    model = _model([spzeros(d, d)], reshape(entries, 1, d), ones(d))
+    buffer = _test_schur(model)
+    @test only(buffer.schur_buffer[3]).weights == fill(-6.0, d, 1)
+end
+
+# The one-hot structure is only exploited if it is given explicitly with
+# `one_hot`, not if the matrices just happen to be one-hot.
+function test_one_hot_not_explicit()
+    d = 4
+    entries = [sparse([j], [j], [2.0], d, d) for j in 1:d]
+    model = _model([spzeros(d, d)], reshape(entries, 1, d), ones(d))
+    buffer = _test_schur(model)
+    @test only(buffer.schur_buffer[3]) isa LRO._GeneralSchurComponent
+    components = LRO.detect_rank_one(reshape(entries, 1, d))
+    model = _model([spzeros(d, d)], components, ones(d))
+    buffer = _test_schur(model)
+    @test only(buffer.schur_buffer[3]).U[1] isa Matrix
+end
+
+# Every pair of component kinds on the same PSD blocks: one-hot, dense
+# rank-one, sparse, diagonal and low-rank.
 function test_component_pairs()
     rng = MersenneTwister(3)
     dims, m = [3, 4], 4
-    # `Int32` indices, as `sparsevec` gives on 32-bit systems.
-    sparse_rank_one = _block_columns(
+    one_hot = _block_columns(
         [1, 2],
-        [
-            LRO.Factorization(
-                sparsevec(Int32[mod1(j, d)], [1.0], d),
-                Float64(j),
-            ) for j in 1:m, d in dims
-        ],
+        [_one_hot(mod1(j, d), d, Float64(j)) for j in 1:m, d in dims],
         2,
     )
     rank_one = _block_columns(
@@ -153,20 +199,15 @@ function test_component_pairs()
         [LRO.Factorization(randn(rng, 4, 2), randn(rng, 2)) for j in 1:m],
         2,
     )
-    components =
-        (sparse_rank_one, rank_one, sparse_component, diagonal, low_rank)
+    components = (one_hot, rank_one, sparse_component, diagonal, low_rank)
     model =
         _model([spzeros(d, d) for d in dims], components, zeros(m); scalars = 2)
     buffer = _test_schur(model; nscalars = 2)
-    @test buffer.schur_buffer[3][1] isa LRO._RankOneSchurComponent
-    @test buffer.schur_buffer[3][2] isa LRO._RankOneSchurComponent
-    # A block with only rank-one components uses the
+    @test buffer.schur_buffer[3][1].U[1] isa LRO._Selection
+    @test buffer.schur_buffer[3][2].U[1] isa Matrix
+    # A block with only one-hot and rank-one components uses the
     # `_add_component_matvec!` path of `eval_schur_complement!`.
-    model = _model(
-        [spzeros(d, d) for d in dims],
-        (sparse_rank_one, rank_one),
-        zeros(m),
-    )
+    model = _model([spzeros(d, d) for d in dims], (one_hot, rank_one), zeros(m))
     return _test_schur(model)
 end
 

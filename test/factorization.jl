@@ -63,6 +63,9 @@ function _sample_matrices()
             ],
         )
     end
+    one_hot = LRO.one_hot(Float64, 2, 3)
+    push!(matrices, LRO.positive_semidefinite_factorization(one_hot))
+    push!(matrices, LRO.Factorization(2one_hot, -1.5))
     return matrices
 end
 

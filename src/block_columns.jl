@@ -104,6 +104,10 @@ const _ZerosMatrix{T} =
 const _RankOneFactorization{T} =
     Factorization{T,<:AbstractVector{T},<:AbstractArray{T,0}}
 
+# `s * e_i * e_i'`, see [`one_hot`](@ref).
+const _OneHotFactorization{T} =
+    Factorization{T,<:FillArrays.OneElement{T,1},<:AbstractArray{T,0}}
+
 # Entries of a component whose nonzero matrices are all rank-one.
 const _RankOneOrZeros{T} = Union{_RankOneFactorization{T},_ZerosMatrix{T}}
 

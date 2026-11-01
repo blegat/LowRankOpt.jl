@@ -99,6 +99,18 @@ to see if the solver receives the low-rank constraint or if it is transformed to
 > ```
 > See [this tutorial on Dualization.jl](https://jump.dev/JuMP.jl/stable/tutorials/conic/dualization/).
 
+### Explicit structure
+
+The structure of the $A_j$ matrices is given explicitly by their types.
+For instance, the matrices $e_i e_i^\top$ of constraints $X_{ii} = b_j$ are given
+as `LRO.positive_semidefinite_factorization(LRO.one_hot(Float64, i, d))`.
+If all the matrices of a PSD block are such one-hot matrices, the Schur complement of this
+block needs no matrix product.
+By default, `LRO.Optimizer` also detects this structure when the constraint is given as
+a `MOI.VectorAffineFunction` in `MOI.PositiveSemidefiniteConeTriangle`; use
+`set_attribute(model, "detect_one_hot", false)` to disable it.
+See the docstring of `LRO.one_hot` for more details.
+
 The solvers that support `LRO.SetDotProducts` are:
 
 * [DSDP.jl](https://github.com/jump-dev/DSDP.jl) : [⚠ WIP](https://github.com/jump-dev/DSDP.jl/pull/37)

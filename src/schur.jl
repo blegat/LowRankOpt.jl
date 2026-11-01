@@ -350,12 +350,27 @@ struct _GeneralSchurComponent{C,J}
     sparse::Vector{Bool}
 end
 
-# Component `Aⱼ = wⱼ * U[j, :] * U[j, :]'`. The rows `U * L` and `U * R`
-# are stored in `UL` and `UR` and `gram` and `gram_right` are `n × n`
-# workspaces.
-struct _RankOneSchurComponent{T,C}
+"""
+    struct _Selection{I<:AbstractVector{Int}}
+        index::I
+    end
+
+Factor `U` of a component of one-hot rank-one matrices
+`Aⱼ = wⱼ e_{index[j]} e_{index[j]}'`, i.e., `U = I[index, :]`. The products
+with `U` are views so they need no computation. If `index` is
+`Base.OneTo`, these views are contiguous. This is the case for instance of
+the max-cut constraints `Xⱼⱼ = 1`.
+"""
+struct _Selection{I<:AbstractVector{Int}}
+    index::I
+end
+
+# Component `Aⱼ = wⱼ * U[j, :] * U[j, :]'` where `U` is either a `Matrix` or
+# a `_Selection`. For a `Matrix` factor, `UL` and `UR` store `U * L` and
+# `U * R` and `gram` and `gram_right` are `n × n` workspaces.
+struct _RankOneSchurComponent{T,C,F}
     component::C
-    U::Vector{Matrix{T}}
+    U::Vector{F}
     weights::Matrix{T}
     UL::Vector{Matrix{T}}
     UR::Vector{Matrix{T}}
@@ -378,6 +393,58 @@ function _RankOneSchurComponent(
         zeros(T, n, n),
         zeros(T, n, n),
     )
+end
+
+function _RankOneSchurComponent(
+    component,
+    U::Vector{<:_Selection},
+    weights::Matrix{T},
+) where {T}
+    empty = [zeros(T, 0, 0) for _ in U]
+    return _RankOneSchurComponent(
+        component,
+        U,
+        weights,
+        empty,
+        empty,
+        zeros(T, 0, 0),
+        zeros(T, 0, 0),
+    )
+end
+
+# `(index, weight)` such that `A = weight * e_index * e_index'`. Zero
+# matrices have index `0`.
+_one_hot(::_ZerosMatrix{T}) where {T} = (0, zero(T))
+function _one_hot(A::_OneHotFactorization)
+    return only(A.factor.ind), only(A.scaling) * abs2(A.factor.val)
+end
+
+# The one-hot structure is given explicitly by the type of the factor, see
+# [`one_hot`](@ref).
+function _schur_component(
+    component::BlockColumns{<:Union{_OneHotFactorization{T},_ZerosMatrix{T}}},
+    model::Model{T},
+    _,
+) where {T}
+    n, p = size(component.values)
+    indices = Vector{Int}[]
+    weights = zeros(T, n, p)
+    for (slot, i) in enumerate(component.block_ids)
+        index = zeros(Int, n)
+        for j in 1:n
+            k, weights[j, slot] = _one_hot(component.values[j, slot])
+            # The index of zero entries does not matter as their weight is
+            # zero, we choose it so that it does not prevent `Base.OneTo`.
+            index[j] = iszero(k) ? (j <= model.msizes[i] ? j : 1) : k
+        end
+        push!(indices, index)
+    end
+    if all(index -> index == eachindex(index), indices)
+        U = [_Selection(Base.OneTo(n)) for _ in indices]
+    else
+        U = _Selection.(indices)
+    end
+    return _RankOneSchurComponent(component, U, weights)
 end
 
 function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T}
@@ -443,22 +510,33 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
     return AW, WAW, components, factor_work
 end
 
-# `U * L` and `U * R`, the latter is not computed if `R === L`
-_left_rows(a::_RankOneSchurComponent, slot, _) = a.UL[slot]
+# `U * M` for a scaling matrix `M`
+_prepare_rows!(UM, U::Matrix, M) = LinearAlgebra.mul!(UM, U, M)
+_prepare_rows!(_, ::_Selection, _) = nothing
+_scaled_rows(::Matrix, UM, _) = UM
+_scaled_rows(U::_Selection, _, M) = view(M, U.index, :)
+
+# `rows * U'`
+_gram!(G, rows, U::Matrix) = LinearAlgebra.mul!(G, rows, U')
+_gram!(_, rows, U::_Selection) = view(rows, :, U.index)
+
+function _left_rows(a::_RankOneSchurComponent, slot, L)
+    return _scaled_rows(a.U[slot], a.UL[slot], L)
+end
 function _right_rows(a::_RankOneSchurComponent, slot, L, R)
     if R === L
         return _left_rows(a, slot, L)
     end
-    return a.UR[slot]
+    return _scaled_rows(a.U[slot], a.UR[slot], R)
 end
 
 _prepare_schur!(::_GeneralSchurComponent, _, _, _) = nothing
 function _prepare_schur!(workspace::_RankOneSchurComponent, i, L, R)
     slot = _block_slot(workspace.component, i)
     if !iszero(slot)
-        LinearAlgebra.mul!(workspace.UL[slot], workspace.U[slot], L)
+        _prepare_rows!(workspace.UL[slot], workspace.U[slot], L)
         if R !== L
-            LinearAlgebra.mul!(workspace.UR[slot], workspace.U[slot], R)
+            _prepare_rows!(workspace.UR[slot], workspace.U[slot], R)
         end
     end
     return nothing
@@ -562,14 +640,37 @@ function _add_schur_pair!(
     return nothing
 end
 
-# `U L V'` and `U R V'` where `U` and `V` are the factors of `a` and `b`
+# The workspaces of a `_Selection` component are empty so the products
+# with a `Matrix` component use the workspaces of the latter.
+function _add_schur_pair!(
+    a::_RankOneSchurComponent{T,C,<:_Selection},
+    b::_RankOneSchurComponent{T,D,Matrix{T}},
+    args...,
+) where {T,C,D}
+    return _add_schur_pair!(b, a, args...)
+end
+
 function _rank_one_grams(a, ia, b, ib, L, R)
-    left = LinearAlgebra.mul!(a.gram, _left_rows(a, ia, L), b.U[ib]')
+    left = _gram!(a.gram, _left_rows(a, ia, L), b.U[ib])
     if R === L
         return left, left
     end
-    right = LinearAlgebra.mul!(a.gram_right, _right_rows(a, ia, L, R), b.U[ib]')
+    right = _gram!(a.gram_right, _right_rows(a, ia, L, R), b.U[ib])
     return left, right
+end
+
+# `view(view(L, I, :), :, J)` would copy `I` if it is a `Vector` so we
+# index `L` directly.
+function _rank_one_grams(
+    a::_RankOneSchurComponent{T,C,<:_Selection},
+    ia,
+    b::_RankOneSchurComponent{T,D,<:_Selection},
+    ib,
+    L,
+    R,
+) where {T,C,D}
+    I, J = a.U[ia].index, b.U[ib].index
+    return view(L, I, J), view(R, I, J)
 end
 
 # Computes `u' * A * v`
@@ -730,6 +831,13 @@ function _add_rank_one_matvec!(
     end
     return nothing
 end
+function _add_rank_one_matvec!(
+    a::_RankOneSchurComponent{T,C,<:_Selection},
+    b::_RankOneSchurComponent{T,D,Matrix{T}},
+    args...,
+) where {T,C,D}
+    return _add_rank_one_matvec!(b, a, args...)
+end
 _add_rank_one_matvec!(::_GeneralSchurComponent, _, args...) = nothing
 function _add_rank_one_matvec!(
     ::_RankOneSchurComponent,
@@ -760,6 +868,7 @@ end
 # Nonzero (index, value) pairs of a rank-one factor, for both sparse and dense
 # factor vectors (dense factors are used e.g. by the SOS rank-one batch).
 _rank_one_nz(b::SparseArrays.SparseVector) = SparseArrays.findnz(b)
+_rank_one_nz(b::FillArrays.OneElement{T,1}) where {T} = (b.ind, (b.val,))
 _rank_one_nz(b::AbstractVector) = (eachindex(b), b)
 
 # `vec(s b b')` has `nnz(b)²` nonzeros at `support(b) × support(b)`.
