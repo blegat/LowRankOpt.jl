@@ -233,6 +233,13 @@ function test_option_default_detects_one_hot()
     return
 end
 
+# The one-hot structure is more specific than rank one.
+function test_one_hot_before_rank_one()
+    model = _build(true; detect_one_hot = true)
+    @test eltype(only(model.A).values) <: LRO._OneHotFactorization
+    return
+end
+
 # An off-diagonal entry or a variable in two diagonal entries is not
 # one-hot.
 function test_not_one_hot()
