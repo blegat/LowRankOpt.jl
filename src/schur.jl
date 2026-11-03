@@ -396,9 +396,10 @@ struct _Selection{I<:AbstractVector{Int}}
     index::I
 end
 
-# Component `Aⱼ = wⱼ * U[j, :] * U[j, :]'` where `U` is either a `Matrix` or
-# a `_Selection`. For a `Matrix` factor, `UL` and `UR` store `U * L` and
-# `U * R` and `gram` and `gram_right` are `n × n` workspaces.
+# Component `Aⱼ = wⱼ * U[j, :] * U[j, :]'` where `U` is either a `Matrix`, a
+# `SparseMatrixCSC` or a `_Selection`. For a `Matrix` or `SparseMatrixCSC`
+# factor, `UL` and `UR` store `U * L` and `U * R` and `gram` and `gram_right`
+# are `n × n` workspaces.
 struct _RankOneSchurComponent{T,C,F}
     component::C
     U::Vector{F}
@@ -411,7 +412,7 @@ end
 
 function _RankOneSchurComponent(
     component,
-    U::Vector{Matrix{T}},
+    U::Vector{<:AbstractMatrix{T}},
     weights::Matrix{T},
 ) where {T}
     n = size(weights, 1)
@@ -419,8 +420,8 @@ function _RankOneSchurComponent(
         component,
         U,
         weights,
-        similar.(U),
-        similar.(U),
+        [zeros(T, size(Ui)) for Ui in U],
+        [zeros(T, size(Ui)) for Ui in U],
         zeros(T, n, n),
         zeros(T, n, n),
     )
@@ -535,6 +536,13 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
     )
 end
 
+# The products `U * L` and `UL * U'` with an `n × d` factor `U` take
+# `O(nnz(U) * (d + n))` operations if `U` is sparse and `O(n * d * (d + n))`
+# if `U` is dense. The factor is sparse if its density is below
+# `1 / _SPARSE_FACTOR_RATIO`. The dense products are done by BLAS so the
+# ratio was estimated to be about 35 with a multithreaded BLAS.
+const _SPARSE_FACTOR_RATIO = 32
+
 function _schur_component(
     component::BlockColumns{<:_RankOneOrZeros{T}},
     model::Model{T},
@@ -547,6 +555,9 @@ function _schur_component(
         Ui, weights[:, slot] =
             _rank_one_factors(component.values, slot, model.msizes[i])
         push!(U, Ui)
+    end
+    if _SPARSE_FACTOR_RATIO * sum(_nnz, U) < sum(length, U)
+        U = SparseArrays.sparse.(U)
     end
     return _RankOneSchurComponent(component, U, weights)
 end
@@ -570,13 +581,13 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
 end
 
 # `U * M` for a scaling matrix `M`
-_prepare_rows!(UM, U::Matrix, M) = LinearAlgebra.mul!(UM, U, M)
+_prepare_rows!(UM, U::AbstractMatrix, M) = LinearAlgebra.mul!(UM, U, M)
 _prepare_rows!(_, ::_Selection, _) = nothing
-_scaled_rows(::Matrix, UM, _) = UM
+_scaled_rows(::AbstractMatrix, UM, _) = UM
 _scaled_rows(U::_Selection, _, M) = view(M, U.index, :)
 
 # `rows * U'`
-_gram!(G, rows, U::Matrix) = LinearAlgebra.mul!(G, rows, U')
+_gram!(G, rows, U::AbstractMatrix) = LinearAlgebra.mul!(G, rows, U')
 _gram!(_, rows, U::_Selection) = view(rows, :, U.index)
 
 function _left_rows(a::_RankOneSchurComponent, slot, L)
@@ -700,10 +711,11 @@ function _add_schur_pair!(
 end
 
 # The workspaces of a `_Selection` component are empty so the products
-# with a `Matrix` component use the workspaces of the latter.
+# with a `Matrix` or `SparseMatrixCSC` component use the workspaces of the
+# latter.
 function _add_schur_pair!(
     a::_RankOneSchurComponent{T,C,<:_Selection},
-    b::_RankOneSchurComponent{T,D,Matrix{T}},
+    b::_RankOneSchurComponent{T,D,<:AbstractMatrix{T}},
     args...,
 ) where {T,C,D}
     return _add_schur_pair!(b, a, args...)
@@ -921,7 +933,7 @@ function _add_rank_one_matvec!(
 end
 function _add_rank_one_matvec!(
     a::_RankOneSchurComponent{T,C,<:_Selection},
-    b::_RankOneSchurComponent{T,D,Matrix{T}},
+    b::_RankOneSchurComponent{T,D,<:AbstractMatrix{T}},
     args...,
 ) where {T,C,D}
     return _add_rank_one_matvec!(b, a, args...)
