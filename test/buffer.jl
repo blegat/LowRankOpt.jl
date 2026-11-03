@@ -5,7 +5,11 @@ using JuMP, Dualization
 include("diff_check.jl")
 
 # Test with zero Ai matrices
-function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
+function _test_zero_Ai(
+    all_zero::Bool,
+    matrix_in_objective::Bool,
+    detect_rank_one::Bool,
+)
     model = Model(dual_optimizer(LRO.Optimizer))
     @variable(model, x[1:2] in MOI.Nonnegatives(2))
     @variable(model, X[1:2, 1:2] in PSDCone())
@@ -21,6 +25,8 @@ function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
         @objective(model, Max, x[1])
     end
     set_attribute(model, "solver", ConvexSolver)
+    # The matrix of `sum(X) == 2` is the rank-one all-ones matrix
+    set_attribute(model, "detect_rank_one", detect_rank_one)
     optimize!(model)
     b = _backend(model)
     T = Float64
@@ -33,14 +39,19 @@ function _test_zero_Ai(all_zero::Bool, matrix_in_objective::Bool)
         # Missing entries of a component use `Int` axes, unlike the `Int64`
         # ones built by the MOI wrapper, which differ on 32-bit systems.
         ZInt = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
-        @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
+        if detect_rank_one
+            R = LRO._SparseRankOne{T}
+            @test only(b.model.A).values isa Matrix{Union{Z,R}}
+        else
+            @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
+        end
     end
     i = LRO.MatrixIndex(1)
     @test iszero(LRO.jac(b.model, 1, i))
     @test iszero(LRO.jac(b.model, 2, i))
     @test iszero(LRO.jac(b.model, 3, i)) == all_zero
     if !all_zero
-        @test LRO.jac(b.model, 3, i) isa S
+        @test LRO.jac(b.model, 3, i) isa (detect_rank_one ? R : S)
         @test iszero(LRO.jac(b.model, 4, i))
     end
     buf = LRO.BufferedModelForSchur(b.model, 1)
@@ -58,7 +69,10 @@ function test_zero_Ai()
     @testset "all_zero=$all_zero" for all_zero in [false, true]
         @testset "matrix_in_objective=$matrix_in_objective" for matrix_in_objective in
                                                                 [false, true]
-            _test_zero_Ai(all_zero, matrix_in_objective)
+            @testset "detect_rank_one=$detect_rank_one" for detect_rank_one in
+                                                            [false, true]
+                _test_zero_Ai(all_zero, matrix_in_objective, detect_rank_one)
+            end
         end
     end
     return

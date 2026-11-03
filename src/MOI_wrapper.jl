@@ -336,7 +336,7 @@ function _add_constraints(
         # Same as for `one_hot`, the rank-one structure is then the same as
         # if the matrices were given as rank-one factorizations, see the
         # "Explicit structure" section of the docstring of `one_hot`.
-        if !one_hot && get(dest.options, "detect_rank_one", false)
+        if !one_hot && get(dest.options, "detect_rank_one", true)
             for col in axes(A, 2)[2:end]
                 _detect_rank_one!(A[lmi_id, col])
             end

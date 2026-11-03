@@ -174,7 +174,9 @@ This is the case for instance of the MAX-CUT constraints `Xᵢᵢ = 1`.
 Giving these matrices as a `MOI.VectorAffineFunction` in
 `MOI.PositiveSemidefiniteConeTriangle` instead uses the generic sparse
 representation, unless they are detected by the `"detect_one_hot"`
-option of `LowRankOpt.Optimizer`, which is `true` by default.
+option of `LowRankOpt.Optimizer`, which is `true` by default. Similarly,
+the rank-one matrices of the other constraints are detected by the
+`"detect_rank_one"` option, which is also `true` by default.
 
 The constraints are currently given one by one. Ideally, the group of
 constraints, e.g., `Xᵢᵢ = 1` for `i in Base.OneTo(d)`, would be given at
