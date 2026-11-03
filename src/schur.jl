@@ -478,6 +478,33 @@ function _schur_component(
     return _RankOneSchurComponent(component, U, weights)
 end
 
+# Ratio between the time of an operation of the pairs of sparse matrices of
+# `_add_sparse_component!` and the time of a flop of the dense matrix product
+# `L Aᵢ R`. The former accesses `L` and `R` at random positions while the
+# latter is done by BLAS. It was estimated to be about 170 on `thetaG51` with a
+# multithreaded BLAS, so this is only a rough estimate.
+const _DENSE_COST_FACTOR = 100
+
+# Number of constraints, in the order `σ` of decreasing number of nonzeros,
+# for which `_add_sparse_component!` forms the dense matrix `L Aᵢ R`. This
+# needs `O(d³)` operations while the inner products `⟨Aᵢ, L Aⱼ R⟩` with the
+# remaining sparse matrices `Aⱼ` need `O(nnz(Aᵢ) * ∑ⱼ nnz(Aⱼ))` operations.
+# As the latter decreases along `σ`, the dense constraints are a prefix of `σ`.
+# The constraints with at most `κ` nonzeros are never dense, as in [FKN97].
+function _last_dense(counts, σ, d, κ)
+    remaining = sum(counts; init = 0)
+    last = 0
+    for i in σ
+        if counts[i] <= κ ||
+           _DENSE_COST_FACTOR * float(counts[i]) * remaining < float(d)^3
+            break
+        end
+        last += 1
+        remaining -= counts[i]
+    end
+    return last
+end
+
 function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T}
     n, p = size(component.values)
     permutation = Matrix{Int}(undef, n, p)
@@ -488,7 +515,8 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
         column = view(component.values, :, slot)
         counts = _nnz.(column)
         permutation[:, slot] = sortperm(counts; rev = true)
-        last_dense[slot] = count(>(κ), counts)
+        last_dense[slot] =
+            _last_dense(counts, view(permutation, :, slot), model.msizes[i], κ)
         sparse[slot] = all(
             A -> A isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros},
             column,
