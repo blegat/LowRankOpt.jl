@@ -121,6 +121,23 @@ function test_sparse_regimes()
     end
 end
 
+# The dense matrix `L Aᵢ R` is only formed when this is cheaper than the
+# inner products with the remaining sparse matrices. Like `thetaG51`, the
+# trace constraint is dense while the rank-one constraints with 9 nonzeros
+# are not even though they have more than `κ = 8` nonzeros.
+function test_last_dense()
+    d = 1001
+    counts = [fill(1, 1001); 1001; fill(9, 5909)]
+    σ = sortperm(counts; rev = true)
+    @test LRO._last_dense(counts, σ, d, 8) == 1
+    @test LRO._last_dense(counts, σ, d, 2000) == 0
+    # For small matrices, the dense product is cheap
+    @test LRO._last_dense(counts, σ, 10, 8) == 5910
+    # The last matrices with one nonzero are cheaper with the sparse path
+    @test 5910 < LRO._last_dense(counts, σ, 10, 0) < length(counts)
+    return
+end
+
 _one_hot(i, d, s) = LRO.Factorization(LRO.one_hot(Float64, i, d), s)
 
 # The max-cut constraints `Xⱼⱼ = 1` are one-hot with the identity index.
