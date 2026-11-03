@@ -469,6 +469,11 @@ function LinearAlgebra.dot(a::Factorization, b::Factorization)
     return sum(VtU)
 end
 
+# The `AbstractMatrix` fallback would go through every entry with `getindex`
+function LinearAlgebra.norm(A::Factorization)
+    return sqrt(real(LinearAlgebra.dot(A, A)))
+end
+
 function LinearAlgebra.dot(a::Factorization, b::AsymmetricFactorization)
     # `⟨XΛX', UΣV'⟩ = ⟨U'XΛ, ΣV'X⟩`
     UtX = left_factor(b)' * a.factor

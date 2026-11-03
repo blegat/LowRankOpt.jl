@@ -78,6 +78,14 @@ function test_dot()
     end
 end
 
+function test_norm()
+    for A in _sample_matrices()
+        if A isa LRO.Factorization
+            @test norm(A) ≈ norm(Matrix(A))
+        end
+    end
+end
+
 # Rank-one factorizations with a 0-dimensional `Array` scaling, as built by
 # `LRO.rank_one`.
 function test_dot_rank_one_array_scaling()
