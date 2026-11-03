@@ -210,7 +210,14 @@ function test_component_pairs()
         [sparse(Symmetric(sprandn(rng, 3, 3, 0.5))) for j in 1:m],
         2,
     )
-    diagonal = _block_columns([2], [Diagonal(randn(rng, 4)) for j in 1:m], 2)
+    # The `Zeros` entry is a non-sparse pair with the rank-one components
+    Z = FillArrays.Zeros{Float64}(4, 4)
+    D = Diagonal{Float64,Vector{Float64}}
+    diagonal = _block_columns(
+        [2],
+        Union{typeof(Z),D}[j == 1 ? Z : Diagonal(randn(rng, 4)) for j in 1:m],
+        2,
+    )
     low_rank = _block_columns(
         [2],
         [LRO.Factorization(randn(rng, 4, 2), randn(rng, 2)) for j in 1:m],

@@ -777,6 +777,10 @@ function _add_schur_pair!(
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
     left, right = _left_rows(a, ia, L), _right_rows(a, ia, L, R)
+    if b.sparse[ib]
+        _add_sparse_rank_one_pair!(a, ia, b.jacobian[ib], left, right, H)
+        return nothing
+    end
     column = view(b.component.values, :, ib)
     for j in axes(H, 1)
         u, v = view(right, j, :), view(left, j, :)
@@ -788,6 +792,31 @@ function _add_schur_pair!(
     end
     return nothing
 end
+
+# Same as `_add_schur_pair!` for a sparse component whose matrices `Bₖ` are the
+# columns of the vectorized Jacobian `J` documented in `buffer_for_jprod`.
+# `(R uⱼ)' Bₖ (L uⱼ)` takes `O(nnz(Bₖ))` operations while `_bilinear_form`
+# takes `O(d + nnz(Bₖ))` operations as it iterates over the columns of `Bₖ`.
+function _add_sparse_rank_one_pair!(a, ia, J, left, right, H)
+    d = size(left, 2)
+    rows, values = SparseArrays.rowvals(J), SparseArrays.nonzeros(J)
+    for j in axes(H, 1)
+        weight = a.weights[j, ia]
+        iszero(weight) && continue
+        for k in axes(H, 2)
+            value = zero(eltype(H))
+            for l in SparseArrays.nzrange(J, k)
+                q, p = divrem(rows[l] - 1, d)
+                value += right[j, p+1] * values[l] * left[j, q+1]
+            end
+            value *= weight
+            H[j, k] += value
+            H[k, j] += value
+        end
+    end
+    return nothing
+end
+
 function _add_schur_pair!(
     a::_GeneralSchurComponent,
     b::_RankOneSchurComponent,
