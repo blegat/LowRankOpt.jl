@@ -54,6 +54,37 @@ function _dot(
     return result
 end
 
+# Computes `tr(A L B R)` for symmetric `d × d` matrices `A` and `B` given as the
+# columns `a` and `b` of the vectorized Jacobian `J` documented in
+# `buffer_for_jprod`. With `tr(A L B R) = ∑ A[p, q] L[q, r] B[r, s] R[s, p]`,
+# this takes `O(nnz(A) * nnz(B))` operations while iterating over the columns
+# of `A` and `B` as in the method above takes `O(d)` operations per nonzero
+# column of `A`.
+function _dot(
+    J::SparseArrays.SparseMatrixCSC,
+    a::Integer,
+    b::Integer,
+    L::AbstractMatrix,
+    R::AbstractMatrix,
+)
+    d = LinearAlgebra.checksquare(L)
+    @assert LinearAlgebra.checksquare(R) == d
+    @assert size(J, 1) == d^2
+    rows, values = SparseArrays.rowvals(J), SparseArrays.nonzeros(J)
+    result = zero(eltype(J))
+    # After these asserts, we know that the row and column indices of `A` and
+    # `B` are in `1:d` so we can safely use `@inbounds`
+    @inbounds for k in SparseArrays.nzrange(J, a)
+        q, p = divrem(rows[k] - 1, d)
+        Apq = values[k]
+        for l in SparseArrays.nzrange(J, b)
+            s, r = divrem(rows[l] - 1, d)
+            result += Apq * L[q+1, r+1] * values[l] * R[s+1, p+1]
+        end
+    end
+    return result
+end
+
 _nnz(::FillArrays.Zeros) = 0
 _nnz(A::SparseArrays.SparseMatrixCSC) = SparseArrays.nnz(A)
 
@@ -124,7 +155,7 @@ function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
                         j = σ[jj, slot]
                         Aj = column[j]
                         if !iszero(_nnz(Aj))
-                            ttt = _dot(Ai, Aj, L, R)
+                            ttt = _dot(workspace.jacobian[slot], i, j, L, R)
                             H[i, j] += ttt
                             if i != j
                                 H[j, i] += ttt
