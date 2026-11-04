@@ -41,7 +41,7 @@ function _test_zero_Ai(
         ZInt = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
         if detect_rank_one
             R = LRO._SparseRankOne{T}
-            @test only(b.model.A).values isa Matrix{Union{Z,R}}
+            @test only(b.model.A).values isa Matrix{Union{ZInt,R}}
         else
             @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
         end
