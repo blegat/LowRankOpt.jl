@@ -109,6 +109,8 @@ block needs no matrix product.
 By default, `LRO.Optimizer` also detects this structure when the constraint is given as
 a `MOI.VectorAffineFunction` in `MOI.PositiveSemidefiniteConeTriangle`; use
 `set_attribute(model, "detect_one_hot", false)` to disable it.
+Similarly, rank-one constraint matrices are detected by default; use
+`set_attribute(model, "detect_rank_one", false)` to disable it.
 See the docstring of `LRO.one_hot` for more details.
 
 The solvers that support `LRO.SetDotProducts` are:

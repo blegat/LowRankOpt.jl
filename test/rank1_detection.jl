@@ -175,9 +175,23 @@ const _SDPA = """
 2 1 2 2 1.0
 """
 
-function _build(detect; detect_one_hot = false)
+# Same as `_SDPA` except that `F₂` is the identity which is not rank one
+const _SDPA_MIXED = """
+2
+1
+2
+1.0 1.0
+0 1 1 1 2.0
+0 1 2 2 2.0
+0 1 1 2 1.0
+1 1 1 1 1.0
+2 1 1 1 1.0
+2 1 2 2 1.0
+"""
+
+function _build(detect; detect_one_hot = false, sdpa = _SDPA)
     path = tempname() * ".dat-s"
-    write(path, _SDPA)
+    write(path, sdpa)
     src = MOI.FileFormats.SDPA.Model{Float64}()
     MOI.read_from_file(src, path)
     rm(path)
@@ -185,7 +199,9 @@ function _build(detect; detect_one_hot = false)
     LRO.Bridges.add_all_bridges(backend(model).optimizer, Float64)
     MOI.copy_to(backend(model), src)
     set_attribute(model, "solver", ConvexSolver)
-    set_attribute(model, "detect_rank_one", detect)
+    if !isnothing(detect)
+        set_attribute(model, "detect_rank_one", detect)
+    end
     if !isnothing(detect_one_hot)
         set_attribute(model, "detect_one_hot", detect_one_hot)
     end
@@ -193,9 +209,26 @@ function _build(detect; detect_one_hot = false)
     return unsafe_backend(model).model
 end
 
-function test_option_default_keeps_sparse()
+function test_option_disabled_keeps_sparse()
     model = _build(false)
     @test eltype(only(model.A).values) <: SparseMatrixCSC
+    return
+end
+
+# If only some of the matrices of the LMI are rank one, the LMI has both a
+# rank-one and a sparse component
+function test_option_mixed()
+    model = _build(true; sdpa = _SDPA_MIXED)
+    @test length(model.A) == 2
+    for M in (SparseMatrixCSC, LRO.Factorization)
+        @test count(c -> any(A -> A isa M, c.values), model.A) == 1
+    end
+    return
+end
+
+function test_option_default_detects_rank_one()
+    model = _build(nothing)
+    @test eltype(only(model.A).values) <: LRO.Factorization
     return
 end
 
