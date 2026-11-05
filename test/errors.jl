@@ -66,6 +66,17 @@ end
         err = LRO.errors(model, xx; y = [0.0], dual_slack = ss)
         @test err[3] == 0
         @test err[4] == 1 / 3
+        # The Cholesky factorization certifies the positive definite `x` while
+        # the indefinite slack falls back to the eigenvalues.
+        work = [LRO.EigenWorkspace(zeros(d, d)) for d in model.msizes]
+        @test LRO.errors(
+            model,
+            xx;
+            y = [0.0],
+            dual_slack = ss,
+            workspace = work,
+        ) == err
+        @test buffered_errors_allocations(model, xx, ss, rr, work, [0.0]) == 0
 
         # A nonzero equation residual does not make a feasible slack infeasible.
         rr[LRO.ScalarIndex] .= 6

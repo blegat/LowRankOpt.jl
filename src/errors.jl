@@ -13,25 +13,37 @@
     isempty(X) && return (err2, err3, err4, err6, C_norm)
     C = grad(model, i)
     C_norm = LinearAlgebra.norm((C_norm, LinearAlgebra.norm(C, p)), p)
-    min_x = i === ScalarIndex ? minimum(X) : matrix_eigmin(X, i, workspace)
+    min_x = i === ScalarIndex ? minimum(X) : negative_eigmin(X, i, workspace)
     err2 = max(err2, -min_x)
     if !isnothing(dual_err)
         err3 = hypot(err3, LinearAlgebra.norm(dual_err[i]))
     end
     if !isnothing(dual_slack)
         S = dual_slack[i]
-        min_s = i === ScalarIndex ? minimum(S) : matrix_eigmin(S, i, workspace)
+        min_s =
+            i === ScalarIndex ? minimum(S) : negative_eigmin(S, i, workspace)
         err4 = max(err4, -min_s)
         err6 += LinearAlgebra.dot(S, X)
     end
     return (err2, err3, err4, err6, C_norm)
 end
 
-function matrix_eigmin(A, ::MatrixIndex, ::Nothing)
-    return LinearAlgebra.eigmin(LinearAlgebra.Symmetric(A))
+# The errors only use the minimum eigenvalue when it is negative so we return
+# `min(eigmin(A), 0)`.
+function negative_eigmin(A, ::MatrixIndex, ::Nothing)
+    return min(LinearAlgebra.eigmin(LinearAlgebra.Symmetric(A)), 0)
 end
-function matrix_eigmin(A, i::MatrixIndex, workspace::Vector{<:EigenWorkspace})
-    return eigmin!(workspace[i.value], A)
+function negative_eigmin(A, i::MatrixIndex, workspace::Vector{<:EigenWorkspace})
+    ws = workspace[i.value]
+    # A Cholesky factorization is several times cheaper than the eigenvalues
+    # and certifies that `A` is positive definite, as for the iterates of
+    # interior-point methods.
+    copyto!(ws.scratch, A)
+    U = LinearAlgebra.Symmetric(ws.scratch, :U)
+    if LinearAlgebra.issuccess(LinearAlgebra.cholesky!(U; check = false))
+        return zero(eltype(ws.scratch))
+    end
+    return min(eigmin!(ws, A), 0)
 end
 
 """
