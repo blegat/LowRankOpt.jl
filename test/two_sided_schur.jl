@@ -190,6 +190,31 @@ function test_one_hot_not_explicit()
     @test only(buffer.schur_buffer[3]).U[1] isa Matrix
 end
 
+# Rank-one matrices whose factors have few nonzeros, as the edge constraints
+# of the Lovász theta number, have a sparse factor `U`.
+function test_sparse_rank_one_factors()
+    rng = MersenneTwister(4)
+    d, m = 100, 6
+    entries = AbstractMatrix{Float64}[
+        (u = sparsevec([j, j + 1], randn(rng, 2), d); sparse(u * u')) for
+        j in 1:m
+    ]
+    entries[2] = FillArrays.Zeros{Float64}(d, d)
+    rank_one = LRO.detect_rank_one(reshape(entries, 1, m))
+    one_hot = _block_columns([1], [_one_hot(j, d, Float64(j)) for j in 1:m], 1)
+    model =
+        _model([spzeros(d, d)], (rank_one..., one_hot), zeros(m); scalars = 1)
+    buffer = _test_schur(model; nscalars = 1)
+    @test buffer.schur_buffer[3][1].U[1] isa SparseMatrixCSC
+    @test buffer.schur_buffer[3][2].U[1] isa LRO._Selection
+    # Only the one-hot and rank-one components so `eval_schur_complement!`
+    # uses `_add_component_matvec!`.
+    model = _model([spzeros(d, d)], (one_hot, rank_one...), zeros(m))
+    buffer = _test_schur(model)
+    @test buffer.schur_buffer[3][2].U[1] isa SparseMatrixCSC
+    return
+end
+
 # Every pair of component kinds on the same PSD blocks: one-hot, dense
 # rank-one, sparse, diagonal and low-rank.
 function test_component_pairs()
