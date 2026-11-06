@@ -212,6 +212,27 @@ function test_sparse_rank_one_factors()
     model = _model([spzeros(d, d)], (one_hot, rank_one...), zeros(m))
     buffer = _test_schur(model)
     @test buffer.schur_buffer[3][2].U[1] isa SparseMatrixCSC
+    # Pairs of distinct components whose second one has sparse factors, after
+    # a component with dense or sparse factors.
+    dense = _block_columns(
+        [1],
+        [LRO.Factorization(randn(rng, d), Float64(j)) for j in 1:m],
+        1,
+    )
+    other = LRO.detect_rank_one(
+        reshape(
+            AbstractMatrix{Float64}[
+                (u = sparsevec([j, d - j], randn(rng, 2), d); sparse(u * u')) for j in 1:m
+            ],
+            1,
+            m,
+        ),
+    )
+    model = _model([spzeros(d, d)], (dense, rank_one..., other...), zeros(m))
+    buffer = _test_schur(model)
+    @test buffer.schur_buffer[3][1].U[1] isa Matrix
+    @test buffer.schur_buffer[3][2].U[1] isa SparseMatrixCSC
+    @test buffer.schur_buffer[3][3].U[1] isa SparseMatrixCSC
     return
 end
 
