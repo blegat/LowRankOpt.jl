@@ -5,6 +5,15 @@ using Test, LinearAlgebra
 import GenericLinearAlgebra
 import LowRankOpt as LRO
 
+# Symmetric operator given by its products only
+struct Operator{M}
+    matrix::M
+end
+
+function LinearAlgebra.mul!(w, op::Operator, v)
+    return LinearAlgebra.mul!(w, op.matrix, v)
+end
+
 function check_workspace(::Type{T}) where {T}
     A = T[2 1 0; 1 2 0; 0 0 -1]
     expected = T[-1, 1, 3]
@@ -40,6 +49,7 @@ function check_workspace(::Type{T}) where {T}
         @test LRO.eigmin!(workspace, input) ≈ first(spectrum)
         # The Krylov subspace is the whole space after 3 iterations.
         @test LRO.lanczos_eigmin!(workspace, input) ≈ first(spectrum)
+        @test LRO.lanczos_eigmin!(workspace, Operator(input)) ≈ first(spectrum)
         @test input == original
         @test workspace.scratch === scratch
     end
@@ -96,6 +106,12 @@ function check_lanczos(::Type{T}) where {T}
     # Without tolerance, it does not converge within the restarts so the
     # eigenvalues are computed.
     @test LRO.lanczos_eigmin!(workspace, A; rtol = 0) ≈ -1
+    @test A == original
+    # The same with products only, the fallback forms the matrix.
+    op = Operator(A)
+    @test LRO.lanczos_eigmin!(workspace, op; rtol = T(1e-4)) ≈ -1 rtol = 1e-3
+    @test LRO.lanczos_eigmin!(workspace, op; rtol = 0) ≈ -1
+    @test lanczos_allocations(workspace, op) == 0
     @test A == original
     return
 end

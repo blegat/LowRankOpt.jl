@@ -180,8 +180,8 @@ end
 """
     lanczos_eigmin!(workspace::EigenWorkspace, A; rtol = 1e-3)
 
-Return an estimate `θ - r` of the minimum eigenvalue of the symmetric matrix
-`A` where `θ` is the smallest Ritz value of a Lanczos iteration with full
+Return an estimate `θ - r` of the minimum eigenvalue of `A` where `θ` is the
+smallest Ritz value of a Lanczos iteration with full
 reorthogonalization and `r` is the norm of its residual. An eigenvalue of `A`
 lies within `r` of `θ` and the minimum eigenvalue is at most `θ` so the
 estimate is usually below the minimum eigenvalue. It is above when the Krylov
@@ -193,6 +193,12 @@ cycles, the minimum eigenvalue is computed by `eigmin!` instead.
 Unlike `eigmin!`, the cost does not include the `O(n³)` reduction to
 tridiagonal form but only one product with `A` per iteration, which makes it
 suitable for the step lengths of interior-point methods.
+
+`A` is either a symmetric matrix, of which only the upper triangle is used, or
+a symmetric linear operator of the size of the workspace supporting
+`LinearAlgebra.mul!(w, A, v)`. Products with an operator avoid forming
+matrices such as `L \\ Δ / L'` whose minimum eigenvalue gives the step length.
+For an operator, the fallback forms its matrix with one product per column.
 """
 function lanczos_eigmin!(
     ws::EigenWorkspace{T},
@@ -230,19 +236,36 @@ function lanczos_eigmin!(
         copyto!(q, y)
         LinearAlgebra.normalize!(q)
     end
-    return eigmin!(ws, A)
+    return _eigmin_fallback!(ws, A)
 end
-lanczos_eigmin!(ws::EigenWorkspace, A; rtol = nothing) = eigmin!(ws, A)
+function lanczos_eigmin!(ws::EigenWorkspace, A; rtol = nothing)
+    return _eigmin_fallback!(ws, A)
+end
+
+_eigmin_fallback!(ws::EigenWorkspace, A::AbstractMatrix) = eigmin!(ws, A)
+function _eigmin_fallback!(ws::EigenWorkspace, A)
+    e = view(ws.krylov, :, 1)
+    for j in axes(ws.scratch, 2)
+        fill!(e, false)
+        e[j] = true
+        LinearAlgebra.mul!(view(ws.scratch, :, j), A, e)
+    end
+    return minimum(first(eigen!(ws, ws.scratch)))
+end
+
+_symmetric_operator(A::AbstractMatrix) = LinearAlgebra.Symmetric(A, :U)
+_symmetric_operator(A) = A
 
 # Lanczos iteration from the first column of `ws.krylov`. Return the estimate
 # `θ - r` if it converges and `nothing` otherwise.
 function _lanczos_cycle!(ws::EigenWorkspace{T}, A, rtol) where {T}
+    op = _symmetric_operator(A)
     Q = ws.krylov
     n = size(Q, 1)
     scale = zero(T)
     for j in eachindex(ws.alpha)
         w = view(Q, :, j + 1)
-        LinearAlgebra.mul!(w, LinearAlgebra.Symmetric(A, :U), view(Q, :, j))
+        LinearAlgebra.mul!(w, op, view(Q, :, j))
         ws.alpha[j] = LinearAlgebra.dot(view(Q, :, j), w)
         scale = max(scale, abs(ws.alpha[j]))
         # Two passes of classical Gram-Schmidt are enough to make `w`
