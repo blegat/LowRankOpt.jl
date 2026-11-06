@@ -38,10 +38,41 @@ function check_workspace(::Type{T}) where {T}
             @test vectors === nothing
         end
         @test LRO.eigmin!(workspace, input) ≈ first(spectrum)
+        # The Krylov subspace is the whole space after 3 iterations.
+        @test LRO.lanczos_eigmin!(workspace, input) ≈ first(spectrum)
         @test input == original
         @test workspace.scratch === scratch
     end
     return
+end
+
+function check_lanczos(::Type{T}) where {T}
+    n = 100
+    Q = Matrix(qr(sin.(1:n) .* cos.((1:n)' ./ 3)).Q)
+    matrix(spectrum) = Matrix(Symmetric(Q * Diagonal(spectrum) * Q'))
+    workspace = LRO.EigenWorkspace(zeros(T, n, n))
+    # The isolated minimum eigenvalue converges quickly.
+    A = matrix([-T(1); range(T(1), T(2); length = n - 1)])
+    original = copy(A)
+    estimate = LRO.lanczos_eigmin!(workspace, A)
+    # The estimate is `θ - r` with `r ≤ 0.02 * abs(θ)` and `θ ≥ -1`.
+    @test -1.03 <= estimate <= -1
+    @test A == original
+    # Without tolerance, the evenly spread spectrum does not converge within
+    # the iterations so the eigenvalues are computed.
+    A = matrix(range(-T(1), T(1); length = n))
+    original = copy(A)
+    @test LRO.lanczos_eigmin!(workspace, A; rtol = 0) ≈ -1
+    @test A == original
+    return
+end
+
+@testset "Lanczos minimum eigenvalue" begin
+    for T in (Float32, Float64)
+        @testset "$T" begin
+            check_lanczos(T)
+        end
+    end
 end
 
 @testset "Symmetric eigenvalue workspace" begin
