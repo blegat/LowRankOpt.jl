@@ -236,6 +236,21 @@ function test_sparse_rank_one_factors()
     return
 end
 
+# The tests run on a single thread so the parts run one after the other, but
+# with the same partition as with several threads.
+function test_foreach_chunk()
+    for (n, expected) in
+        ((1, [2:8]), (3, [2:3, 4:5, 6:8]), (7, [i:i for i in 2:8]))
+        chunks = Vector{UnitRange{Int}}(undef, n)
+        LRO._foreach_chunk(2:8, n) do c, columns
+            chunks[c] = columns
+            return
+        end
+        @test chunks == expected
+    end
+    return
+end
+
 # Every pair of component kinds on the same PSD blocks: one-hot, dense
 # rank-one, sparse, diagonal and low-rank.
 function test_component_pairs()

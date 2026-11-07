@@ -590,8 +590,38 @@ function buffer_for_schur_complement(model::Model{T}, κ) where {T}
     return AW, WAW, components, factor_work
 end
 
+# Calls `f(c, columns)` for each part `c` of a partition of `indices` in `n`
+# contiguous ranges `columns`, in parallel when Julia has several threads.
+# `Threads.@threads` allocates the tasks so a single part calls `f` directly.
+function _foreach_chunk(
+    f::F,
+    indices::AbstractUnitRange,
+    n = min(Threads.nthreads(), length(indices)),
+) where {F}
+    if n <= 1
+        f(1, indices)
+        return nothing
+    end
+    Threads.@threads for c in 1:n
+        first_index = first(indices) + div((c - 1) * length(indices), n)
+        last_index = first(indices) + div(c * length(indices), n) - 1
+        f(c, first_index:last_index)
+    end
+    return nothing
+end
+
 # `U * M` for a scaling matrix `M`
 _prepare_rows!(UM, U::AbstractMatrix, M) = LinearAlgebra.mul!(UM, U, M)
+# The product of `SparseArrays` is not multithreaded unlike the one of BLAS.
+# The column views of a matrix that is not strided may fall back to the
+# generic `getindex` so it uses the single-threaded product.
+function _prepare_rows!(UM, U::SparseArrays.SparseMatrixCSC, M::StridedMatrix)
+    _foreach_chunk(axes(M, 2)) do _, columns
+        LinearAlgebra.mul!(view(UM, :, columns), U, view(M, :, columns))
+        return
+    end
+    return nothing
+end
 _prepare_rows!(_, ::_Selection, _) = nothing
 _scaled_rows(::AbstractMatrix, UM, _) = UM
 _scaled_rows(U::_Selection, _, M) = view(M, U.index, :)
@@ -739,22 +769,71 @@ function _add_schur_pair!(
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
     left, right = _left_rows(a, ia, L), _right_rows(a, ia, L, R)
+    if !same
+        # The transposed entries `H[k, j]` of distinct columns `k` are in the
+        # same columns of `H` so the columns cannot be computed in parallel.
+        _add_sparse_rank_one_columns!(
+            H,
+            a,
+            ia,
+            b,
+            ib,
+            left,
+            right,
+            axes(H, 2),
+            1,
+            same,
+        )
+        return nothing
+    end
+    _foreach_chunk(axes(H, 2)) do c, columns
+        _add_sparse_rank_one_columns!(
+            H,
+            a,
+            ia,
+            b,
+            ib,
+            left,
+            right,
+            columns,
+            c,
+            same,
+        )
+        return
+    end
+    return nothing
+end
+
+# Columns `columns` of `_add_schur_pair!` using the columns `c` of `a.gram`
+# and `a.gram_right` as workspace.
+function _add_sparse_rank_one_columns!(
+    H,
+    a::_RankOneSchurComponent{T},
+    ia,
+    b,
+    ib,
+    left,
+    right,
+    columns,
+    c,
+    same,
+) where {T}
     V = b.U_transpose[ib]
     rows, values = SparseArrays.rowvals(V), SparseArrays.nonzeros(V)
     # `U L vₖ` and `U R vₖ`
-    l, r = view(a.gram, :, 1), view(a.gram_right, :, 1)
-    for k in axes(H, 2)
+    l, r = view(a.gram, :, c), view(a.gram_right, :, c)
+    for k in columns
         fill!(l, zero(T))
-        if R !== L
+        if right !== left
             fill!(r, zero(T))
         end
         for p in SparseArrays.nzrange(V, k)
             l .+= values[p] .* view(left, :, rows[p])
-            if R !== L
+            if right !== left
                 r .+= values[p] .* view(right, :, rows[p])
             end
         end
-        rk = R === L ? l : r
+        rk = right === left ? l : r
         for j in axes(H, 1)
             value = a.weights[j, ia] * b.weights[k, ib] * l[j] * rk[j]
             H[j, k] += value
