@@ -44,11 +44,38 @@ function check_workspace(::Type{T}) where {T}
     return
 end
 
+function eigenvectors_allocations(workspace, A)
+    return @allocated LRO.eigen!(workspace, A; vectors = true)
+end
+
+# Above 25, `syevd` uses divide and conquer, which checks the size of the work
+# arrays.
+function check_syevd(::Type{T}) where {T}
+    n = 40
+    B = randn(T, n, n)
+    input = B + B'
+    workspace = LRO.EigenWorkspace(zeros(T, n, n))
+    for _ in 1:2
+        A = copy(input)
+        values, vectors = LRO.eigen!(workspace, A; vectors = true)
+        @test vectors === A
+        @test values ≈ eigvals(Symmetric(input))
+        @test input * vectors ≈ vectors * Diagonal(values) rtol = 100eps(T)
+        @test length(workspace.syevd_work) == 1 + 6n + 2n^2
+        @test length(workspace.syevd_iwork) == 3 + 5n
+    end
+    @test eigenvectors_allocations(workspace, copy(input)) == 0
+    return
+end
+
 @testset "Symmetric eigenvalue workspace" begin
     setprecision(BigFloat, 256) do
         for T in (Float32, Float64, BigFloat)
             @testset "$T" begin
                 check_workspace(T)
+                if T != BigFloat
+                    check_syevd(T)
+                end
             end
         end
     end
