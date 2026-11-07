@@ -24,7 +24,7 @@ Dualization = "191a621a-6537-11e9-281d-650236a99e60"
 DualizationExt = "Dualization"
 
 [compat]
-FastLapackInterface = "2"
+FastLapackInterface = "2.2"
 Dualization = "0.5.10, 0.6, 0.7"
 FillArrays = "1.13"
 KrylovKit = "0.9.5, 0.10"
