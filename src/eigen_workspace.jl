@@ -24,7 +24,8 @@ end
     eigen!(workspace::EigenWorkspace, A; vectors=false, abstol=-1.0)
 
 Compute symmetric eigenvalues, optionally with eigenvectors, overwriting `A`.
-Returned arrays are borrowed until the next use of `workspace`.
+Returned arrays are borrowed until the next use of `workspace`. With
+`vectors = true`, the eigenvectors are stored in `A` and `abstol` is ignored.
 """
 function eigen!(
     ws::EigenWorkspace{T},
@@ -34,6 +35,13 @@ function eigen!(
 ) where {T<:Union{Float32,Float64}}
     lapack = ws.lapack::FastLapackInterface.HermitianEigenWs{T,Matrix{T},T}
     LinearAlgebra.LAPACK.chkuplofinite(A, 'U')
+    if vectors
+        # The divide-and-conquer algorithm of `syevd` is about twice as fast
+        # as `syevr` when the eigenvalues are clustered, as for the scaling
+        # of interior-point methods near the central path.
+        # TODO use `lapack` once FastLapackInterface supports `syevd!`
+        return LinearAlgebra.LAPACK.syevd!('V', 'U', A)
+    end
     return LinearAlgebra.LAPACK.syevr!(
         lapack,
         vectors ? 'V' : 'N',
