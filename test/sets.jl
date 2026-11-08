@@ -9,6 +9,7 @@ using Test
 import LinearAlgebra
 import MathOptInterface as MOI
 import LowRankOpt as LRO
+import Random
 
 function _test_factorization(A, B)
     @test size(A) == size(B)
@@ -123,17 +124,51 @@ function test_conversion()
 end
 
 function test_symmetrize()
-    for use_krylov in [false, true]
-        f = LRO.symmetrize_factorization([0, 0, 1], [2, 0, 0]; use_krylov)
-        σ = sortperm(f.scaling)
-        @test f.scaling[σ] ≈ [-1, 1]
-        F = f.factor[:, σ]
-        if F[1, 1] < 0
-            @test F ≈ [-1 1; 0 0; 1 1] / √2
-        else
-            @test F ≈ [1 1; 0 0; -1 1] / √2
+    f = LRO.symmetrize_factorization([0, 0, 1], [2, 0, 0])
+    σ = sortperm(f.scaling)
+    @test f.scaling[σ] ≈ [-1, 1]
+    for (j, expected) in enumerate(([1, 0, -1], [1, 0, 1]))
+        v = f.factor[:, σ[j]]
+        @test sign(v[1]) * v ≈ expected / √2
+    end
+    rng = Random.MersenneTwister(123)
+    for T in (Float32, Float64)
+        for (n, r) in ((8, 2), (4, 2), (2, 3), (1, 1), (5, 0))
+            L = randn(rng, T, n, r)
+            R = randn(rng, T, n, r)
+            _test_symmetrize(L, R)
         end
     end
+    for (L, R) in (
+        ([1, 2, 3], [2, 4, 6]),
+        (ones(5, 2), ones(5, 2)),
+        (zeros(5, 2), ones(5, 2)),
+        (zeros(3), zeros(3)),
+        (
+            Matrix{Float64}(LinearAlgebra.I, 4, 4),
+            [1 0 0 0; 0 1 0 0; 0 0 -1 0; 0 0 0 -1],
+        ),
+    )
+        _test_symmetrize(L, R)
+    end
+end
+
+function _test_symmetrize(L, R)
+    f = LRO.symmetrize_factorization(L, R)
+    expected = (L * R' + R * L') / 2
+    k = min(size(L, 1), 2size(L, 2))
+    tol = 100eps(eltype(f))
+    @test size(f.factor) == (size(L, 1), k)
+    @test length(f.scaling) == k
+    @test isapprox(Matrix(f), expected; atol = tol, rtol = tol)
+    @test isapprox(
+        f.factor' * f.factor,
+        Matrix{eltype(f)}(LinearAlgebra.I, k, k);
+        atol = tol,
+        rtol = tol,
+    )
+    @test issorted(abs.(f.scaling); rev = true)
+    return
 end
 
 function test_set_dot()
