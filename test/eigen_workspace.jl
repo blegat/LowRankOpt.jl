@@ -97,7 +97,10 @@ function check_lanczos(::Type{T}) where {T}
     # The estimate is `θ - r` with `r ≤ 1e-3 * abs(θ)` and `θ ≥ -1`.
     @test -1.002 <= estimate <= -1
     @test A == original
-    @test lanczos_allocations(workspace, A) == 0
+    # Julia v1.10 allocates in `lanczos_eigmin!` for `Float32`
+    if VERSION >= v"1.11"
+        @test lanczos_allocations(workspace, A) == 0
+    end
     # The evenly spread spectrum needs a restart to converge to `rtol = 1e-4`
     A = matrix(range(-T(1), T(1); length = n))
     original = copy(A)
@@ -111,7 +114,9 @@ function check_lanczos(::Type{T}) where {T}
     op = Operator(A)
     @test LRO.lanczos_eigmin!(workspace, op; rtol = T(1e-4)) ≈ -1 rtol = 1e-3
     @test LRO.lanczos_eigmin!(workspace, op; rtol = 0) ≈ -1
-    @test lanczos_allocations(workspace, op) == 0
+    if VERSION >= v"1.11"
+        @test lanczos_allocations(workspace, op) == 0
+    end
     @test A == original
     return
 end
