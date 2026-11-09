@@ -408,6 +408,9 @@ struct _RankOneSchurComponent{T,C,F}
     UR::Vector{Matrix{T}}
     gram::Matrix{T}
     gram_right::Matrix{T}
+    # `copy(transpose(U[i]))` for sparse factors, whose columns are the
+    # factors, and empty otherwise.
+    U_transpose::Vector{F}
 end
 
 function _RankOneSchurComponent(
@@ -424,7 +427,13 @@ function _RankOneSchurComponent(
         [zeros(T, size(Ui)) for Ui in U],
         zeros(T, n, n),
         zeros(T, n, n),
+        _transposed_factors(U),
     )
+end
+
+_transposed_factors(U) = empty(U)
+function _transposed_factors(U::Vector{<:SparseArrays.SparseMatrixCSC})
+    return [copy(transpose(Ui)) for Ui in U]
 end
 
 function _RankOneSchurComponent(
@@ -441,6 +450,7 @@ function _RankOneSchurComponent(
         empty,
         zeros(T, 0, 0),
         zeros(T, 0, 0),
+        similar(U, 0),
     )
 end
 
@@ -705,6 +715,52 @@ function _add_schur_pair!(
         H[j, k] += value
         if !same
             H[k, j] += value
+        end
+    end
+    return nothing
+end
+
+# With sparse factors `vₖ` of `b`, the column `k` of `U L V'` is the sum of
+# the few columns of `U L` selected by the nonzeros of `vₖ`. Accumulating the
+# products column by column avoids filling and reading the `n × n` matrices
+# `U L V'` and `U R V'`, which dominate the time on thetaG11.
+function _add_schur_pair!(
+    a::_RankOneSchurComponent{T,C,<:AbstractMatrix{T}},
+    b::_RankOneSchurComponent{T,D,<:SparseArrays.SparseMatrixCSC{T}},
+    i,
+    L,
+    R,
+    AW,
+    WAW,
+    work,
+    H,
+    same,
+) where {T,C,D}
+    ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
+    (iszero(ia) || iszero(ib)) && return nothing
+    left, right = _left_rows(a, ia, L), _right_rows(a, ia, L, R)
+    V = b.U_transpose[ib]
+    rows, values = SparseArrays.rowvals(V), SparseArrays.nonzeros(V)
+    # `U L vₖ` and `U R vₖ`
+    l, r = view(a.gram, :, 1), view(a.gram_right, :, 1)
+    for k in axes(H, 2)
+        fill!(l, zero(T))
+        if R !== L
+            fill!(r, zero(T))
+        end
+        for p in SparseArrays.nzrange(V, k)
+            l .+= values[p] .* view(left, :, rows[p])
+            if R !== L
+                r .+= values[p] .* view(right, :, rows[p])
+            end
+        end
+        rk = R === L ? l : r
+        for j in axes(H, 1)
+            value = a.weights[j, ia] * b.weights[k, ib] * l[j] * rk[j]
+            H[j, k] += value
+            if !same
+                H[k, j] += value
+            end
         end
     end
     return nothing
