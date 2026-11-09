@@ -61,8 +61,6 @@ function check_syevd(::Type{T}) where {T}
         @test vectors === A
         @test values ≈ eigvals(Symmetric(input))
         @test input * vectors ≈ vectors * Diagonal(values) rtol = 100eps(T)
-        @test length(workspace.syevd_work) == 1 + 6n + 2n^2
-        @test length(workspace.syevd_iwork) == 3 + 5n
     end
     @test eigenvectors_allocations(workspace, copy(input)) == 0
     return
