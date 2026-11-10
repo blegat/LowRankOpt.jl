@@ -14,7 +14,11 @@ function Base.getindex(m::AbstractFactorization, i::Int, j::Int)
     left = left_factor(m)
     right = right_factor(m)
     return sum(
-        left[i, k] * m.scaling[k] * right[j, k]' for k in eachindex(m.scaling)
+        (
+            left[i, k] * m.scaling[k] * right[j, k]' for
+            k in eachindex(m.scaling)
+        );
+        init = zero(eltype(m)),
     )
 end
 
@@ -352,6 +356,9 @@ right_factor(m::AsymmetricFactorization) = m.right
 
 Factorization corresponding to the symmetrization `(L * R' + R * L') / 2` of `L * R'`.
 
+Use a thin QR factorization of `[L R]` to reduce the eigenproblem to dimension
+at most `2size(L, 2)`, without forming the full symmetrized matrix.
+
 ## Example
 
 ```jldoctest
@@ -361,18 +368,15 @@ julia> LowRankOpt.symmetrize_factorization([1, 0], [0, 1])
  0.5  0.0
 ```
 """
-function symmetrize_factorization(L, R; use_krylov = true)
-    sym = LinearAlgebra.Symmetric((L * R' + R * L') / 2)
-    r = 2size(L, 2)
-    if use_krylov
-        eigvals, factors = KrylovKit.eigsolve(sym, r)
-        factor = reduce(hcat, factors)
-    else
-        eigvals, factor = LinearAlgebra.eigen(sym)
-    end
+function symmetrize_factorization(L, R)
+    qr = LinearAlgebra.qr([L R])
+    r = size(L, 2)
+    left = qr.R[:, 1:r]
+    right = qr.R[:, (r+1):end]
+    sym = LinearAlgebra.Symmetric((left * right' + right * left') / 2)
+    eigvals, factor = LinearAlgebra.eigen(sym)
     σ = sortperm(abs.(eigvals), rev = true)
-    keep = σ[1:r]
-    return Factorization(factor[:, keep], eigvals[keep])
+    return Factorization(Matrix(qr.Q) * factor[:, σ], eigvals[σ])
 end
 
 struct TriangleVectorization{T,M<:AbstractMatrix{T}} <: AbstractVector{T}
