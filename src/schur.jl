@@ -292,7 +292,7 @@ function _add_eval_schur_complement!(
     result,
     i::MatrixIndex,
 )
-    AW, WAW, _, _ = model.schur_buffer
+    AW, WAW, _, _ = _schur_buffer(model)
     LinearAlgebra.mul!(AW[i.value], L, Ay)
     LinearAlgebra.mul!(WAW[i.value], AW[i.value], R)
     return add_jprod!(model, WAW[i.value], result, i)
@@ -344,7 +344,7 @@ function _eval_schur_complement!(
     result,
 ) where {F}
     fill!(result, zero(eltype(result)))
-    components = model.schur_buffer[3]
+    components = _schur_buffer(model)[3]
     for i in matrix_indices(model)
         if _has_general_component(components, i.value)
             _add_eval_schur_complement!(
@@ -1046,7 +1046,7 @@ function add_schur_complement!(
     R::AbstractMatrix,
     H,
 )
-    AW, WAW, components, work = model.schur_buffer
+    AW, WAW, components, work = _schur_buffer(model)
     _prepare_components!(components, i.value, L, R)
     _add_component_pairs!(
         components,
