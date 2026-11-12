@@ -12,6 +12,11 @@ function Solver(
     dense_condition = nothing,
     kws...,
 )
+    primal = LRO.primal_model(src)
+    if length(ranks) == LRO.num_matrices(primal) &&
+       LRO.num_second_order_cones(primal) > 0
+        ranks = vcat(ranks, primal.dim.second_order_dimensions)
+    end
     model = Model{square_scalars}(LRO.dual_model(src), ranks)
     solver = sub_solver(model; kws...)
     stats = SolverCore.GenericExecutionStats(model)
@@ -37,7 +42,10 @@ function MOI.get(solver::Solver, ::LRO.ConvexTerminationStatus)
 end
 
 function MOI.get(solver::Solver, ::LRO.DualSolution)
-    return Solution(solver.stats.solution, solver.model.dim)
+    return LRO.cone_multipliers(
+        LRO.primal_model(solver.model.model),
+        Solution(solver.stats.solution, solver.model.dim),
+    )
 end
 
 # Burer-Monteiro solves the explicitly dualized model.
