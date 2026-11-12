@@ -16,7 +16,7 @@ using SparseArrays
 import LowRankOpt as LRO
 import Random
 
-# Build a tiny `LRO.Model` whose constraint matrices share the
+# Build a tiny `LRO.DualModel` whose constraint matrices share the
 # `view(U_i, j, :)` shape produced by the SOS bridge / sample-from-parent
 # rank-1 batch (`LRO._rank_one_rowview_batch`).
 function _rank1_model(::Type{T}, sizes::Vector{Int}, n::Int; seed = 0) where {T}
@@ -41,7 +41,7 @@ function _rank1_model(::Type{T}, sizes::Vector{Int}, n::Int; seed = 0) where {T}
     b = randn(rng, T, n)
     d_lin = sparsevec(Int64[], T[], 0)
     C_lin = spzeros(T, Int64, n, 0)
-    return LRO.Model(C, A, b, d_lin, C_lin, Int64.(sizes)), Us, weights
+    return LRO.DualModel(C, A, b, d_lin, C_lin, Int64.(sizes)), Us, weights
 end
 
 # Brute-force: H[j,k] = Σ_i ⟨A_{i,j}, W_i A_{i,k} W_i⟩, no rank-1 trick.
@@ -76,7 +76,7 @@ function test_single_block()
     sizes = [3]
     n = 4
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedDualModel(model, 1)
     W = _random_sym_blocks(T, sizes)
     H = zeros(T, n, n)
     LRO.add_schur_complement!(buf, LRO.MatrixIndex(1), W[1], H)
@@ -90,7 +90,7 @@ function test_multiple_blocks()
     sizes = [3, 2, 4]
     n = 5
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedDualModel(model, 1)
     W = _random_sym_blocks(T, sizes)
     H = zeros(T, n, n)
     for idx in LRO.matrix_indices(model)
@@ -106,7 +106,7 @@ function test_single_constraint()
     sizes = [3]
     n = 1
     model, Us, ws = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedDualModel(model, 1)
     W = _random_sym_blocks(T, sizes)
     H = zeros(T, n, n)
     LRO.add_schur_complement!(buf, LRO.MatrixIndex(1), W[1], H)
@@ -134,8 +134,9 @@ function test_negative_scalings()
     end
     CT = LRO.Factorization{T,Vector{T},Array{T,0}}
     C = CT[LRO.Factorization(zeros(T, 2), reshape(T[zero(T)], ()))]
-    model2 = LRO.Model(C, A, model.b, model.d_lin, model.C_lin, model.msizes)
-    buf = LRO.BufferedModelForSchur(model2, 1)
+    model2 =
+        LRO.DualModel(C, A, model.b, model.d_lin, model.C_lin, model.msizes)
+    buf = LRO.BufferedDualModel(model2, 1)
     W = _random_sym_blocks(T, sizes; seed = 7)
     H = zeros(T, n, n)
     LRO.add_schur_complement!(buf, LRO.MatrixIndex(1), W[1], H)
@@ -145,7 +146,7 @@ function test_negative_scalings()
 end
 
 # Shim supporting `W[MatrixIndex(i)]` and `W[LRO.ScalarIndex]` indexing
-# the way `LRO.VectorizedSolution` does on the solver side.
+# the way `LRO.VectorizedConeVector` does on the solver side.
 struct _WShim{T}
     blocks::Vector{Matrix{T}}
     scalars::Vector{T}
@@ -160,7 +161,7 @@ function test_eval_matches_matvec()
     sizes = [3, 2]
     n = 4
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedDualModel(model, 1)
     W_blocks = _random_sym_blocks(T, sizes)
     W = _WShim(W_blocks, T[])
     rng = Random.MersenneTwister(11)

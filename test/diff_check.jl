@@ -105,17 +105,18 @@ function diff_check(model::JuMP.AbstractModel)
 end
 
 struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
-    model::LRO.Model{T}
+    model::LRO.DualModel{T}
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
 end
 
-function ConvexSolver(model::LRO.Model)
+function ConvexSolver(src::Union{LRO.Model,LRO.DualModel})
+    model = LRO.dual_model(src)
     stats = SolverCore.GenericExecutionStats(model)
     return ConvexSolver(model, stats)
 end
 
-function LRO.MOI.get(solver::ConvexSolver, ::LRO.Solution)
-    return LRO.VectorizedSolution(solver.stats.solution, solver.model.dim)
+function LRO.MOI.get(solver::ConvexSolver, ::LRO.DualSolution)
+    return LRO.VectorizedConeVector(solver.stats.solution, solver.model.dim)
 end
 
 function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
@@ -130,7 +131,7 @@ function _alloc_schur_complement(model, i, Wi, H)
     @test 0 == @allocated LRO.add_schur_complement!(model, i, Wi, H)
 end
 
-function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
+function schur_test(model::LRO.BufferedDualModel{T}, w) where {T}
     n = model.meta.ncon
     y = rand(T, n)
 
@@ -217,20 +218,25 @@ function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
     @test dcons ≈ model.model.d_lin - model.model.C_lin' * y
 end
 
-function schur_test(model::LRO.BufferedModelForSchur{T}) where {T}
+function schur_test(model::LRO.BufferedDualModel{T}) where {T}
     w = rand(T, model.meta.nvar)
-    W = LRO.VectorizedSolution(w, model.model.dim)
+    W = LRO.VectorizedConeVector(w, model.model.dim)
     for i in LRO.matrix_indices(model)
         W[i] .= W[i] .+ W[i]'
     end
     return schur_test(model, W)
 end
 
-function schur_test(model::LRO.Model, κ)
-    return schur_test(LRO.BufferedModelForSchur(model, κ))
+function schur_test(model::LRO.DualModel, κ)
+    return schur_test(LRO.BufferedDualModel(model, κ))
 end
 
 function schur_test(model::JuMP.AbstractModel, κ)
     b = _backend(model)
     return schur_test(b.solver.model, κ)
 end
+
+function LRO.MOI.get(solver::ConvexSolver, ::LRO.PrimalSolution)
+    return solver.stats.multipliers
+end
+LRO.MOI.get(solver::ConvexSolver, ::LRO.DualObjective) = -solver.stats.objective

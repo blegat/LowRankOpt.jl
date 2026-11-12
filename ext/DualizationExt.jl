@@ -9,6 +9,6 @@ import Dualization
 import LowRankOpt
 
 Dualization.dual_attribute(attr::LowRankOpt.RawStatus) = attr
-Dualization.dual_attribute(attr::LowRankOpt.Solution) = attr
+Dualization.dual_attribute(attr::LowRankOpt.DualSolution) = attr
 
 end

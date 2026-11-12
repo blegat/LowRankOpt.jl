@@ -36,13 +36,13 @@ function _test_schur(model; κ = 1, nscalars = 0)
     rng = MersenneTwister(1)
     T = eltype(model.b)
     m = model.meta.ncon
-    buffer = LRO.BufferedModelForSchur(model, κ)
+    buffer = LRO.BufferedDualModel(model, κ)
     idx = LRO.matrix_indices(model)
-    L = LRO.ShapedSolution(
+    L = LRO.ShapedConeVector(
         rand(rng, T, nscalars),
         [_spd(rng, d) for d in model.msizes],
     )
-    R = LRO.ShapedSolution(
+    R = LRO.ShapedConeVector(
         rand(rng, T, nscalars),
         [_spd(rng, d) for d in model.msizes],
     )
@@ -89,7 +89,7 @@ function _model(C, A, b; scalars = 0)
     C_lin = sparse(
         T[iszero(scalars) ? 0 : (j + l) % 2 for j in 1:m, l in 1:scalars],
     )
-    return LRO.Model(
+    return LRO.DualModel(
         C,
         A,
         b,

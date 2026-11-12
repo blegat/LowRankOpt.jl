@@ -383,15 +383,19 @@ function MOI.copy_to(
     b = dest.max_sense ? b0 : -b0
 
     dest.model = Model(
-        _instantiate(A[:, 1]),
-        _instantiate(A[:, 2:end]),
-        b,
-        convert(
-            SparseArrays.SparseVector{T,Int64},
-            SparseArrays.sparsevec(Cd_lin.constants),
-        ),
-        C_lin,
-        msizes,
+        DualModel(
+            _instantiate(A[:, 1]),
+            _instantiate(A[:, 2:end]),
+            b,
+            convert(
+                SparseArrays.SparseVector{T,Int64},
+                SparseArrays.sparsevec(Cd_lin.constants),
+            ),
+            C_lin,
+            msizes,
+        );
+        objective_constant = dest.max_sense ? -dest.objective_constant :
+                             dest.objective_constant,
     )
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
     options = copy(dest.options)
@@ -465,11 +469,9 @@ function MOI.get(
     if status == MOI.LOCALLY_SOLVED
         status = MOI.OPTIMAL
     elseif status == MOI.LOCALLY_INFEASIBLE
-        # Since we solve the dual, we need to dualize the status
-        status = MOI.DUAL_INFEASIBLE
-    elseif status == MOI.NORM_LIMIT
-        # Since we solve the dual, we need to dualize the status
         status = MOI.INFEASIBLE
+    elseif status == MOI.NORM_LIMIT
+        status = MOI.DUAL_INFEASIBLE
     end
     return status
 end
@@ -510,8 +512,11 @@ end
 
 function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
-    val = dual_obj(optimizer.model, optimizer.solver.stats.multipliers)
-    return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
+    val = NLPModels.obj(
+        optimizer.model,
+        MOI.get(optimizer.solver, PrimalSolution()),
+    )
+    return optimizer.max_sense ? -val : val
 end
 
 function MOI.get(
@@ -520,7 +525,7 @@ function MOI.get(
     vi::MOI.VariableIndex,
 )
     MOI.check_result_index_bounds(optimizer, attr)
-    return optimizer.solver.stats.multipliers[vi.value]
+    return MOI.get(optimizer.solver, PrimalSolution())[vi.value]
 end
 
 function MOI.get(
@@ -528,8 +533,10 @@ function MOI.get(
     attr::MOI.DualObjectiveValue,
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
-    val = optimizer.solver.stats.objective
-    return optimizer.objective_constant + (optimizer.max_sense ? val : -val)
+    val =
+        MOI.get(optimizer.solver, DualObjective()) +
+        optimizer.model.objective_constant
+    return optimizer.max_sense ? -val : val
 end
 
 function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
@@ -546,10 +553,27 @@ function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
     end
 end
 
-struct Solution <: MOI.AbstractModelAttribute end
-MOI.is_set_by_optimize(::Solution) = true
-
-MOI.get(optimizer::Optimizer, attr::Solution) = MOI.get(optimizer.solver, attr)
+struct PrimalSolution <: MOI.AbstractModelAttribute end
+struct DualSolution <: MOI.AbstractModelAttribute end
+struct DualObjective <: MOI.AbstractModelAttribute end
+MOI.is_set_by_optimize(::PrimalSolution) = true
+MOI.is_set_by_optimize(::DualSolution) = true
+MOI.is_set_by_optimize(::DualObjective) = true
+function MOI.get(
+    optimizer::Optimizer,
+    attr::Union{PrimalSolution,DualSolution,DualObjective},
+)
+    return MOI.get(optimizer.solver, attr)
+end
+function MOI.get(
+    solver::SolverCore.AbstractOptimizationSolver,
+    ::PrimalSolution,
+)
+    return solver.stats.solution
+end
+function MOI.get(solver::SolverCore.AbstractOptimizationSolver, ::DualObjective)
+    return get(solver.stats.solver_specific, :dual_objective, NaN)
+end
 
 function MOI.get(
     optimizer::Optimizer{T},
@@ -558,7 +582,7 @@ function MOI.get(
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     lmi_id = optimizer.lmi_id[ci]
-    sol = MOI.get(optimizer, Solution())
+    sol = MOI.get(optimizer, DualSolution())
     return TriangleVectorization(sol[MatrixIndex(lmi_id)])
 end
 
@@ -569,6 +593,6 @@ function MOI.get(
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
-    sol = MOI.get(optimizer, Solution())
+    sol = MOI.get(optimizer, DualSolution())
     return sol[ScalarIndex][rows]
 end
