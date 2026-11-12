@@ -28,6 +28,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
+    scalar_rows::Dict{MOI.ConstraintIndex,UnitRange{Int}}
     lin_cones::Union{Nothing,NNGCones{T}}
     max_sense::Bool
     objective_constant::T
@@ -39,6 +40,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
             nothing,
             nothing,
             Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
+            Dict{MOI.ConstraintIndex,UnitRange{Int}}(),
             nothing,
             false,
             0.0,
@@ -61,6 +63,7 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.model = nothing
     optimizer.lin_cones = nothing
     empty!(optimizer.lmi_id)
+    empty!(optimizer.scalar_rows)
     optimizer.objective_constant = NaN
     return
 end
@@ -119,7 +122,17 @@ function MOI.supports(
     return true
 end
 
-const SUPPORTED_CONES = Union{NNG,PSD,LOW}
+const BOUNDED_SCALAR{T} =
+    Union{MOI.EqualTo{T},MOI.GreaterThan{T},MOI.LessThan{T},MOI.Interval{T}}
+const BOUNDED_VECTOR = Union{MOI.Zeros,MOI.Nonpositives}
+const SUPPORTED_CONES = Union{NNG,PSD,LOW,BOUNDED_VECTOR}
+function MOI.supports_constraint(
+    ::Optimizer{T},
+    ::Type{MOI.ScalarAffineFunction{T}},
+    ::Type{<:BOUNDED_SCALAR{T}},
+) where {T}
+    return true
+end
 
 function MOI.supports_constraint(
     ::Optimizer{T},
@@ -300,6 +313,9 @@ function _add_constraints(
     ::Type{VAF{T}},
     ::Type{S},
 ) where {T,S}
+    if S <: BOUNDED_VECTOR
+        return
+    end
     for ci in MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},S}())
         # No need to map with `index_map` since we have the same indices thanks to
         # the `MatrixOfConstraints`
@@ -346,7 +362,7 @@ function _add_constraints(
 end
 
 function _nlmi(src, ::Type{F}, ::Type{S}) where {F,S}
-    if S == NNG
+    if !(S <: Union{PSD,LOW})
         return 0
     else
         return MOI.get(src, MOI.NumberOfConstraints{F,S}())
@@ -395,6 +411,7 @@ function MOI.copy_to(
         objective_constant = dest.max_sense ? -dest.objective_constant :
                              dest.objective_constant,
     )
+    _copy_scalar_constraints!(dest, src, constraint_types)
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
     options = copy(dest.options)
     dest.lin_cones = Cd_lin.sets
@@ -593,4 +610,75 @@ function MOI.get(
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
     sol = MOI.get(optimizer, DualSolution())
     return sol[ScalarIndex][rows]
+end
+
+function _add_constraints(
+    ::Optimizer{T},
+    src,
+    A,
+    msizes,
+    ::Type{MOI.ScalarAffineFunction{T}},
+    ::Type{<:BOUNDED_SCALAR{T}},
+) where {T}
+    return
+end
+
+_scalar_bounds(set::MOI.EqualTo) = (set.value, set.value)
+_scalar_bounds(set::MOI.GreaterThan) = (set.lower, Inf)
+_scalar_bounds(set::MOI.LessThan) = (-Inf, set.upper)
+_scalar_bounds(set::MOI.Interval) = (set.lower, set.upper)
+_scalar_bounds(::MOI.Zeros) = (0, 0)
+_scalar_bounds(::MOI.Nonpositives) = (-Inf, 0)
+
+function _copy_scalar_constraints!(dest::Optimizer{T}, src, types) where {T}
+    rows, cols, vals = Int[], Int[], T[]
+    constants, lower, upper = T[], T[], T[]
+    ns = num_scalars(dest.model)
+    for (F, S) in types
+        if !(S <: Union{BOUNDED_SCALAR,BOUNDED_VECTOR})
+            continue
+        end
+        for ci in MOI.get(src, MOI.ListOfConstraintIndices{F,S}())
+            f, set = MOI.get(src, MOI.CanonicalConstraintFunction(), ci),
+            MOI.get(src, MOI.ConstraintSet(), ci)
+            offset = length(constants)
+            functions =
+                f isa MOI.ScalarAffineFunction ? [f] :
+                MOI.Utilities.eachscalar(f)
+            l, u = _scalar_bounds(set)
+            for scalar in functions
+                push!(constants, scalar.constant)
+                push!(lower, l)
+                push!(upper, u)
+                for t in scalar.terms
+                    push!(rows, length(constants))
+                    push!(cols, t.variable.value)
+                    push!(vals, t.coefficient)
+                end
+            end
+            dest.scalar_rows[ci] = (ns+offset+1):(ns+length(constants))
+        end
+    end
+    if !isempty(constants)
+        J = SparseArrays.sparse(
+            rows,
+            cols,
+            vals,
+            length(constants),
+            dest.model.meta.nvar,
+        )
+        append_scalar_constraints!(dest.model, J, constants, lower, upper)
+    end
+    return
+end
+
+function MOI.get(
+    optimizer::Optimizer,
+    attr::MOI.ConstraintDual,
+    ci::MOI.ConstraintIndex{F,S},
+) where {F,S<:Union{BOUNDED_SCALAR,BOUNDED_VECTOR}}
+    MOI.check_result_index_bounds(optimizer, attr)
+    values =
+        MOI.get(optimizer, DualSolution())[ScalarIndex][optimizer.scalar_rows[ci]]
+    return S <: BOUNDED_SCALAR ? only(values) : values
 end

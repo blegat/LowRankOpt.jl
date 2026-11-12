@@ -149,6 +149,82 @@ function Model(C, A::Matrix{<:AbstractMatrix}, b, d_lin, C_lin, msizes; kws...)
     return Model(C, _matrix_components(A), b, d_lin, C_lin, msizes; kws...)
 end
 
+# Each finite bound contributes one nonnegative slack. Equality rows can be
+# retained separately by solvers with an augmented KKT system.
+function scalar_bounds(model::Model{T}; equalities = true) where {T}
+    rows, signs, constants = Int[], T[], T[]
+    for i in 1:num_scalars(model)
+        l, u = model.meta.lcon[i], model.meta.ucon[i]
+        if !equalities && l == u
+            continue
+        end
+        if isfinite(l)
+            push!(rows, i)
+            push!(signs, -one(T))
+            push!(constants, model.constant[i] - l)
+        end
+        if isfinite(u)
+            push!(rows, i)
+            push!(signs, one(T))
+            push!(constants, u - model.constant[i])
+        end
+    end
+    C = SparseArrays.sparse(model.jacobian[rows, :]')
+    for j in axes(C, 2), p in SparseArrays.nzrange(C, j)
+        SparseArrays.nonzeros(C)[p] *= signs[j]
+    end
+    return C, constants, rows, signs
+end
+
+function cone_multipliers(model::Model, cone)
+    if num_scalars(model) == length(model.d_lin)
+        return cone
+    end
+    _, _, rows, signs = scalar_bounds(model)
+    scalars = zeros(eltype(cone), num_scalars(model))
+    for k in eachindex(rows)
+        scalars[rows[k]] -= signs[k] * cone[ScalarIndex][k]
+    end
+    return ShapedConeVector(scalars, [cone[i] for i in matrix_indices(model)])
+end
+
+function append_scalar_constraints!(
+    model::Model{T},
+    J,
+    c,
+    lower,
+    upper,
+) where {T}
+    ns = num_scalars(model)
+    jacobian = vcat(model.jacobian[1:ns, :], J, model.jacobian[(ns+1):end, :])
+    constant = vcat(model.constant[1:ns], c, model.constant[(ns+1):end])
+    lcon = vcat(model.meta.lcon[1:ns], lower, model.meta.lcon[(ns+1):end])
+    ucon = vcat(model.meta.ucon[1:ns], upper, model.meta.ucon[(ns+1):end])
+    nscalar = ns + length(c)
+    model.dim = ConeDimensions(
+        nscalar,
+        model.dim.side_dimensions,
+        cumsum([nscalar; model.dim.side_dimensions .^ 2]),
+    )
+    model.jacobian = jacobian
+    model.constant = constant
+    model.jac_rows, model.jac_cols, _ = SparseArrays.findnz(jacobian)
+    m = length(constant)
+    model.meta = NLPModels.NLPModelMeta{T,Vector{T}}(
+        model.meta.nvar;
+        ncon = m,
+        x0 = copy(model.meta.x0),
+        lcon,
+        ucon,
+        nnzj = length(model.jac_rows),
+        nnzh = 0,
+        lin_nnzj = length(model.jac_rows),
+        nln_nnzj = 0,
+        lin = collect(1:m),
+    )
+    return model
+end
+
 primal_model(model::Model) = model
 num_scalars(model::Model) = model.dim.num_scalars
 num_matrices(model::Model) = length(model.C)

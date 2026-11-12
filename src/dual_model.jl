@@ -85,16 +85,28 @@ end
 Create a cone-variable adapter sharing the original model's coefficients.
 The original model is available as `primal_model(adapter)`.
 """
-function dual_model(model::Model)
+function dual_model(model::Model; equalities = true)
+    if num_scalars(model) == length(model.d_lin)
+        return DualModel(
+            model,
+            model.C,
+            model.A,
+            model.d_lin,
+            model.C_lin,
+            model.msizes,
+        )
+    end
+    C, d, _, _ = scalar_bounds(model; equalities)
     return DualModel(
         model,
         model.C,
         model.A,
-        model.d_lin,
-        model.C_lin,
+        SparseArrays.sparsevec(d),
+        C,
         model.msizes,
     )
 end
+
 DualModel(model::Model) = dual_model(model)
 dual_model(model::AbstractDualModel) = model
 primal_model(model::DualModel) = model.model
