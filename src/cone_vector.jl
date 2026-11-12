@@ -1,7 +1,14 @@
 struct ConeDimensions
     num_scalars::Int64
+    second_order_dimensions::Vector{Int64}
     side_dimensions::Vector{Int64}
     offsets::Vector{Int64}
+end
+function ConeDimensions(n, dimensions, offsets)
+    return ConeDimensions(n, Int[], dimensions, offsets)
+end
+function num_second_order_cones(dim::ConeDimensions)
+    return length(dim.second_order_dimensions)
 end
 
 num_matrices(d::ConeDimensions) = length(d.side_dimensions)
@@ -10,6 +17,11 @@ Base.length(d::ConeDimensions) = d.offsets[end]
 struct ScalarIndex
     value::Int64
 end
+
+struct SOCIndex
+    value::Int64
+end
+Base.broadcastable(i::SOCIndex) = Ref(i)
 
 struct MatrixIndex
     value::Int64
@@ -20,7 +32,7 @@ abstract type AbstractConeVector{T} <: AbstractVector{T} end
 
 function Base.getindex(
     s::AbstractConeVector,
-    i::Union{Type{ScalarIndex},MatrixIndex},
+    i::Union{Type{ScalarIndex},SOCIndex,MatrixIndex},
 )
     return view(s, i)
 end
@@ -35,6 +47,7 @@ function LinearAlgebra.dot(x::VectorizedConeVector, z::VectorizedConeVector)
 end
 
 num_matrices(x::VectorizedConeVector) = num_matrices(x.dim)
+num_second_order_cones(x::VectorizedConeVector) = num_second_order_cones(x.dim)
 
 function Base.similar(s::VectorizedConeVector)
     return VectorizedConeVector(similar(s.x), s.dim)
@@ -49,6 +62,17 @@ end
 function Base.to_index(s::VectorizedConeVector, mi::MatrixIndex)
     i = mi.value
     return (1+s.dim.offsets[i]):s.dim.offsets[i+1]
+end
+
+function Base.to_index(s::VectorizedConeVector, index::SOCIndex)
+    first =
+        s.dim.num_scalars +
+        sum(view(s.dim.second_order_dimensions, 1:(index.value-1))) +
+        1
+    return first:(first+s.dim.second_order_dimensions[index.value]-1)
+end
+function Base.view(s::VectorizedConeVector, index::SOCIndex)
+    return view(s.x, Base.to_index(s, index))
 end
 
 function Base.view(s::VectorizedConeVector, ::Type{ScalarIndex})
@@ -68,11 +92,25 @@ Base.getindex(s::VectorizedConeVector, i::Integer) = getindex(s.x, i)
 
 struct ShapedConeVector{T,MT<:AbstractMatrix{T}} <: AbstractConeVector{T}
     scalars::Vector{T}
+    second_order::Vector{Vector{T}}
     matrices::Vector{MT}
 end
 
+function ShapedConeVector(scalars::Vector{T}, matrices) where {T}
+    return ShapedConeVector(scalars, Vector{T}[], matrices)
+end
+function ShapedConeVector{T,MT}(scalars, matrices) where {T,MT}
+    return ShapedConeVector{T,MT}(scalars, Vector{T}[], matrices)
+end
+num_second_order_cones(x::ShapedConeVector) = length(x.second_order)
+second_order_indices(model) = SOCIndex.(1:num_second_order_cones(model))
+
 function Base.size(s::ShapedConeVector)
-    return (length(s.scalars) + sum(length, s.matrices, init = 0),)
+    return (
+        length(s.scalars) +
+        sum(length, s.second_order, init = 0) +
+        sum(length, s.matrices, init = 0),
+    )
 end
 num_matrices(s::ShapedConeVector) = length(s.matrices)
 
@@ -90,12 +128,17 @@ function LinearAlgebra.dot(
     b::ShapedConeVector{T},
 ) where {T}
     return LinearAlgebra.dot(a.scalars, b.scalars) +
+           sum(
+               LinearAlgebra.dot.(a.second_order, b.second_order);
+               init = zero(T),
+           ) +
            sum(eachindex(a.matrices); init = zero(T)) do i
-        return LinearAlgebra.dot(a.matrices[i], b.matrices[i])
-    end
+               return LinearAlgebra.dot(a.matrices[i], b.matrices[i])
+           end
 end
 
 Base.view(s::ShapedConeVector, ::Type{ScalarIndex}) = s.scalars
+Base.view(s::ShapedConeVector, i::SOCIndex) = s.second_order[i.value]
 Base.view(s::ShapedConeVector, i::MatrixIndex) = s.matrices[i.value]
 
 function Base.getindex(s::ShapedConeVector, i::Integer)
@@ -104,6 +147,12 @@ function Base.getindex(s::ShapedConeVector, i::Integer)
         return s.scalars[i]
     end
     i -= length(s.scalars)
+    for cone in s.second_order
+        if i <= length(cone)
+            return cone[i]
+        end
+        i -= length(cone)
+    end
     for matrix in s.matrices
         if i <= length(matrix)
             return matrix[i]

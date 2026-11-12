@@ -236,7 +236,7 @@ julia> MOI.Utilities.distance_to_set(dual(con_ref), dual_set)
 
 `LowRankOpt.Model` exposes ordinary scalar decision variables through
 NLPModels. Its constraint vector contains bounded scalar constraints first,
-then PSD blocks identified by `model.dim`. The PSD entries have free
+then SOC blocks and PSD blocks identified by `model.dim`. Cone entries have free
 componentwise metadata bounds; positive semidefiniteness is a block
 restriction handled by conic solvers.
 
@@ -266,3 +266,15 @@ Here `NLPModels.obj(model, x) = -dot(b, x)`. Scalar constraints are
 scalar decision variables. `DualSolution` queries refer to constraint
 multipliers in a `VectorizedConeVector` or `ShapedConeVector`, rather than
 being used as an indirect query for decision variables.
+
+
+SOC outputs use standard Lorentz coordinates. Rotated SOCs are converted
+orthogonally, and their MOI multipliers are converted back. Cone vectors
+support `SOCIndex` alongside `ScalarIndex` and `MatrixIndex`.
+
+Explicit dual conversion lifts each SOC to a PSD arrow and recovers native
+cone multipliers through its adjoint. Burer–Monteiro automatically uses
+full ranks for these lifted blocks when `ranks` specifies native PSD blocks.
+Conic Farkas and recession certificates are checked independently of solver
+termination heuristics by `infeasibility_certificate` and
+`recession_certificate`.

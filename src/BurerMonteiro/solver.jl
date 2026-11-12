@@ -11,6 +11,11 @@ function Solver(
     square_scalars = false,
     kws...,
 )
+    primal = LRO.primal_model(src)
+    if length(ranks) == LRO.num_matrices(primal) &&
+       LRO.num_second_order_cones(primal) > 0
+        ranks = vcat(ranks, primal.dim.second_order_dimensions)
+    end
     model = Model{square_scalars}(LRO.dual_model(src), ranks)
     solver = sub_solver(model; kws...)
     stats = SolverCore.GenericExecutionStats(model)
