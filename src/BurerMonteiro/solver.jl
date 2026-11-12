@@ -36,7 +36,10 @@ function MOI.get(solver::Solver, ::LRO.ConvexTerminationStatus)
 end
 
 function MOI.get(solver::Solver, ::LRO.DualSolution)
-    return Solution(solver.stats.solution, solver.model.dim)
+    return LRO.cone_multipliers(
+        LRO.primal_model(solver.model.model),
+        Solution(solver.stats.solution, solver.model.dim),
+    )
 end
 
 # Burer-Monteiro solves the explicitly dualized model.
