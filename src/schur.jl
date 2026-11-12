@@ -840,7 +840,13 @@ function _add_sparse_rank_one_columns!(
     # `U L vₖ` and `U R vₖ`
     l, r = view(a.gram, :, c), view(a.gram_right, :, c)
     two_sided = right !== left
+    # A small block may involve only a few of the model's constraints.
+    # Skip zero factors before touching the dense workspaces or Schur matrix.
     for k in columns
+        weight = b.weights[k, ib]
+        if iszero(weight)
+            continue
+        end
         fill!(l, zero(T))
         if two_sided
             fill!(r, zero(T))
@@ -852,18 +858,23 @@ function _add_sparse_rank_one_columns!(
             end
         end
         rk = two_sided ? r : l
-        weight = b.weights[k, ib]
         # Testing `same` outside the loop over the entries of the column `k`
         # makes the loop faster for many small blocks.
         if same
             for j in axes(H, 1)
-                H[j, k] += a.weights[j, ia] * weight * l[j] * rk[j]
+                row_weight = a.weights[j, ia]
+                if !iszero(row_weight)
+                    H[j, k] += row_weight * weight * l[j] * rk[j]
+                end
             end
         else
             for j in axes(H, 1)
-                value = a.weights[j, ia] * weight * l[j] * rk[j]
-                H[j, k] += value
-                H[k, j] += value
+                row_weight = a.weights[j, ia]
+                if !iszero(row_weight)
+                    value = row_weight * weight * l[j] * rk[j]
+                    H[j, k] += value
+                    H[k, j] += value
+                end
             end
         end
     end
