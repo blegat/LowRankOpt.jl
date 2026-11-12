@@ -92,7 +92,7 @@ _nnz(A::SparseArrays.SparseMatrixCSC) = SparseArrays.nnz(A)
 # This assumption is used by Loraine.
 
 function add_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     W,
     ::Type{MatrixIndex},
     H,
@@ -104,7 +104,7 @@ function add_schur_complement!(
 end
 
 function add_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     L,
     R,
     ::Type{MatrixIndex},
@@ -217,7 +217,7 @@ end
 # Keep sparse output on the sparse-product path: repeated sparse axpy! updates
 # would search its index structure once per contribution.
 function add_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     w::StridedVector,
     ::Type{ScalarIndex},
     H::StridedMatrix,
@@ -226,7 +226,7 @@ function add_schur_complement!(
 end
 
 function _add_scalar_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     weight::F,
     H,
 ) where {F<:Function}
@@ -264,12 +264,12 @@ end
 # and adding the contribution of the scalar block gives
 # H = ∑ᵢ 𝐀ᵢᵀ (Wᵢ ⊗ Wᵢ) 𝐀ᵢ + C_lin * Diagonal(w) * C_linᵀ
 # where the scalar block `w = W[ScalarIndex]` is the weight itself.
-function schur_complement!(model::BufferedModelForSchur, W::AbstractVector, H)
+function schur_complement!(model::BufferedDualModel, W::AbstractVector, H)
     return _schur_complement!(model, W, W, k -> W[ScalarIndex][k], H)
 end
 
 """
-    schur_complement!(model::BufferedModelForSchur, L, R, H)
+    schur_complement!(model::BufferedDualModel, L, R, H)
 
 Computes the Schur complement
 `H[j, k] = ∑ᵢ ⟨Aᵢⱼ, Lᵢ Aᵢₖ Rᵢ⟩ + ∑ₗ C_lin[j, l] L[l] R[l] C_lin[k, l]`
@@ -279,7 +279,7 @@ is obtained with `Lᵢ = Rᵢ = Wᵢ` and the Helmberg-Kojima-Monteiro direction
 with `Lᵢ = Sᵢ⁻¹` and `Rᵢ = Xᵢ`.
 """
 function schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     L::AbstractVector,
     R::AbstractVector,
     H,
@@ -306,7 +306,7 @@ end
 # matrix-vector product. Two `d×d` products, so `Θ(d³)` however sparse the
 # `Aᵢₖ` are.
 function _add_eval_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     L::AbstractMatrix,
     R::AbstractMatrix,
     Ay::AbstractMatrix,
@@ -324,7 +324,7 @@ end
 # `add_schur_complement!` makes per constraint matrix via its dense condition,
 # here made once for `A(y)`.
 function _add_eval_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     L::AbstractMatrix,
     R::AbstractMatrix,
     Ay::SparseArrays.SparseMatrixCSC,
@@ -340,18 +340,18 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
-function eval_schur_complement!(model::BufferedModelForSchur, W, y, result)
+function eval_schur_complement!(model::BufferedDualModel, W, y, result)
     weight = k -> W[ScalarIndex][k]
     return _eval_schur_complement!(model, W, W, weight, y, result)
 end
 
 """
-    eval_schur_complement!(model::BufferedModelForSchur, L, R, y, result)
+    eval_schur_complement!(model::BufferedDualModel, L, R, y, result)
 
 Computes the product `H * y` of the Schur complement `H` computed by
 [`schur_complement!(model, L, R, H)`](@ref) with `y` without forming `H`.
 """
-function eval_schur_complement!(model::BufferedModelForSchur, L, R, y, result)
+function eval_schur_complement!(model::BufferedDualModel, L, R, y, result)
     weight = k -> L[ScalarIndex][k] * R[ScalarIndex][k]
     return _eval_schur_complement!(model, L, R, weight, y, result)
 end
@@ -521,7 +521,7 @@ end
 # [`one_hot`](@ref).
 function _schur_component(
     component::BlockColumns{<:Union{_OneHotFactorization{T},_ZerosMatrix{T}}},
-    model::Model{T},
+    model::DualModel{T},
     _,
 ) where {T}
     n, p = size(component.values)
@@ -569,7 +569,7 @@ end
 
 function _schur_component(
     component::BlockColumns,
-    model::Model{T},
+    model::DualModel{T},
     dense_condition,
 ) where {T}
     n, p = size(component.values)
@@ -612,7 +612,7 @@ const _SPARSE_FACTOR_RATIO = 32
 
 function _schur_component(
     component::BlockColumns{<:_RankOneOrZeros{T}},
-    model::Model{T},
+    model::DualModel{T},
     _,
 ) where {T}
     n, p = size(component.values)
@@ -626,7 +626,10 @@ function _schur_component(
     return _RankOneSchurComponent(component, U, weights)
 end
 
-function buffer_for_schur_complement(model::Model{T}, dense_condition) where {T}
+function buffer_for_schur_complement(
+    model::DualModel{T},
+    dense_condition,
+) where {T}
     AW = [zeros(T, d, d) for d in model.msizes]
     WAW = copy.(AW)
     components = map(A -> _schur_component(A, model, dense_condition), model.A)
@@ -1089,7 +1092,7 @@ end
 end
 
 function add_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     i::MatrixIndex,
     W::AbstractMatrix,
     H,
@@ -1099,7 +1102,7 @@ end
 
 """
     add_schur_complement!(
-        model::BufferedModelForSchur,
+        model::BufferedDualModel,
         i::MatrixIndex,
         L::AbstractMatrix,
         R::AbstractMatrix,
@@ -1109,7 +1112,7 @@ end
 Adds `⟨Aᵢⱼ, L Aᵢₖ R⟩` to `H[j, k]` for symmetric matrices `L` and `R`.
 """
 function add_schur_complement!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     i::MatrixIndex,
     L::AbstractMatrix,
     R::AbstractMatrix,

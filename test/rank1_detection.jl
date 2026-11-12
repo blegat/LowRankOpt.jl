@@ -136,14 +136,15 @@ function test_detected_schur_complement()
     b = zeros(n)
     d_lin = sparsevec(Int64[], Float64[], 0)
     C_lin = spzeros(Float64, Int64, n, 0)
-    model = LRO.Model(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, Int64[d])
+    model =
+        LRO.DualModel(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, Int64[d])
     @test eltype(only(model.A).values) <: LRO.Factorization
-    reference = LRO.Model(C, arr, b, d_lin, C_lin, Int64[d])
-    buffer = LRO.BufferedModelForSchur(
+    reference = LRO.DualModel(C, arr, b, d_lin, C_lin, Int64[d])
+    buffer = LRO.BufferedDualModel(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
     )
-    reference_buffer = LRO.BufferedModelForSchur(
+    reference_buffer = LRO.BufferedDualModel(
         reference;
         dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
     )
@@ -221,12 +222,12 @@ function _build(
         set_attribute(model, "detect_one_hot", detect_one_hot)
     end
     optimize!(model) # `ConvexSolver` is a no-op: this just triggers `copy_to`
-    return unsafe_backend(model).model
+    return LRO.dual_model(unsafe_backend(model).model)
 end
 
 # Keeps the model given by `LRO.Optimizer`
 struct BufferedSolver <: SolverCore.AbstractOptimizationSolver
-    model::LRO.BufferedModelForSchur{Float64}
+    model::LRO.BufferedDualModel{Float64}
 end
 
 SolverCore.solve!(::BufferedSolver, ::LRO.Model) = nothing
@@ -241,7 +242,7 @@ function test_option_dense_condition()
             solver = model -> (solver = BufferedSolver(model)),
             dense_condition = c -> dense,
         )
-        buffer = LRO.BufferedModelForSchur(solver.model)
+        buffer = LRO.BufferedDualModel(solver.model)
         @test buffer === solver.model
         component = only(buffer.schur_buffer[3])
         n = only(component.last_nonzero)
@@ -303,7 +304,7 @@ function test_option_default_detects_one_hot()
             Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
         1:sparse_model.meta.ncon,
     )
-    buffer = LRO.BufferedModelForSchur(
+    buffer = LRO.BufferedDualModel(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )

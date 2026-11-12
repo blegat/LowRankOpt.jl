@@ -103,7 +103,7 @@ end
 """
     default_dense_condition()
 
-Default dense condition of [`BufferedModelForSchur`](@ref). A dense condition
+Default dense condition of [`BufferedDualModel`](@ref). A dense condition
 is any callable that returns a `Bool` for a [`DenseCandidate`](@ref), for
 instance a combination of [`MinNonzeros`](@ref) and [`DenseCost`](@ref) with
 [`And`](@ref), [`Or`](@ref) and [`Not`](@ref), or a Julia function.

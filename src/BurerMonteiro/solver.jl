@@ -5,16 +5,20 @@ struct Solver{S,T,CT,AT,ST} <: SolverCore.AbstractOptimizationSolver
 end
 
 function Solver(
-    src::LRO.Model;
+    src::Union{LRO.Model,LRO.DualModel};
     sub_solver,
     ranks,
     square_scalars = false,
     kws...,
 )
-    model = Model{square_scalars}(src, ranks)
+    model = Model{square_scalars}(LRO.dual_model(src), ranks)
     solver = sub_solver(model; kws...)
     stats = SolverCore.GenericExecutionStats(model)
     return Solver(model, solver, stats)
+end
+
+function Solver(src::LRO.BufferedDualModel; kws...)
+    return Solver(src.model; kws...)
 end
 
 function SolverCore.solve!(
@@ -35,6 +39,10 @@ function MOI.get(solver::Solver, ::LRO.ConvexTerminationStatus)
     #      and turn `LOCALLY_SOLVED` into `OPTIMAL`
 end
 
-function MOI.get(solver::Solver, ::LRO.Solution)
+function MOI.get(solver::Solver, ::LRO.DualSolution)
     return Solution(solver.stats.solution, solver.model.dim)
 end
+
+# Burer-Monteiro solves the explicitly dualized model.
+MOI.get(solver::Solver, ::LRO.PrimalSolution) = solver.stats.multipliers
+MOI.get(solver::Solver, ::LRO.DualObjective) = -solver.stats.objective

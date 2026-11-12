@@ -41,10 +41,10 @@ function _test_simple_lp(opt)
     @test dual_objective_value(model) ≈ 1
     b = unsafe_backend(model)
     if !(b isa DualOptimizer)
-        @test isnothing(LRO.buffer_for_jtprod(b.model))
+        @test isnothing(LRO.buffer_for_jtprod(LRO.dual_model(b.model)))
     end
     raw_sol = MOI.get(model, LRO.RawStatus(:solution))
-    sol = MOI.get(model, LRO.Solution())
+    sol = MOI.get(model, LRO.DualSolution())
     @test raw_sol isa Vector{Float64}
     @test sol isa LRO.BurerMonteiro.Solution{false,Float64,Vector{Float64}}
     outer = LRO.BurerMonteiro._OuterProduct(sol, sol)
@@ -55,6 +55,16 @@ function _test_simple_lp(opt)
         @test abs(sol[1]) < 1e-6
     end
     diff_check(model)
+    return
+end
+
+function test_dense_condition()
+    _test_simple_lp(
+        optimizer_with_attributes(
+            LRO.Optimizer,
+            "dense_condition" => LRO.MinNonzeros(0),
+        ),
+    )
     return
 end
 
@@ -153,7 +163,7 @@ function test_trace()
     set_attribute(model, "max_iter", 0)
     optimize!(model)
     @test termination_status(model) == MOI.ITERATION_LIMIT
-    nlp = unsafe_backend(model).model
+    nlp = LRO.dual_model(unsafe_backend(model).model)
     @test nlp.C isa Vector{SparseMatrixCSC{T,Int64}}
     @test nlp.C[1] == [3 1; 1 4]
     @test only(nlp.A).values isa Matrix{
@@ -195,7 +205,7 @@ function test_moi_runtests()
 end
 
 function test_no_constraints()
-    model = LRO.Model(
+    model = LRO.DualModel(
         [spzeros(1, 1)],
         [ones(1, 1) for _ in 1:1, _ in 1:0],
         zeros(0),
@@ -235,7 +245,7 @@ function test_different_factor_ranks()
     optimize!(model)
     @test termination_status(model) == MOI.ITERATION_LIMIT
     diff_check(model)
-    nlp = unsafe_backend(model).model
+    nlp = LRO.dual_model(unsafe_backend(model).model)
     T = Float64
     MT = LRO.Factorization{T,Matrix{T},LRO.Ones{T}}
     @test nlp.C isa Vector{MT}

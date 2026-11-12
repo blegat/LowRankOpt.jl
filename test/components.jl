@@ -55,14 +55,14 @@ function _fixture(::Type{T}, kind) where {T}
     b = T[1, -2, 3]
     scalars = sparsevec(Int64[], T[], 0)
     scalar_jacobian = spzeros(T, Int64, n, 0)
-    model = LRO.Model(C, components, b, scalars, scalar_jacobian, dims)
-    reference = LRO.Model(C, full, b, scalars, scalar_jacobian, dims)
-    W = LRO.ShapedSolution(T[], [
+    model = LRO.DualModel(C, components, b, scalars, scalar_jacobian, dims)
+    reference = LRO.DualModel(C, full, b, scalars, scalar_jacobian, dims)
+    W = LRO.ShapedConeVector(T[], [
         let R = randn(rng, T, d, d)
             R * R' + I
         end for d in dims
     ])
-    x = LRO.ShapedSolution(
+    x = LRO.ShapedConeVector(
         T[],
         [Matrix(Symmetric(randn(rng, T, d, d))) for d in dims],
     )
@@ -86,11 +86,11 @@ end
 @testset "Component sums and Schur cross terms" begin
     for T in (Float32, Float64), kind in (:rank_one, :mixed), κ in (0, 1, 100)
         model, reference, full, W, x, y = _fixture(T, kind)
-        buffer = LRO.BufferedModelForSchur(
+        buffer = LRO.BufferedDualModel(
             model;
             dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
         )
-        reference_buffer = LRO.BufferedModelForSchur(
+        reference_buffer = LRO.BufferedDualModel(
             reference;
             dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
         )
@@ -103,7 +103,7 @@ end
         H = zeros(T, 3, 3)
         Hy = zeros(T, 3)
         Jv = zeros(T, 3)
-        Jty = LRO.ShapedSolution(T[], similar.(x.matrices))
+        Jty = LRO.ShapedConeVector(T[], similar.(x.matrices))
         for i in LRO.matrix_indices(model), j in 1:3
             @test LRO.jac(model, j, i) ≈ full[i.value, j]
         end
@@ -158,7 +158,7 @@ end
         ),
         3,
     )
-    model = LRO.Model(
+    model = LRO.DualModel(
         [spzeros(d, d) for d in (2, 1, 3)],
         (component,),
         zeros(n),
@@ -178,7 +178,7 @@ end
         3,
     )
     @test_throws DimensionMismatch LRO.BlockColumns([1, 2], component.values, 3)
-    @test_throws DimensionMismatch LRO.Model(
+    @test_throws DimensionMismatch LRO.DualModel(
         model.C,
         (LRO.BlockColumns([1], component.values, 2),),
         model.b,
@@ -206,23 +206,23 @@ end
     b = T[1, -2, 3]
     scalars = sparsevec(Int64[], T[], 0)
     scalar_jacobian = spzeros(T, Int64, n, 0)
-    model = LRO.Model(C, A, b, scalars, scalar_jacobian, dims)
+    model = LRO.DualModel(C, A, b, scalars, scalar_jacobian, dims)
     rank_one, sparse_component = model.A
     @test rank_one.block_ids == [1, 3]
     @test sparse_component.block_ids == [1, 2]
     @test eltype(rank_one.values) == Union{typeof(R(1)),typeof(Z(1))}
     @test eltype(sparse_component.values) == Union{typeof(S(1)),typeof(Z(1))}
-    W = LRO.ShapedSolution(T[], [
+    W = LRO.ShapedConeVector(T[], [
         let R = randn(rng, T, d, d)
             R * R' + I
         end for d in dims
     ])
-    x = LRO.ShapedSolution(
+    x = LRO.ShapedConeVector(
         T[],
         [Matrix(Symmetric(randn(rng, T, d, d))) for d in dims],
     )
     y = randn(rng, T, n)
-    buffer = LRO.BufferedModelForSchur(
+    buffer = LRO.BufferedDualModel(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
@@ -232,7 +232,7 @@ end
     H = zeros(T, n, n)
     Hy = zeros(T, n)
     Jv = zeros(T, n)
-    Jty = LRO.ShapedSolution(T[], similar.(x.matrices))
+    Jty = LRO.ShapedConeVector(T[], similar.(x.matrices))
     _iteration!(buffer, W, x, y, H, Hy, Jv, Jty)
     expected_H = [
         sum(
@@ -294,7 +294,7 @@ end
         Matrix(rank_one.values[j, 1]) +
         Matrix(legacy[1, j]) for _ in 1:1, j in 1:n
     ]
-    model = LRO.Model(
+    model = LRO.DualModel(
         [spzeros(T, d, d)],
         (asym, rank_one, legacy),
         zeros(T, n),
@@ -303,7 +303,7 @@ end
         Int64[d],
     )
     @test model.A[3] == LRO.BlockColumns(legacy)
-    buffer = LRO.BufferedModelForSchur(
+    buffer = LRO.BufferedDualModel(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
     )
@@ -317,7 +317,7 @@ end
     expected_H = [dot(full[j], W * full[k] * W) for j in 1:n, k in 1:n]
     @test H ≈ expected_H
     Hy = zeros(T, n)
-    LRO.eval_schur_complement!(buffer, LRO.ShapedSolution(T[], [W]), y, Hy)
+    LRO.eval_schur_complement!(buffer, LRO.ShapedConeVector(T[], [W]), y, Hy)
     @test Hy ≈ expected_H * y
     @test LRO.unsafe_jtprod(buffer, y, i) ≈ sum(y[j] * full[j] for j in 1:n)
 end
@@ -336,7 +336,7 @@ end
         ),
         1,
     )
-    model = LRO.Model(
+    model = LRO.DualModel(
         [spzeros(T, d, d)],
         (one_hot,),
         ones(T, d),
@@ -346,7 +346,7 @@ end
     )
     # The `d` one-hot factors have `d < m * d` nonzeros so the dense
     # `m × d` factor of `RankOneJacobian` would be wasteful.
-    buffer = LRO.BufferedModelForSchur(
+    buffer = LRO.BufferedDualModel(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )

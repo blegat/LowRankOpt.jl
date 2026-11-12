@@ -1,12 +1,6 @@
-mutable struct BufferedModelForSchur{
-    T,
-    C<:AbstractMatrix{T},
-    A<:Tuple,
-    JB,
-    JTB,
-    SB,
-} <: AbstractModel{T}
-    model::Model{T,C,A}
+mutable struct BufferedDualModel{T,C<:AbstractMatrix{T},A<:Tuple,JB,JTB,SB} <:
+               AbstractDualModel{T}
+    model::DualModel{T,C,A}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     jprod_buffer::JB
     jtprod_buffer::JTB
@@ -14,7 +8,7 @@ mutable struct BufferedModelForSchur{
 end
 
 """
-    BufferedModelForSchur(
+    BufferedDualModel(
         model;
         dense_condition = default_dense_condition(),
         schur = true,
@@ -31,14 +25,14 @@ workspaces already match the requested choice, return the model unchanged,
 even if it was built with another `dense_condition`. Otherwise, construct or
 drop only the Schur workspaces.
 """
-function BufferedModelForSchur(
-    model::Model;
+function BufferedDualModel(
+    model::DualModel;
     dense_condition = default_dense_condition(),
     schur::Bool = true,
 )
     schur_buffer =
         schur ? buffer_for_schur_complement(model, dense_condition) : nothing
-    return BufferedModelForSchur(
+    return BufferedDualModel(
         model,
         model.meta,
         buffer_for_jprod(model),
@@ -47,8 +41,8 @@ function BufferedModelForSchur(
     )
 end
 
-function BufferedModelForSchur(
-    model::BufferedModelForSchur;
+function BufferedDualModel(
+    model::BufferedDualModel;
     dense_condition = default_dense_condition(),
     schur::Bool = true,
 )
@@ -58,7 +52,7 @@ function BufferedModelForSchur(
     schur_buffer =
         schur ? buffer_for_schur_complement(model.model, dense_condition) :
         nothing
-    return BufferedModelForSchur(
+    return BufferedDualModel(
         model.model,
         model.meta,
         model.jprod_buffer,
@@ -67,35 +61,35 @@ function BufferedModelForSchur(
     )
 end
 
-function _schur_buffer(model::BufferedModelForSchur)
+function _schur_buffer(model::BufferedDualModel)
     if isnothing(model.schur_buffer)
         throw(ArgumentError("Schur workspaces are disabled; use schur = true."))
     end
     return model.schur_buffer
 end
 
-num_scalars(model::BufferedModelForSchur) = num_scalars(model.model)
-num_matrices(model::BufferedModelForSchur) = num_matrices(model.model)
-matrix_indices(model::BufferedModelForSchur) = matrix_indices(model.model)
-side_dimension(model::BufferedModelForSchur, i) = side_dimension(model.model, i)
+num_scalars(model::BufferedDualModel) = num_scalars(model.model)
+num_matrices(model::BufferedDualModel) = num_matrices(model.model)
+matrix_indices(model::BufferedDualModel) = matrix_indices(model.model)
+side_dimension(model::BufferedDualModel, i) = side_dimension(model.model, i)
 
 #######################
 ###### Objective ######
 #######################
 
-function NLPModels.obj(model::BufferedModelForSchur, x::AbstractVector)
+function NLPModels.obj(model::BufferedDualModel, x::AbstractVector)
     return NLPModels.obj(model.model, x)
 end
 
-function dual_obj(model::BufferedModelForSchur, y::AbstractVector)
+function dual_obj(model::BufferedDualModel, y::AbstractVector)
     return dual_obj(model.model, y)
 end
 
-function grad(model::BufferedModelForSchur, ::Type{ScalarIndex})
+function grad(model::BufferedDualModel, ::Type{ScalarIndex})
     return grad(model.model, ScalarIndex)
 end
 
-function grad(model::BufferedModelForSchur, i::MatrixIndex)
+function grad(model::BufferedDualModel, i::MatrixIndex)
     return grad(model.model, i)
 end
 
@@ -103,11 +97,11 @@ end
 ###### Constraints ######
 #########################
 
-cons_constant(model::BufferedModelForSchur) = cons_constant(model.model)
-function jac(model::BufferedModelForSchur, j::Integer, ::Type{ScalarIndex})
+cons_constant(model::BufferedDualModel) = cons_constant(model.model)
+function jac(model::BufferedDualModel, j::Integer, ::Type{ScalarIndex})
     return jac(model.model, j, ScalarIndex)
 end
-function norm_jac(model::BufferedModelForSchur, i::MatrixIndex)
+function norm_jac(model::BufferedDualModel, i::MatrixIndex)
     return norm_jac(model.model, i)
 end
 
@@ -133,7 +127,7 @@ function _add_vec!(I, J, V, j, offset, A::SparseArrays.SparseMatrixCSC)
 end
 
 """
-    buffer_for_jprod(model::Model, i::MatrixIndex)
+    buffer_for_jprod(model::DualModel, i::MatrixIndex)
 
 Return the sparse matrix collecting the vectorization of every constraint
 matrix of the `i`th PSD block:
@@ -168,7 +162,7 @@ Optimization Methods and Software 39.6 (2024): 1185-1215.
 "Exploiting sparsity in primal-dual interior-point methods for
 semidefinite programming." Mathematical Programming 79 (1997): 235-253.
 """
-function buffer_for_jprod(model::Model{T}, i::MatrixIndex) where {T}
+function buffer_for_jprod(model::DualModel{T}, i::MatrixIndex) where {T}
     J = _rank_one_jacobian(model, i)
     if !isnothing(J)
         return J
@@ -201,7 +195,7 @@ function _jacobian_buffer(components, i, d, ncon, ::Type{T}) where {T}
     return A
 end
 
-function buffer_for_jprod(model::Model{T}) where {T}
+function buffer_for_jprod(model::DualModel{T}) where {T}
     buffers = Union{SparseArrays.SparseMatrixCSC{T,Int64},RankOneJacobian{T}}[
         buffer_for_jprod(model, i) for i in matrix_indices(model)
     ]
@@ -237,7 +231,7 @@ struct RankOneJacobian{T}
     coef::Vector{T}
 end
 
-function _rank_one_jacobian(model::Model{T}, i::MatrixIndex) where {T}
+function _rank_one_jacobian(model::DualModel{T}, i::MatrixIndex) where {T}
     d = side_dimension(model, i)
     U = Matrix{T}[]
     weights = Vector{T}[]
@@ -306,7 +300,7 @@ end
 
 """
     add_sub_jprod!(
-        model::BufferedModelForSchur,
+        model::BufferedDualModel,
         i::MatrixIndex,
         V::AbstractMatrix,
         Jv::AbstractVector,
@@ -320,7 +314,7 @@ product with the column subset `𝐀ᵢ[:, I]` of the buffer described in
 constraints as columns.
 """
 function add_sub_jprod!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     i::MatrixIndex,
     V::AbstractMatrix,
     Jv::AbstractVector,
@@ -333,7 +327,7 @@ end
 
 """
     add_jprod!(
-        model::BufferedModelForSchur,
+        model::BufferedDualModel,
         V::AbstractMatrix,
         Jv::AbstractVector,
         i::MatrixIndex,
@@ -346,7 +340,7 @@ by `buffer_for_jprod` so this is a single sparse matrix-vector
 product.
 """
 function add_jprod!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     V::AbstractMatrix,
     Jv::AbstractVector,
     i::MatrixIndex,
@@ -359,7 +353,7 @@ end
 ########################
 
 function jtprod!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     y::AbstractVector,
     vJ::AbstractVector,
     ::Type{ScalarIndex},
@@ -367,7 +361,7 @@ function jtprod!(
     return jtprod!(model.model, y, vJ, ScalarIndex)
 end
 
-function buffer_for_jtprod(model::Model)
+function buffer_for_jtprod(model::DualModel)
     if iszero(num_matrices(model))
         return
     end
@@ -441,7 +435,7 @@ nonzeros.
 const SPARSE_JTPROD_WORK_RATIO = 0.05
 
 function buffer_for_jtprod(
-    model::Model{T},
+    model::DualModel{T},
     mat_idx::MatrixIndex;
     density = DENSE_JTPROD_DENSITY,
     work_ratio = SPARSE_JTPROD_WORK_RATIO,
@@ -484,7 +478,7 @@ function buffer_for_jtprod(
 end
 
 function NLPModels.jtprod!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     _::AbstractVector,
     y::AbstractVector,
     vJ::AbstractVector,
@@ -529,7 +523,7 @@ end
 
 function _jtprod!(
     buffer::FillArrays.Zeros,
-    ::BufferedModelForSchur,
+    ::BufferedDualModel,
     ::AbstractVector,
     ::MatrixIndex,
 )
@@ -542,7 +536,7 @@ end
 # allocate, unlike `vec` which would allocate a reshaped wrapper every call.
 function _jtprod!(
     buffer::StridedMatrix,
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     # `y` is a `SparseVector` when called from Loraine's `H_alpha`
     # preconditioner, so this must stay an `AbstractVector`.
     y::AbstractVector,
@@ -557,7 +551,7 @@ end
 # this is preferred over the dense buffer above.
 function _jtprod!(
     buffer::SparseArrays.SparseMatrixCSC,
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     y::AbstractVector,
     i::MatrixIndex,
 )
@@ -591,7 +585,7 @@ function _add_vec!(I, J, V, j, offset, A::AbstractMatrix)
 end
 
 """
-    unsafe_jtprod(model::BufferedModelForSchur, y, i::MatrixIndex)
+    unsafe_jtprod(model::BufferedDualModel, y, i::MatrixIndex)
 
 Return the product between the sub-Jacobian associated to `i` and `y`:
 `∑ⱼ Aᵢⱼ yⱼ`. This function is **unsafe** because it returns
@@ -599,13 +593,13 @@ an alias to an internal buffer `model.jtprod_buffer[i.value]` that is
 going to be reused whenever `unsafe_jprod` or `unsafe_dual_cons` is called
 is called for the same `i`.
 """
-function unsafe_jtprod(model::BufferedModelForSchur, y, i::MatrixIndex)
+function unsafe_jtprod(model::BufferedDualModel, y, i::MatrixIndex)
     buffer = model.jtprod_buffer[i.value]
     return _jtprod!(buffer, model, y, i)
 end
 
 function dual_cons!(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     y::AbstractVector,
     res,
     ::Type{ScalarIndex},
@@ -635,7 +629,7 @@ end
 _sub(A::AbstractMatrix, B::SparseArrays.SparseMatrixCSC) = A - B
 
 """
-    unsafe_dual_cons(model::BufferedModelForSchur, y, i::MatrixIndex)
+    unsafe_dual_cons(model::BufferedDualModel, y, i::MatrixIndex)
 
 Return value of the dual constraint of index `i`:
 `C - ∑ⱼ Aᵢⱼ yⱼ`. This function is **unsafe** because it may return
@@ -644,7 +638,7 @@ an alias to the matrix `C` or the internal buffer
 the returned value and don't call any mutating operation on it.
 """
 function unsafe_dual_cons(
-    model::BufferedModelForSchur,
+    model::BufferedDualModel,
     y::AbstractVector,
     i::MatrixIndex,
 )

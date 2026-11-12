@@ -46,11 +46,11 @@ function _test_holy(; is_dual, low_rank, square_scalars, n = 10)
     else
         SparseMatrixCSC{T,Int64}
     end
-    @test b.model.C isa Vector{F}
+    @test LRO.dual_model(b.model).C isa Vector{F}
     # The rank-one structure of the classic formulation is detected by the
     # `detect_rank_one` option
     A = low_rank ? F : LRO._SparseRankOne{T}
-    @test only(b.model.A).values isa Matrix{A}
+    @test only(LRO.dual_model(b.model).A).values isa Matrix{A}
 end
 
 function test_holy()

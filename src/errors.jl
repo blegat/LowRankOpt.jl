@@ -47,7 +47,7 @@ function negative_eigmin(A, i::MatrixIndex, workspace::Vector{<:EigenWorkspace})
 end
 
 """
-    errors(model::AbstractModel, x; y = nothing, p = 2, ...)
+    errors(model::AbstractDualModel, x; y = nothing, p = 2, ...)
 
 Return [the six DIMACS-style errors](https://plato.asu.edu/dimacs/node3.html).
 
@@ -132,7 +132,7 @@ The signed duality gap and complementarity share the denominator
 reuse eigensolver storage. The primal and dual solutions are preserved.
 """
 function errors(
-    model::AbstractModel,
+    model::AbstractDualModel,
     x;
     y = nothing,
     primal_err = NLPModels.cons(model, x),
