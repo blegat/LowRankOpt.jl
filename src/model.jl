@@ -7,9 +7,9 @@ Base.broadcastable(model::AbstractModel) = Ref(model)
 
 Affine conic model with ordinary scalar decision variables. The model owns
 its coefficient data and NLPModels metadata. Constraint outputs are ordered
-as a nonnegative scalar prefix followed by PSD blocks identified by `dim`.
-The PSD entries have free componentwise metadata bounds; positive
-semidefiniteness is a block constraint.
+as bounded scalar rows, SOC blocks, then PSD blocks identified by `dim`.
+The cone entries have free componentwise metadata bounds; membership in
+the cone is a block constraint.
 
 The objective is `-b' * x + objective_constant`; scalar constraints are
 `d_lin - C_lin' * x`, and PSD constraints are
@@ -177,7 +177,8 @@ function scalar_bounds(model::Model{T}; equalities = true) where {T}
 end
 
 function cone_multipliers(model::Model, cone)
-    if num_scalars(model) == length(model.d_lin)
+    if num_scalars(model) == length(model.d_lin) &&
+       iszero(num_second_order_cones(model))
         return cone
     end
     _, _, rows, signs = scalar_bounds(model)
@@ -185,7 +186,17 @@ function cone_multipliers(model::Model, cone)
     for k in eachindex(rows)
         scalars[rows[k]] -= signs[k] * cone[ScalarIndex][k]
     end
-    return ShapedConeVector(scalars, [cone[i] for i in matrix_indices(model)])
+    soc = Vector{eltype(cone)}[]
+    offset = num_matrices(model)
+    for i in second_order_indices(model)
+        matrix = cone[MatrixIndex(offset+i.value)]
+        push!(soc, [LinearAlgebra.tr(matrix); 2 .* matrix[1, 2:end]])
+    end
+    return ShapedConeVector(
+        scalars,
+        soc,
+        [cone[i] for i in matrix_indices(model)],
+    )
 end
 
 function append_scalar_constraints!(
@@ -203,8 +214,14 @@ function append_scalar_constraints!(
     nscalar = ns + length(c)
     model.dim = ConeDimensions(
         nscalar,
+        model.dim.second_order_dimensions,
         model.dim.side_dimensions,
-        cumsum([nscalar; model.dim.side_dimensions .^ 2]),
+        cumsum(
+            [
+                nscalar+sum(model.dim.second_order_dimensions);
+                model.dim.side_dimensions .^ 2
+            ],
+        ),
     )
     model.jacobian = jacobian
     model.constant = constant
@@ -227,6 +244,7 @@ end
 
 primal_model(model::Model) = model
 num_scalars(model::Model) = model.dim.num_scalars
+num_second_order_cones(model::Model) = num_second_order_cones(model.dim)
 num_matrices(model::Model) = length(model.C)
 function matrix_indices(model::Model)
     return MOI.Utilities.LazyMap{MatrixIndex}(
