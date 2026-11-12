@@ -238,6 +238,30 @@ function test_sparse_rank_one_factors()
     return
 end
 
+# Small PSD blocks may involve only a few constraints of a large model.
+# Distinct components and blocks need not have the same active constraints.
+function test_sparse_rank_one_zero_weights()
+    dims, m = [80, 81], 8
+    function component(offset)
+        entries = [
+            LRO.Factorization(
+                sparsevec([1, mod1(j + offset, d - 1) + 1], [1.0, -0.4], d),
+                mod(j + i, 3) == offset ? (-1.0)^j : 0.0,
+            ) for j in 1:m, (i, d) in enumerate(dims)
+        ]
+        return only(LRO.detect_rank_one(permutedims(sparse.(entries))))
+    end
+    model = _model(
+        [spzeros(d, d) for d in dims],
+        (component(0), component(1)),
+        zeros(m);
+        scalars = 1,
+    )
+    buffer = _test_schur(model; nscalars = 1)
+    @test all(c -> all(U -> U isa SparseMatrixCSC, c.U), buffer.schur_buffer[3])
+    return
+end
+
 # The tests run on a single thread so the parts run one after the other, but
 # with the same partition as with several threads.
 function test_foreach_chunk()
