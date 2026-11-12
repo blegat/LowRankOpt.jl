@@ -6,7 +6,7 @@ import NLPModels
 
 function example()
     A = [sparse([1.0 0; 0 0]), sparse([0.0 1; 1 0]), sparse([0.0 0; 0 1])]
-    model = LRO.Model(
+    model = LRO.DualModel(
         [sparse([2.0 0; 0 3])],
         reshape(A, 1, 3),
         [1.0, 2.0, 3.0],
@@ -27,8 +27,8 @@ end
 
 @testset "Optional Schur workspaces" begin
     model, A = example()
-    full = LRO.BufferedModelForSchur(model, 8)
-    lean = LRO.BufferedModelForSchur(model, 8; schur = false)
+    full = LRO.BufferedDualModel(model, 8)
+    lean = LRO.BufferedDualModel(model, 8; schur = false)
     @test !isnothing(full.schur_buffer)
     @test isnothing(lean.schur_buffer)
     @test lean.model === full.model === model
@@ -47,7 +47,7 @@ end
               model.C[1] - sum(y[j] * A[j] for j in 1:3)
         product_allocations(buffered, X, y, result, idx)
         @test product_allocations(buffered, X, y, result, idx) == 0
-        shaped = LRO.ShapedSolution([1.0, 2.0], [X])
+        shaped = LRO.ShapedConeVector([1.0, 2.0], [X])
         NLPModels.jprod!(buffered, shaped, shaped, result)
         @test result ≈ [dot(a, X) for a in A] + model.C_lin * shaped.scalars
         @test NLPModels.obj(buffered, shaped) ≈ dot(model.C[1], X) + 5.0
@@ -56,10 +56,10 @@ end
     end
 
     # Rewrapping preserves both Jacobian caches, including their sparse patterns.
-    @test LRO.BufferedModelForSchur(full, 0) === full
-    @test LRO.BufferedModelForSchur(lean, 0; schur = false) === lean
-    dropped = LRO.BufferedModelForSchur(full, 8; schur = false)
-    restored = LRO.BufferedModelForSchur(lean, 8)
+    @test LRO.BufferedDualModel(full, 0) === full
+    @test LRO.BufferedDualModel(lean, 0; schur = false) === lean
+    dropped = LRO.BufferedDualModel(full, 8; schur = false)
+    restored = LRO.BufferedDualModel(lean, 8)
     for (source, wrapped) in ((full, dropped), (lean, restored))
         @test wrapped !== source
         @test wrapped.model === source.model
@@ -68,8 +68,8 @@ end
     end
     @test isnothing(dropped.schur_buffer)
     @test !isnothing(restored.schur_buffer)
-    L = LRO.ShapedSolution([1.0, 2.0], [[2.0 0.3; 0.3 1.0]])
-    R = LRO.ShapedSolution([3.0, 4.0], [[1.0 -0.1; -0.1 3.0]])
+    L = LRO.ShapedConeVector([1.0, 2.0], [[2.0 0.3; 0.3 1.0]])
+    R = LRO.ShapedConeVector([3.0, 4.0], [[1.0 -0.1; -0.1 3.0]])
     expected = [tr(A[j] * L[idx] * A[k] * R[idx]) for j in 1:3, k in 1:3]
     expected += model.C_lin * Diagonal(L.scalars .* R.scalars) * model.C_lin'
     for buffered in (full, restored)

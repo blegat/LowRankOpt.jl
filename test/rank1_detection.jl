@@ -136,11 +136,12 @@ function test_detected_schur_complement()
     b = zeros(n)
     d_lin = sparsevec(Int64[], Float64[], 0)
     C_lin = spzeros(Float64, Int64, n, 0)
-    model = LRO.Model(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, Int64[d])
+    model =
+        LRO.DualModel(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, Int64[d])
     @test eltype(only(model.A).values) <: LRO.Factorization
-    reference = LRO.Model(C, arr, b, d_lin, C_lin, Int64[d])
-    buffer = LRO.BufferedModelForSchur(model, 0)
-    reference_buffer = LRO.BufferedModelForSchur(reference, 0)
+    reference = LRO.DualModel(C, arr, b, d_lin, C_lin, Int64[d])
+    buffer = LRO.BufferedDualModel(model, 0)
+    reference_buffer = LRO.BufferedDualModel(reference, 0)
     W = Matrix(Symmetric(ones(d, d) + d * I))
     i = LRO.MatrixIndex(1)
     H = zeros(n, n)
@@ -261,7 +262,7 @@ function test_option_default_detects_one_hot()
             Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
         1:sparse_model.meta.ncon,
     )
-    buffer = LRO.BufferedModelForSchur(model, 1)
+    buffer = LRO.BufferedDualModel(model, 1)
     @test only(only(buffer.schur_buffer[3]).U) == LRO._Selection(Base.OneTo(2))
     return
 end

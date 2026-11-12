@@ -19,15 +19,15 @@ import LowRankOpt as LRO
     )
         flat = vcat(scalars, vec.(matrices)...)
         other_flat = vcat(other_scalars, vec.(other_matrices)...)
-        dims = LRO.Dimensions(
+        dims = LRO.ConeDimensions(
             length(scalars),
             size.(matrices, 1),
             cumsum([length(scalars); length.(matrices)]),
         )
-        shaped = LRO.ShapedSolution(scalars, matrices)
-        other_shaped = LRO.ShapedSolution(other_scalars, other_matrices)
-        vectorized = LRO.VectorizedSolution(flat, dims)
-        other_vectorized = LRO.VectorizedSolution(other_flat, dims)
+        shaped = LRO.ShapedConeVector(scalars, matrices)
+        other_shaped = LRO.ShapedConeVector(other_scalars, other_matrices)
+        vectorized = LRO.VectorizedConeVector(flat, dims)
+        other_vectorized = LRO.VectorizedConeVector(other_flat, dims)
         @test LRO.num_matrices(dims) == length(matrices)
         for (x, y) in ((shaped, other_shaped), (vectorized, other_vectorized))
             @test LRO.num_matrices(x) == length(matrices)

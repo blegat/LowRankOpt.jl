@@ -32,33 +32,39 @@ function _test_zero_Ai(
     T = Float64
     Z = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int64},Base.OneTo{Int64}}}
     S = SparseArrays.SparseMatrixCSC{T,Int64}
-    @test b.model.C isa Vector{matrix_in_objective ? S : Z}
+    @test LRO.dual_model(b.model).C isa Vector{matrix_in_objective ? S : Z}
     if all_zero
-        @test isempty(b.model.A)
+        @test isempty(LRO.dual_model(b.model).A)
     else
         # Missing entries of a component use `Int` axes, unlike the `Int64`
         # ones built by the MOI wrapper, which differ on 32-bit systems.
         ZInt = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
         if detect_rank_one
             R = LRO._SparseRankOne{T}
-            @test only(b.model.A).values isa Matrix{Union{ZInt,R}}
+            @test only(LRO.dual_model(b.model).A).values isa
+                  Matrix{Union{ZInt,R}}
         else
-            @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
+            @test only(LRO.dual_model(b.model).A).values isa
+                  Matrix{Union{S,ZInt}}
         end
     end
     i = LRO.MatrixIndex(1)
-    @test iszero(LRO.jac(b.model, 1, i))
-    @test iszero(LRO.jac(b.model, 2, i))
-    @test iszero(LRO.jac(b.model, 3, i)) == all_zero
+    @test iszero(LRO.jac(LRO.dual_model(b.model), 1, i))
+    @test iszero(LRO.jac(LRO.dual_model(b.model), 2, i))
+    @test iszero(LRO.jac(LRO.dual_model(b.model), 3, i)) == all_zero
     if !all_zero
-        @test LRO.jac(b.model, 3, i) isa (detect_rank_one ? R : S)
-        @test iszero(LRO.jac(b.model, 4, i))
+        @test LRO.jac(LRO.dual_model(b.model), 3, i) isa
+              (detect_rank_one ? R : S)
+        @test iszero(LRO.jac(LRO.dual_model(b.model), 4, i))
     end
-    buf = LRO.BufferedModelForSchur(b.model, 1)
+    buf = LRO.BufferedDualModel(LRO.dual_model(b.model), 1)
     if all_zero
         @test buf.jtprod_buffer[] isa LRO.FillArrays.Zeros
     else
-        @test all(A -> buf.jtprod_buffer[] !== A, only(b.model.A).values)
+        @test all(
+            A -> buf.jtprod_buffer[] !== A,
+            only(LRO.dual_model(b.model).A).values,
+        )
     end
     for κ in 0:5
         schur_test(model, κ)
@@ -88,7 +94,7 @@ function test_sparse_jtprod_buffer()
             SparseArrays.sparse([mod1(j, d)], [mod1(j, d)], [T(j)], d, d)
             for _ in 1:1, j in 1:ncon
         ]
-        model = LRO.Model(
+        model = LRO.DualModel(
             [SparseArrays.spzeros(T, d, d)],
             A,
             zeros(T, ncon),
@@ -117,7 +123,7 @@ function test_sparse_jtprod_buffer()
             work_ratio = work_ratio / 2,
         ) isa Matrix
 
-        buf = LRO.BufferedModelForSchur(model, 1)
+        buf = LRO.BufferedDualModel(model, 1)
         @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
         # A lazy zero matrix contributes nothing, including when only a
         # subset of constraints is requested. It must not use the generic
@@ -165,7 +171,7 @@ function test_sparse_jtprod_mixed_patterns()
     A = Matrix{Union{typeof(Z),typeof(P)}}(undef, 1, 4)
     A[1, :] = [Z, P, Z, Q]
     original = deepcopy(A)
-    model = LRO.Model(
+    model = LRO.DualModel(
         [SparseArrays.spzeros(d, d)],
         A,
         zeros(4),
@@ -174,7 +180,7 @@ function test_sparse_jtprod_mixed_patterns()
         Int64[d],
     )
     i = LRO.MatrixIndex(1)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedDualModel(model, 1)
     buffer = buf.jtprod_buffer[i.value]
     @test buffer isa SparseArrays.SparseMatrixCSC
     @test SparseArrays.nnz(buffer) == 7
@@ -207,7 +213,7 @@ function test_dense_dual_cons_reuses_product()
     # The objective has entries outside the constraint pattern.
     C = SparseArrays.sparse([1, 2], [2, 1], [4.0, 4.0], d, d)
     for objective in (C, FillArrays.Zeros(d, d))
-        model = LRO.Model(
+        model = LRO.DualModel(
             [objective],
             reshape([P, Q], 1, 2),
             zeros(2),
@@ -218,7 +224,7 @@ function test_dense_dual_cons_reuses_product()
             Int64[d],
         )
         original_C, original_A = deepcopy(model.C), deepcopy(model.A)
-        buf = LRO.BufferedModelForSchur(model, 1)
+        buf = LRO.BufferedDualModel(model, 1)
         i = LRO.MatrixIndex(1)
         buffer = buf.jtprod_buffer[i.value]
         @test buffer isa Matrix
@@ -241,7 +247,7 @@ function test_sparse_dual_cons_reuses_product()
     P = SparseArrays.spdiagm(Float64.(1:d))
     Q = SparseArrays.sparse([1, 3], [3, 1], [2.0, 2.0], d, d)
     objective = FillArrays.Zeros(d, d)
-    model = LRO.Model(
+    model = LRO.DualModel(
         [objective],
         reshape([P, Q], 1, 2),
         zeros(2),
@@ -250,7 +256,7 @@ function test_sparse_dual_cons_reuses_product()
         Int64[d],
     )
     original_A = deepcopy(model.A)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedDualModel(model, 1)
     i = LRO.MatrixIndex(1)
     buffer = buf.jtprod_buffer[i.value]
     @test buffer isa SparseArrays.SparseMatrixCSC
