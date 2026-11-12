@@ -85,7 +85,8 @@ Create a cone-variable adapter sharing the original model's coefficients.
 The original model is available as `primal_model(adapter)`.
 """
 function dual_model(model::Model; equalities = true)
-    if num_scalars(model) == length(model.d_lin)
+    if num_scalars(model) == length(model.d_lin) &&
+       iszero(num_second_order_cones(model))
         return DualModel(
             model,
             model.C,
@@ -96,13 +97,14 @@ function dual_model(model::Model; equalities = true)
         )
     end
     C, d, _, _ = scalar_bounds(model; equalities)
+    costs, coefficients, sizes = lifted_soc_data(model)
     return DualModel(
         model,
-        model.C,
-        model.A,
+        costs,
+        coefficients,
         SparseArrays.sparsevec(d),
         C,
-        model.msizes,
+        sizes,
     )
 end
 
