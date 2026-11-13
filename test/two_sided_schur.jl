@@ -149,6 +149,7 @@ function test_one_hot_identity()
     component = only(buffer.schur_buffer[3])
     @test component isa LRO._RankOneSchurComponent
     @test only(component.U) == LRO._Selection(Base.OneTo(d))
+    @test only(component.indices) isa Base.OneTo
 end
 
 # More constraints than the side dimension so the index repeats.
@@ -173,7 +174,7 @@ function test_one_hot_value()
         [LRO.Factorization(FillArrays.OneElement(2.0, j, d), -1.5) for j in 1:d]
     model = _model([spzeros(d, d)], reshape(entries, 1, d), ones(d))
     buffer = _test_schur(model)
-    @test only(buffer.schur_buffer[3]).weights == fill(-6.0, d, 1)
+    @test only(only(buffer.schur_buffer[3]).weights) == fill(-6.0, d)
 end
 
 # The one-hot structure is only exploited if it is given explicitly with
@@ -257,6 +258,83 @@ function test_sparse_rank_one_zero_weights()
     )
     buffer = _test_schur(model; nscalars = 1)
     @test all(c -> all(U -> U isa SparseMatrixCSC, c.U), buffer.schur_buffer[3])
+    return
+end
+
+# Local row numbers differ from global constraint indices, and partners
+# can have different active counts. An entirely inactive block must also
+# work for both explicit assembly and the matrix-vector product.
+function test_rank_one_active_blocks()
+    rng = MersenneTwister(29)
+    dims, m = [80, 81], 8
+    supports = (([2, 5], Int[]), ([1, 4, 7], [3, 6, 8]))
+    for kind in (:dense, :sparse, :selection)
+        function component(offset)
+            entries = [
+                begin
+                    v = if kind == :dense
+                        randn(rng, d)
+                    elseif kind == :sparse
+                        sparsevec([1, mod1(j + offset, d - 1) + 1], [1.0, -0.4], d)
+                    else
+                        LRO.one_hot(Float64, mod1(j + offset, d), d)
+                    end
+                    weight = j in supports[offset][slot] ? (-1.0)^j : 0.0
+                    LRO.Factorization(v, weight)
+                end for j in 1:m, (slot, d) in enumerate(dims)
+            ]
+            return LRO.BlockColumns([1, 2], entries, 2)
+        end
+        model = _model(
+            [spzeros(d, d) for d in dims],
+            (component(1), component(2)),
+            zeros(m),
+        )
+        buffer = _test_schur(model)
+        for (offset, workspace) in enumerate(buffer.schur_buffer[3])
+            @test workspace.indices == collect(supports[offset])
+            @test all(!iszero, Iterators.flatten(workspace.weights))
+            if kind != :selection
+                @test size(workspace.gram) ==
+                      (maximum(length, supports[offset]), m)
+                @test [size(U, 1) for U in workspace.U] == collect(length.(supports[offset]))
+            end
+        end
+        # Both general-component paths must scatter compact rows as well:
+        # sparse coefficients on the first block and diagonals on the second.
+        sparse_component = _block_columns(
+            [1],
+            [sparse([1, 2], [2, 1], [0.5, 0.5], dims[1], dims[1]) for _ in 1:m],
+            2,
+        )
+        diagonal =
+            _block_columns([2], [Diagonal(randn(rng, dims[2])) for _ in 1:m], 2)
+        mixed =
+            _model(model.C, (model.A..., sparse_component, diagonal), zeros(m))
+        _test_schur(mixed)
+    end
+    return
+end
+
+# Removing absent constraints must not make dense active factors look
+# sparse. Conversely, a fully active dense component keeps its direct map.
+function test_rank_one_active_density()
+    d, m = 4, 40
+    for active in (Int[], [7, 31], collect(1:m))
+        entries = [
+            LRO.Factorization([1.0, 0.2j, -0.3, 0.4], j in active ? 1.0 : 0.0) for j in 1:m
+        ]
+        model = _model(
+            [spzeros(d, d)],
+            (_block_columns([1], entries, 1),),
+            zeros(m),
+        )
+        buffer = _test_schur(model)
+        component = only(buffer.schur_buffer[3])
+        @test only(component.U) isa Matrix
+        @test size(only(component.U)) == (length(active), d)
+        @test (only(component.indices) isa Base.OneTo) == (length(active) == m)
+    end
     return
 end
 
