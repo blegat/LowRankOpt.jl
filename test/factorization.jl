@@ -16,6 +16,16 @@ struct DummySparse <: SparseArrays.AbstractSparseVector{Float64,Int} end
 Base.size(::DummySparse) = (2,)
 Base.getindex(::DummySparse, ::Integer) = 1.0
 
+function test_sparse_factor_index_types()
+    for Ti in (Int32, Int64)
+        factor = sparsevec(Ti[1, 3], [2.0, -1.0], Ti(3))
+        F = LRO.Factorization(factor, 2.0)
+        @test size(F) === (3, 3)
+        @test sparse(F) == [8.0 0 -4; 0 0 0; -4 0 2]
+    end
+    return
+end
+
 function test_dot_error()
     F = DummyFactorization()
     err = ErrorException(
