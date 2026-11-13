@@ -383,17 +383,15 @@ function MOI.copy_to(
     b = dest.max_sense ? b0 : -b0
 
     dest.model = Model(
-        DualModel(
-            _instantiate(A[:, 1]),
-            _instantiate(A[:, 2:end]),
-            b,
-            convert(
-                SparseArrays.SparseVector{T,Int64},
-                SparseArrays.sparsevec(Cd_lin.constants),
-            ),
-            C_lin,
-            msizes,
-        );
+        _instantiate(A[:, 1]),
+        _instantiate(A[:, 2:end]),
+        b,
+        convert(
+            SparseArrays.SparseVector{T,Int64},
+            SparseArrays.sparsevec(Cd_lin.constants),
+        ),
+        C_lin,
+        msizes;
         objective_constant = dest.max_sense ? -dest.objective_constant :
                              dest.objective_constant,
     )

@@ -9,6 +9,7 @@ import FastLapackInterface
 import LinearAlgebra
 import SparseArrays
 import MathOptInterface as MOI
+import NLPModels
 
 include("sets.jl")
 include("factorization.jl")
@@ -19,9 +20,9 @@ include("Bridges/Bridges.jl")
 
 include("cone_vector.jl")
 include("block_columns.jl")
+include("model.jl")
 include("dual_model.jl")
 include("buffer.jl")
-include("model.jl")
 include("schur.jl")
 include("MOI_wrapper.jl")
 include("eigen_workspace.jl")

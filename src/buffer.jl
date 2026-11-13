@@ -1,6 +1,6 @@
-mutable struct BufferedDualModel{T,C<:AbstractMatrix{T},A<:Tuple,JB,JTB,SB} <:
+mutable struct BufferedDualModel{T,D<:DualModel{T},JB,JTB,SB} <:
                AbstractDualModel{T}
-    model::DualModel{T,C,A}
+    model::D
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     jprod_buffer::JB
     jtprod_buffer::JTB
@@ -56,6 +56,8 @@ function _schur_buffer(model::BufferedDualModel)
     end
     return model.schur_buffer
 end
+
+primal_model(model::BufferedDualModel) = primal_model(model.model)
 
 num_scalars(model::BufferedDualModel) = num_scalars(model.model)
 num_matrices(model::BufferedDualModel) = num_matrices(model.model)
