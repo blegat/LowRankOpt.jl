@@ -12,9 +12,9 @@ The block identifiers must be strictly increasing. Other blocks have no
 contribution. Missing blocks are skipped, without requiring `zero(M)` for
 the matrix element type `M`.
 
-Constraints are rows and stored PSD blocks are columns, so each block's
-constraint matrices are contiguous. This container stores whole columns;
-it does not represent sparsity within a column.
+Constraints are rows and stored PSD blocks are columns. Dense `values`
+keep each block's coefficients contiguous; internal sparse storage can
+also omit absent variable coefficients within a stored block.
 
 For example, with `n` equality constraints and three PSD blocks,
 `BlockColumns([1, 3], values, 3)` stores an `n × 2` matrix of coefficients.
@@ -22,15 +22,15 @@ It contributes to blocks 1 and 3 and contributes nothing to block 2.
 A model can sum this with another component by passing `(component1,
 component2)` as its constraint data.
 """
-struct BlockColumns{M<:AbstractMatrix}
+struct BlockColumns{M<:AbstractMatrix,V<:AbstractMatrix{M}}
     block_ids::Vector{Int}
-    values::Matrix{M}
+    values::V
     nblocks::Int
     function BlockColumns(
         block_ids,
-        values::Matrix{M},
+        values::V,
         nblocks::Integer,
-    ) where {M<:AbstractMatrix}
+    ) where {M<:AbstractMatrix,V<:AbstractMatrix{M}}
         ids = Int.(block_ids)
         length(ids) == size(values, 2) || throw(
             DimensionMismatch(
@@ -45,7 +45,7 @@ struct BlockColumns{M<:AbstractMatrix}
                 "block identifiers must be strictly increasing and within 1:nblocks",
             ),
         )
-        return new{M}(ids, values, Int(nblocks))
+        return new{M,V}(ids, values, Int(nblocks))
     end
 end
 
@@ -165,3 +165,18 @@ function _matrix_components(A::AbstractMatrix)
         unique(typeof(value) for value in A if !(value isa FillArrays.Zeros))
     return Tuple(_typed_component(M, A) for M in types)
 end
+
+# Sparse variable coefficients within each stored PSD block. Each missing
+# coefficient shares its block's zero matrix instead of storing a dense grid.
+struct SparseBlockCoefficients{M,T} <: AbstractMatrix{Union{M,_ZerosMatrix{T}}}
+    columns::Vector{Dict{Int,M}}
+    zeros::Vector{_ZerosMatrix{T}}
+    nrows::Int
+end
+Base.size(A::SparseBlockCoefficients) = (A.nrows, length(A.columns))
+function Base.getindex(A::SparseBlockCoefficients, i::Int, j::Int)
+    @boundscheck checkbounds(A, i, j)
+    return get(A.columns[j], i, A.zeros[j])
+end
+_coefficient_indices(A::AbstractMatrix, slot) = axes(A, 1)
+_coefficient_indices(A::SparseBlockCoefficients, slot) = keys(A.columns[slot])

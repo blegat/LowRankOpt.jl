@@ -284,7 +284,7 @@ function _coefficient_dot(A::AbstractFactorization, V::AbstractFactorization)
     return LinearAlgebra.dot(A, V)
 end
 function _add_column_jprod!(values, slot, V, Jv)
-    for j in eachindex(Jv)
+    for j in _coefficient_indices(values, slot)
         Jv[j] += _coefficient_dot(values[j, slot], V)
     end
     return nothing
