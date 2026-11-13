@@ -100,10 +100,11 @@ function _model(C, A, b; scalars = 0)
 end
 
 # Sparse matrices with one, a few and many nonzeros so that `κ` selects
-# the three regimes of the sparse component.
+# the three regimes of the sparse component. The dense product of the matrix
+# with two nonzero columns only uses these columns.
 function test_sparse_regimes()
     rng = MersenneTwister(2)
-    d, m = 6, 5
+    d, m = 6, 6
     entries = [
         sparse([2], [2], [1.5], d, d),
         sparse(
@@ -112,6 +113,7 @@ function test_sparse_regimes()
         sparse(Symmetric(randn(rng, d, d))),
         sparse([4], [4], [-2.0], d, d),
         spzeros(d, d),
+        sparse([1, 3, 3], [3, 1, 3], [1.0, 1.0, 0.5], d, d),
     ]
     model =
         _model([spzeros(d, d)], reshape(entries, 1, m), zeros(m); scalars = 2)
