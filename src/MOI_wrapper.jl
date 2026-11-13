@@ -188,25 +188,81 @@ function _instantiate(A::_MatrixBuilder{T}) where {T}
     end
 end
 
-function _instantiate(A::Array{_MatrixBuilder{T}}) where {T}
-    if isempty(A)
-        return Array{
-            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
-        }(
-            undef,
-            size(A),
-        )
-    else
-        I = _instantiate.(A)
-        if !isconcretetype(eltype(I))
-            # If we have for instance FillArrays.Zeros but also low-rank,
-            # the eltype is `AbstractMatrix` which is going to cause dynamic dispatch
-            # every time it is accessed. Instead, we want a small `Union` as Julia
-            # handles it much more efficiently, see https://julialang.org/blog/2018/08/union-splitting/
-            I = convert(Array{Union{unique(typeof.(I))...}}, I)
-        end
-        return I
+function _matrix_builder!(
+    blocks::Vector{Dict{Int,_MatrixBuilder{T}}},
+    i,
+    j,
+    d,
+) where {T}
+    return get!(blocks[i], j) do
+        return _MatrixBuilder{T}(d)
     end
+end
+
+function _coefficient_component(
+    ::Type{M},
+    entries,
+    n,
+    msizes,
+) where {M<:AbstractMatrix}
+    ids = sort!(unique(first(entry) for entry in entries))
+    slots = Dict(i => k for (k, i) in enumerate(ids))
+    T = eltype(M)
+    columns = [Dict{Int,M}() for i in ids]
+    for (i, j, matrix) in entries
+        columns[slots[i]][j] = matrix::M
+    end
+    values = SparseBlockCoefficients(
+        columns,
+        _ZerosMatrix{T}[
+            FillArrays.Zeros{T}(Int(msizes[i]), Int(msizes[i])) for i in ids
+        ],
+        Int(n),
+    )
+    return BlockColumns(ids, values, length(msizes))
+end
+
+# Build homogeneous block columns directly from present MOI coefficients.
+# Missing variables need no matrix builder or per-entry zero matrix.
+function _coefficient_data(
+    blocks::Vector{Dict{Int,_MatrixBuilder{T}}},
+    msizes,
+    n,
+) where {T}
+    costs = AbstractMatrix{T}[]
+    types = DataType[]
+    entries = Dict{DataType,Vector{Tuple{Int,Int,AbstractMatrix{T}}}}()
+    for (i, builders) in enumerate(blocks)
+        constant = get(builders, 1, nothing)
+        push!(
+            costs,
+            isnothing(constant) ? FillArrays.Zeros{T}(msizes[i], msizes[i]) :
+            _instantiate(constant),
+        )
+        for (j, builder) in builders
+            if j == 1
+                continue
+            end
+            matrix = _instantiate(builder)
+            if _matrix_iszero(matrix)
+                continue
+            end
+            M = typeof(matrix)
+            if !haskey(entries, M)
+                push!(types, M)
+                entries[M] = Tuple{Int,Int,AbstractMatrix{T}}[]
+            end
+            push!(entries[M], (i, j-1, matrix))
+        end
+    end
+    if isempty(costs)
+        typed_costs = _ZerosMatrix{T}[]
+    else
+        typed_costs = convert(Vector{Union{unique(typeof.(costs))...}}, costs)
+    end
+    components =
+        Tuple(_coefficient_component(M, entries[M], n, msizes) for M in types)
+    return typed_costs, components
 end
 
 function __add!(A::_MatrixBuilder, i, j, v)
@@ -329,12 +385,15 @@ function _add_constraints(
         push!(msizes, d)
         lmi_id = length(msizes)
         dest.lmi_id[ci] = lmi_id
-        for k in axes(A, 2)
-            A[lmi_id, k] = _MatrixBuilder{T}(d)
-        end
+        A[lmi_id] = Dict{Int,_MatrixBuilder{T}}()
         for row in eachindex(func.constants)
             if !iszero(func.constants[row])
-                _add!(A[lmi_id, 1], row, func.constants[row], set)
+                _add!(
+                    _matrix_builder!(A, lmi_id, 1, d),
+                    row,
+                    func.constants[row],
+                    set,
+                )
             end
         end
         # If the structure is one-hot, we treat the constraint as if it was
@@ -348,17 +407,24 @@ function _add_constraints(
             col = 1 + scalar.variable.value
             row, coef = term.output_index, -scalar.coefficient
             if one_hot
-                _add_one_hot!(A[lmi_id, col], row, coef, set)
+                _add_one_hot!(
+                    _matrix_builder!(A, lmi_id, col, d),
+                    row,
+                    coef,
+                    set,
+                )
             else
-                _add!(A[lmi_id, col], row, coef, set)
+                _add!(_matrix_builder!(A, lmi_id, col, d), row, coef, set)
             end
         end
         # Same as for `one_hot`, the rank-one structure is then the same as
         # if the matrices were given as rank-one factorizations, see the
         # "Explicit structure" section of the docstring of `one_hot`.
         if !one_hot && get(dest.options, "detect_rank_one", true)
-            for col in axes(A, 2)[2:end]
-                _detect_rank_one!(A[lmi_id, col])
+            for (col, builder) in A[lmi_id]
+                if col != 1
+                    _detect_rank_one!(builder)
+                end
             end
         end
     end
@@ -384,10 +450,10 @@ function MOI.copy_to(
     C_lin = -convert(SM, C_lin')
     n = MOI.get(src, MOI.NumberOfVariables())
     constraint_types = MOI.get(src, MOI.ListOfConstraintTypesPresent())
-    nlmi = sum(constraint_types) do (F, S)
+    nlmi = sum(constraint_types; init = 0) do (F, S)
         return _nlmi(src, F, S)
     end
-    A = Matrix{_MatrixBuilder{T}}(undef, nlmi, n + 1)
+    A = Vector{Dict{Int,_MatrixBuilder{T}}}(undef, nlmi)
     empty!(dest.lmi_id)
     msizes = Int64[]
     for (F, S) in constraint_types
@@ -402,9 +468,10 @@ function MOI.copy_to(
     end
     b = dest.max_sense ? b0 : -b0
 
+    costs, coefficients = _coefficient_data(A, msizes, n)
     dest.model = Model(
-        _instantiate(A[:, 1]),
-        _instantiate(A[:, 2:end]),
+        costs,
+        coefficients,
         b,
         convert(
             SparseArrays.SparseVector{T,Int64},
