@@ -32,41 +32,21 @@ function NLPModels.jprod!(
 end
 
 """
-    DualModel
+    DualModel(model::Model)
 
-DualModel representing the primal-dual pair of problems:
-```math
-\\begin{aligned}
-\\min {} & \\sum_{i=1}^\\text{nlmi}
-\\langle C_i, X_i \\rangle + \\langle d_\\text{lin}, x \\rangle &
-\\max {} & b^\\top y
-\\\\
-\\text{s.t. } & \\sum_{i=1}^\\text{nlmi} \\langle A_{i,j}, X_i \\rangle + (C_\\text{lin} x)_j = b_j
-\\qquad
-\\forall j \\in \\{1,\\ldots,m\\} &
-\\text{s.t. } & \\sum_{j=1}^m y_j A_{i,j} \\preceq C_i
-\\qquad
-\\forall i \\in \\{1,\\ldots,\\text{nlmi}\\}
-\\\\
-& x \\ge 0, X_i \\succeq 0
-\\qquad
-\\forall i \\in \\{1,\\ldots,\\text{nlmi}\\} &
-& C_\\text{lin}^\\top y \\le d_\\text{lin}
-\\end{aligned}
-```
-This corresponds to [this primal-dual pair](https://plato.asu.edu/dimacs/node2.html).
-The fields of the `struct` as related to the arrays of the above formulation as follows:
+Explicit cone-variable adapter of `model`. Its nonnegative scalar variables
+`z` and PSD matrix variables `X[i]` satisfy
+`(C_lin * z)[j] + sum(dot(A[i,j], X[i]) for i) = b[j]`. It minimizes
+`dot(d_lin, z) + sum(dot(C[i], X[i]))`, the negative of the maximization dual
+objective, excluding the original objective constant.
 
-* The ``i``th PSD constraint is of size `msize[i] × msisze[i]`
-* The matrix ``C_i`` is given by `C[i]`.
-* `A` is a tuple of [`BlockColumns`](@ref) components. The matrix
-  ``A_{i,j}`` is the sum of their entries for PSD block `i` and constraint
-  `j`. A dense outer matrix in the original block-by-constraint layout is
-  accepted and split into homogeneous components. Tuple entries can also
-  use dense outer matrices in that layout.
+The adapter shares affine coefficients with its parent where possible and
+owns the metadata for its cone variables. [`primal_model`](@ref) returns the
+original model, preserving its objective constant and native constraints.
 """
-mutable struct DualModel{T,C<:AbstractMatrix{T},A<:Tuple} <:
-               AbstractDualModel{T}
+struct DualModel{T,C<:AbstractMatrix{T},A<:Tuple,M<:Model{T}} <:
+       AbstractDualModel{T}
+    model::M
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     dim::ConeDimensions
     C::Vector{C}
@@ -75,59 +55,53 @@ mutable struct DualModel{T,C<:AbstractMatrix{T},A<:Tuple} <:
     d_lin::SparseArrays.SparseVector{T,Int64}
     C_lin::SparseArrays.SparseMatrixCSC{T,Int64}
     msizes::Vector{Int64}
-
-    function DualModel(
-        C::Vector{CT},
-        A::Tuple,
-        b::Vector{T},
-        d_lin::SparseArrays.SparseVector{T,Int64},
-        C_lin::SparseArrays.SparseMatrixCSC{T,Int64},
-        msizes::Vector{Int64},
-    ) where {T,CT<:AbstractMatrix{T}}
-        components = map(_as_component, A)
-        for component in components
-            size(component) == (length(b), length(C)) || throw(
-                DimensionMismatch(
-                    "constraint components must have one row per constraint and one logical column per PSD block",
-                ),
-            )
-            for (k, i) in enumerate(component.block_ids),
-                j in axes(component.values, 1)
-
-                coefficient = component.values[j, k]
-                coefficient isa AbstractMatrix{T} || throw(
-                    ArgumentError(
-                        "constraint coefficients must have element type $T",
-                    ),
-                )
-                size(coefficient) == (msizes[i], msizes[i]) || throw(
-                    DimensionMismatch(
-                        "constraint matrix has the wrong size for PSD block $i",
-                    ),
-                )
-            end
-        end
-        model = new{T,CT,typeof(components)}()
-        model.C = C
-        model.A = components
-        model.b = b
-        model.d_lin = d_lin
-        model.C_lin = C_lin
-        model.msizes = msizes
-        n = num_scalars(model)
-        model.meta = NLPModels.NLPModelMeta{T,Vector{T}}(
-            Int(n + sum(abs2, msizes, init = 0)),
-            ncon = length(b),
-        )
-        offsets = n .+ [0; cumsum(abs2.(msizes))]
-        model.dim = ConeDimensions(n, msizes, offsets)
-        return model
-    end
 end
 
-# Preserve the existing constructor for one dense outer matrix of matrices.
-function DualModel(C, A::Matrix{<:AbstractMatrix}, b, d_lin, C_lin, msizes)
-    return DualModel(C, _matrix_components(A), b, d_lin, C_lin, msizes)
+# Explicitly supply transformed coefficients while retaining the original
+# model, e.g. when finite scalar bounds are expanded into cone variables.
+function DualModel(
+    model::Model{T},
+    C::Vector{CT},
+    A::Tuple,
+    d_lin::SparseArrays.SparseVector{T},
+    C_lin::SparseArrays.SparseMatrixCSC{T},
+    msizes::AbstractVector{<:Integer},
+) where {T,CT<:AbstractMatrix{T}}
+    d_lin = convert(SparseArrays.SparseVector{T,Int64}, d_lin)
+    C_lin = convert(SparseArrays.SparseMatrixCSC{T,Int64}, C_lin)
+    msizes = convert(Vector{Int64}, msizes)
+    n = length(d_lin)
+    meta = NLPModels.NLPModelMeta{T,Vector{T}}(
+        Int(n + sum(abs2, msizes; init = 0));
+        ncon = length(model.b),
+    )
+    dim = ConeDimensions(n, msizes, n .+ [0; cumsum(abs2.(msizes))])
+    return DualModel(model, meta, dim, C, A, model.b, d_lin, C_lin, msizes)
+end
+
+"""
+    dual_model(model::Model)
+
+Create a cone-variable adapter sharing the original model's coefficients.
+The original model is available as `primal_model(adapter)`.
+"""
+function dual_model(model::Model)
+    return DualModel(
+        model,
+        model.C,
+        model.A,
+        model.d_lin,
+        model.C_lin,
+        model.msizes,
+    )
+end
+DualModel(model::Model) = dual_model(model)
+dual_model(model::AbstractDualModel) = model
+primal_model(model::DualModel) = model.model
+
+# Convenience for callers that explicitly request the cone-variable form.
+function DualModel(C::Vector, A, b, d_lin, C_lin, msizes)
+    return DualModel(Model(C, A, b, d_lin, C_lin, msizes))
 end
 
 function NLPModels.unconstrained(model::DualModel)

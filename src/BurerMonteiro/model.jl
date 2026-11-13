@@ -1,13 +1,14 @@
-mutable struct Model{S,T,CT,AT,JTB} <: NLPModels.AbstractNLPModel{T,Vector{T}}
-    model::LRO.DualModel{T,CT,AT}
+mutable struct Model{S,T,D<:LRO.DualModel{T},JTB} <:
+               NLPModels.AbstractNLPModel{T,Vector{T}}
+    model::D
     dim::Dimensions{S}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     counters::NLPModels.Counters
     jtprod_buffer::JTB
-    function Model{S}(model::LRO.DualModel{T,CT,AT}, ranks) where {S,T,CT,AT}
+    function Model{S}(model::D, ranks) where {S,T,D<:LRO.DualModel{T}}
         dim = Dimensions{S}(model, ranks)
         jtprod_buffer = buffer_for_jtprod(model, dim)
-        return new{S,T,CT,AT,typeof(jtprod_buffer)}(
+        return new{S,T,D,typeof(jtprod_buffer)}(
             model,
             dim,
             meta(dim, LRO.cons_constant(model)),

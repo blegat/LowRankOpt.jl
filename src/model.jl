@@ -1,29 +1,32 @@
 # The public NLPModels interface uses free variables and cone constraints.
-# The explicit DualModel retains the cone-variable formulation required by
-# factorization algorithms and the existing primal-dual linear algebra.
 abstract type AbstractModel{T} <: NLPModels.AbstractNLPModel{T,Vector{T}} end
 Base.broadcastable(model::AbstractModel) = Ref(model)
 
 """
-    Model(data::DualModel; objective_constant = 0)
+    Model(C, A, b, d_lin, C_lin, msizes; objective_constant = 0)
 
-Affine conic model with ordinary scalar decision variables. Constraint
-outputs are ordered as the bounded scalar prefix followed by PSD blocks.
-The scalar prefix has lower bound zero; PSD blocks are identified by `dim`
-and have free componentwise bounds in `meta`. Their positive-semidefinite
-restriction is a block constraint, not a componentwise bound.
+Affine conic model with ordinary scalar decision variables. The model owns
+its coefficient data and NLPModels metadata. Constraint outputs are ordered
+as a nonnegative scalar prefix followed by PSD blocks identified by `dim`.
+The PSD entries have free componentwise metadata bounds; positive
+semidefiniteness is a block constraint.
 
-The objective is `-data.b' * x + objective_constant`; scalar constraints
-are `data.d_lin - data.C_lin' * x`, and PSD constraints are
-`data.C[i] - sum(data.A[i,j] * x[j])`. Matrix outputs use full column-major
+The objective is `-b' * x + objective_constant`; scalar constraints are
+`d_lin - C_lin' * x`, and PSD constraints are
+`C[i] - sum(A[i,j] * x[j])`. Matrix outputs use full column-major
 vectorization, so Jacobian adjoints use the Frobenius inner product.
 
-Use [`dual_model`](@ref) explicitly for algorithms operating on cone
-variables. This constructor shares their coefficient data; it does not
-change the NLPModels variables to cone variables.
+`A` is a tuple of [`BlockColumns`](@ref) components. A dense outer matrix
+in block-by-constraint order is also accepted. Use [`DualModel`](@ref) or
+[`dual_model`](@ref) explicitly for algorithms operating on cone variables.
 """
-mutable struct Model{T,D<:DualModel{T}} <: AbstractModel{T}
-    data::D
+mutable struct Model{T,C<:AbstractMatrix{T},A<:Tuple} <: AbstractModel{T}
+    C::Vector{C}
+    A::A
+    b::Vector{T}
+    d_lin::SparseArrays.SparseVector{T,Int64}
+    C_lin::SparseArrays.SparseMatrixCSC{T,Int64}
+    msizes::Vector{Int64}
     dim::ConeDimensions
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     counters::NLPModels.Counters
@@ -34,32 +37,70 @@ mutable struct Model{T,D<:DualModel{T}} <: AbstractModel{T}
     objective_constant::T
 end
 
-function Model(data::DualModel{T}; objective_constant = zero(T)) where {T}
-    n = length(data.b)
-    dim = data.dim
+function Model(
+    C::Vector{CT},
+    A::Tuple,
+    b::Vector{T},
+    d_lin::SparseArrays.SparseVector{T},
+    C_lin::SparseArrays.SparseMatrixCSC{T},
+    msizes::AbstractVector{<:Integer};
+    objective_constant = zero(T),
+) where {T,CT<:AbstractMatrix{T}}
+    components = map(_as_component, A)
+    for component in components
+        if size(component) != (length(b), length(C))
+            throw(
+                DimensionMismatch(
+                    "constraint components must have one row per constraint and one logical column per PSD block",
+                ),
+            )
+        end
+        for (k, i) in enumerate(component.block_ids),
+            j in axes(component.values, 1)
+
+            coefficient = component.values[j, k]
+            if !(coefficient isa AbstractMatrix{T})
+                throw(
+                    ArgumentError(
+                        "constraint coefficients must have element type $T",
+                    ),
+                )
+            end
+            if size(coefficient) != (msizes[i], msizes[i])
+                throw(
+                    DimensionMismatch(
+                        "constraint matrix has the wrong size for PSD block $i",
+                    ),
+                )
+            end
+        end
+    end
+    d_lin = convert(SparseArrays.SparseVector{T,Int64}, d_lin)
+    C_lin = convert(SparseArrays.SparseMatrixCSC{T,Int64}, C_lin)
+    msizes = convert(Vector{Int64}, msizes)
+    n = length(b)
+    ns = length(d_lin)
+    dim = ConeDimensions(ns, msizes, ns .+ [0; cumsum(abs2.(msizes))])
     m = Int(length(dim))
     rows, cols, values = Int[], Int[], T[]
-    # The first block contains ordinary scalar inequalities.
-    C = data.C_lin
-    for k in axes(C, 2), p in SparseArrays.nzrange(C, k)
+    for k in axes(C_lin, 2), p in SparseArrays.nzrange(C_lin, k)
         push!(rows, k)
-        push!(cols, SparseArrays.rowvals(C)[p])
-        push!(values, -SparseArrays.nonzeros(C)[p])
+        push!(cols, SparseArrays.rowvals(C_lin)[p])
+        push!(values, -SparseArrays.nonzeros(C_lin)[p])
     end
     constant = zeros(T, m)
     constraint = VectorizedConeVector(constant, dim)
-    constraint[ScalarIndex] .= data.d_lin
-    for idx in matrix_indices(data)
-        i, d = idx.value, side_dimension(data, idx)
-        constraint[idx] .= data.C[i]
+    constraint[ScalarIndex] .= d_lin
+    for (i, d) in enumerate(msizes)
+        constraint[MatrixIndex(i)] .= C[i]
         offset = dim.offsets[i]
-        _foreach_column(data.A, i) do coefficients, slot
+        _foreach_column(components, i) do coefficients, slot
             for j in axes(coefficients, 1)
-                A = coefficients[j, slot]
-                if iszero(A)
+                coefficient = coefficients[j, slot]
+                if iszero(coefficient)
                     continue
                 end
-                I, J, V = SparseArrays.findnz(SparseArrays.sparse(A))
+                I, J, V = SparseArrays.findnz(SparseArrays.sparse(coefficient))
                 for k in eachindex(V)
                     push!(rows, offset + I[k] + (J[k] - 1) * d)
                     push!(cols, j)
@@ -87,7 +128,12 @@ function Model(data::DualModel{T}; objective_constant = zero(T)) where {T}
         minimize = true,
     )
     return Model(
-        data,
+        C,
+        components,
+        b,
+        d_lin,
+        C_lin,
+        msizes,
         dim,
         meta,
         NLPModels.Counters(),
@@ -99,29 +145,26 @@ function Model(data::DualModel{T}; objective_constant = zero(T)) where {T}
     )
 end
 
-"""
-    dual_model(model::Model)
+function Model(C, A::Matrix{<:AbstractMatrix}, b, d_lin, C_lin, msizes; kws...)
+    return Model(C, _matrix_components(A), b, d_lin, C_lin, msizes; kws...)
+end
 
-Return the explicitly named cone-variable dual formulation. The public
-model and its dual share affine coefficient data.
-"""
-dual_model(model::Model) = model.data
-dual_model(model::AbstractDualModel) = model
 primal_model(model::Model) = model
-primal_model(model::DualModel) = Model(model)
-primal_model(model::BufferedDualModel) = Model(model.model)
-DualModel(model::Model) = dual_model(model)
-
 num_scalars(model::Model) = model.dim.num_scalars
-num_matrices(model::Model) = num_matrices(model.data)
-matrix_indices(model::Model) = matrix_indices(model.data)
-side_dimension(model::Model, idx::MatrixIndex) = side_dimension(model.data, idx)
+num_matrices(model::Model) = length(model.C)
+function matrix_indices(model::Model)
+    return MOI.Utilities.LazyMap{MatrixIndex}(
+        _matrix_index,
+        Base.OneTo(num_matrices(model)),
+    )
+end
+side_dimension(model::Model, idx::MatrixIndex) = model.msizes[idx.value]
 NLPModels.unconstrained(model::Model) = iszero(model.meta.ncon)
 NLPModels.has_bounds(::Model) = false
 
 function NLPModels.obj(model::Model, x::AbstractVector)
     NLPModels.increment!(model, :neval_obj)
-    return -LinearAlgebra.dot(model.data.b, x) + model.objective_constant
+    return -LinearAlgebra.dot(model.b, x) + model.objective_constant
 end
 
 function NLPModels.grad!(
@@ -130,7 +173,7 @@ function NLPModels.grad!(
     gradient::AbstractVector,
 )
     NLPModels.increment!(model, :neval_grad)
-    gradient .= -model.data.b
+    gradient .= -model.b
     return gradient
 end
 

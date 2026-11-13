@@ -1,5 +1,5 @@
-struct Solver{S,T,CT,AT,ST} <: SolverCore.AbstractOptimizationSolver
-    model::Model{S,T,CT,AT}
+struct Solver{S,T,D,JTB,ST} <: SolverCore.AbstractOptimizationSolver
+    model::Model{S,T,D,JTB}
     solver::ST
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
 end
