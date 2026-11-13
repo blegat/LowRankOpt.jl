@@ -240,17 +240,25 @@ then PSD blocks identified by `model.dim`. The PSD entries have free
 componentwise metadata bounds; positive semidefiniteness is a block
 restriction handled by conic solvers.
 
-The cone-variable formulation is explicitly named `LowRankOpt.DualModel`.
-`LowRankOpt.dual_model(model)` selects that formulation for algorithms such
-as Burer–Monteiro. `BufferedDualModel` caches its operators without changing
-the public primal model's variable meaning.
-
-For coefficient data `C, A, b, d_lin, C_lin, msizes`:
+`LowRankOpt.Model` owns the coefficient data and the NLPModels interface.
+Construct it directly from `C, A, b, d_lin, C_lin, msizes`:
 
 ```julia
-data = LowRankOpt.DualModel(C, A, b, d_lin, C_lin, msizes)
-model = LowRankOpt.Model(data)
+model = LowRankOpt.Model(C, A, b, d_lin, C_lin, msizes)
 ```
+
+Algorithms such as Burer–Monteiro explicitly request the cone-variable
+formulation through `LowRankOpt.DualModel(model)` or
+`LowRankOpt.dual_model(model)`. This adapter shares the model's coefficients;
+`BufferedDualModel` adds caches for its operators.
+
+```julia
+dual = LowRankOpt.DualModel(model)
+LowRankOpt.primal_model(dual) === model # true
+```
+
+Returning to the original model preserves its objective constant and
+NLPModels metadata.
 
 Here `NLPModels.obj(model, x) = -dot(b, x)`. Scalar constraints are
 `d_lin - C_lin' * x ≥ 0`; each PSD block is
