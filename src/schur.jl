@@ -130,67 +130,88 @@ end
 function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
     σ, last_dense = workspace.permutation, workspace.last_dense
     column = view(workspace.component.values, :, slot)
-    n = length(column)
+    # The constraints that are zero on this block are the last ones of `σ`
+    n = workspace.last_nonzero[slot]
 
-    for ii in axes(H, 1)
+    for ii in 1:n
         i = σ[ii, slot]
         Ai = column[i]
-        if _nnz(Ai) > 0
-            if ii <= last_dense[slot]
-                LinearAlgebra.mul!(AW, L, Ai)
-                LinearAlgebra.mul!(WAW, AW, R)
-                I = view(σ, ii:n, slot)
-                _add_jprod!(
-                    WAW,
-                    view(H, I, i),
-                    view(workspace.jacobian[slot], :, I),
-                )
-                for jj in (ii+1):n
-                    j = σ[jj, slot]
-                    H[i, j] = H[j, i]
+        if ii <= last_dense[slot]
+            _sparse_sandwich!(WAW, AW, L, R, Ai)
+            I = view(σ, ii:n, slot)
+            _add_jprod!(
+                WAW,
+                view(H, I, i),
+                view(workspace.jacobian[slot], :, I),
+            )
+            for jj in (ii+1):n
+                j = σ[jj, slot]
+                H[i, j] = H[j, i]
+            end
+        elseif _nnz(Ai) > 1
+            @inbounds for jj in ii:n
+                j = σ[jj, slot]
+                ttt = _dot(workspace.jacobian[slot], i, j, L, R)
+                H[i, j] += ttt
+                if i != j
+                    H[j, i] += ttt
                 end
-            else
-                if _nnz(Ai) > 1
-                    @inbounds for jj in ii:n
-                        j = σ[jj, slot]
-                        Aj = column[j]
-                        if !iszero(_nnz(Aj))
-                            ttt = _dot(workspace.jacobian[slot], i, j, L, R)
-                            H[i, j] += ttt
-                            if i != j
-                                H[j, i] += ttt
-                            end
-                        end
-                    end
-                elseif _nnz(Ai) == 1
-                    # A is symmetric
-                    iiiiAi = jjjiAi = only(SparseArrays.rowvals(Ai))
-                    vvvi = only(SparseArrays.nonzeros(Ai))
-                    @inbounds for jj in ii:n
-                        j = σ[jj, slot]
-                        Ajjj = column[j]
-                        # As we sort the matrices in decreasing `nnz` order,
-                        # the rest of matrices is either zero or have only
-                        # one entry
-                        if !iszero(_nnz(Ajjj))
-                            iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
-                            vvvj = only(SparseArrays.nonzeros(Ajjj))
-                            ttt =
-                                vvvi *
-                                L[iiiiAi, iiijAj] *
-                                R[jjjjAj, jjjiAi] *
-                                vvvj
-                            H[i, j] += ttt
-                            if i != j
-                                H[j, i] += ttt
-                            end
-                        end
-                    end
+            end
+        else
+            # A is symmetric
+            iiiiAi = jjjiAi = only(SparseArrays.rowvals(Ai))
+            vvvi = only(SparseArrays.nonzeros(Ai))
+            # As we sort the matrices in decreasing `nnz` order, the rest of
+            # the matrices have only one entry
+            @inbounds for jj in ii:n
+                j = σ[jj, slot]
+                Ajjj = column[j]
+                iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
+                vvvj = only(SparseArrays.nonzeros(Ajjj))
+                ttt = vvvi * L[iiiiAi, iiijAj] * R[jjjjAj, jjjiAi] * vvvj
+                H[i, j] += ttt
+                if i != j
+                    H[j, i] += ttt
                 end
             end
         end
     end
     return H
+end
+
+# `WAW = L * A * R`. If `A` has `k` nonzero columns `cols` with `2k ≤ d`,
+# `L * A[:, cols]` and the transpose of `R[cols, :]` are stored in the first
+# `2k` columns of `AW` so that this takes `O(d * nnz(A) + d² * k)` operations
+# instead of `O(d³)`.
+function _sparse_sandwich!(WAW, AW, L, R, A::SparseArrays.SparseMatrixCSC)
+    d = LinearAlgebra.checksquare(A)
+    k = count(col -> !isempty(SparseArrays.nzrange(A, col)), axes(A, 2))
+    if 2k > d
+        LinearAlgebra.mul!(AW, L, A)
+        return LinearAlgebra.mul!(WAW, AW, R)
+    end
+    rows, values = SparseArrays.rowvals(A), SparseArrays.nonzeros(A)
+    t = 0
+    for col in axes(A, 2)
+        range = SparseArrays.nzrange(A, col)
+        isempty(range) && continue
+        t += 1
+        @inbounds for p in axes(AW, 1)
+            AW[p, t] = zero(eltype(AW))
+            AW[p, k+t] = R[col, p]
+        end
+        @inbounds for i in range
+            row, value = rows[i], values[i]
+            for p in axes(AW, 1)
+                AW[p, t] += L[p, row] * value
+            end
+        end
+    end
+    return LinearAlgebra.mul!(
+        WAW,
+        view(AW, :, 1:k),
+        transpose(view(AW, :, (k+1):(2k))),
+    )
 end
 
 # Keep sparse output on the sparse-product path: repeated sparse axpy! updates
@@ -378,6 +399,7 @@ struct _GeneralSchurComponent{C,J}
     jacobian::J
     permutation::Matrix{Int}
     last_dense::Vector{Int}
+    last_nonzero::Vector{Int}
     sparse::Vector{Bool}
 end
 
@@ -520,6 +542,7 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
     n, p = size(component.values)
     permutation = Matrix{Int}(undef, n, p)
     last_dense = zeros(Int, p)
+    last_nonzero = zeros(Int, p)
     sparse = Vector{Bool}(undef, p)
     jacobian = SparseArrays.SparseMatrixCSC{T,Int64}[]
     for (slot, i) in enumerate(component.block_ids)
@@ -528,6 +551,7 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
         permutation[:, slot] = sortperm(counts; rev = true)
         last_dense[slot] =
             _last_dense(counts, view(permutation, :, slot), model.msizes[i], κ)
+        last_nonzero[slot] = count(!iszero, counts)
         sparse[slot] = all(
             A -> A isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros},
             column,
@@ -542,6 +566,7 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
         jacobian,
         permutation,
         last_dense,
+        last_nonzero,
         sparse,
     )
 end
