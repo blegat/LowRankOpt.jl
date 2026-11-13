@@ -10,9 +10,9 @@ function example()
         [sparse([2.0 0; 0 3])],
         reshape(A, 1, 3),
         [1.0, 2.0, 3.0],
-        sparse([1.0, 2.0]),
-        sparse([1.0 0; 0 2; 3 1]),
-        [2],
+        SparseVector{Float64,Int64}(sparse([1.0, 2.0])),
+        SparseMatrixCSC{Float64,Int64}(sparse([1.0 0; 0 2; 3 1])),
+        Int64[2],
     )
     return model, A
 end
