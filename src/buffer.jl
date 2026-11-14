@@ -13,14 +13,54 @@ mutable struct BufferedModelForSchur{
     schur_buffer::SB
 end
 
-function BufferedModelForSchur(model, datasparsity)
+"""
+    BufferedModelForSchur(model, datasparsity; schur = true)
+
+Cache Jacobian products and, by default, Schur-complement assembly workspaces.
+Use `schur = false` when only Jacobian products are needed. Schur-complement
+assembly and matrix-vector products require the Schur workspaces.
+
+Wrapping an already buffered model reuses its Jacobian caches. If its Schur
+workspaces already match the requested choice, return the model unchanged.
+Otherwise, construct or drop only the Schur workspaces. `datasparsity` is
+used when constructing new Schur workspaces.
+"""
+function BufferedModelForSchur(model::Model, datasparsity; schur::Bool = true)
+    schur_buffer =
+        schur ? buffer_for_schur_complement(model, datasparsity) : nothing
     return BufferedModelForSchur(
         model,
         model.meta,
         buffer_for_jprod(model),
         buffer_for_jtprod(model),
-        buffer_for_schur_complement(model, datasparsity),
+        schur_buffer,
     )
+end
+
+function BufferedModelForSchur(
+    model::BufferedModelForSchur,
+    datasparsity;
+    schur::Bool = true,
+)
+    if schur == !isnothing(model.schur_buffer)
+        return model
+    end
+    schur_buffer =
+        schur ? buffer_for_schur_complement(model.model, datasparsity) : nothing
+    return BufferedModelForSchur(
+        model.model,
+        model.meta,
+        model.jprod_buffer,
+        model.jtprod_buffer,
+        schur_buffer,
+    )
+end
+
+function _schur_buffer(model::BufferedModelForSchur)
+    if isnothing(model.schur_buffer)
+        throw(ArgumentError("Schur workspaces are disabled; use schur = true."))
+    end
+    return model.schur_buffer
 end
 
 num_scalars(model::BufferedModelForSchur) = num_scalars(model.model)
