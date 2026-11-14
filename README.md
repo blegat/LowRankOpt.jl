@@ -230,3 +230,39 @@ of primal optimality.
 julia> MOI.Utilities.distance_to_set(dual(con_ref), dual_set)
 0.0
 ```
+
+
+### Primal and dual model interfaces
+
+`LowRankOpt.Model` exposes ordinary scalar decision variables through
+NLPModels. Its constraint vector contains bounded scalar constraints first,
+then PSD blocks identified by `model.dim`. The PSD entries have free
+componentwise metadata bounds; positive semidefiniteness is a block
+restriction handled by conic solvers.
+
+`LowRankOpt.Model` owns the coefficient data and the NLPModels interface.
+Construct it directly from `C, A, b, d_lin, C_lin, msizes`:
+
+```julia
+model = LowRankOpt.Model(C, A, b, d_lin, C_lin, msizes)
+```
+
+Algorithms such as Burer–Monteiro explicitly request the cone-variable
+formulation through `LowRankOpt.DualModel(model)` or
+`LowRankOpt.dual_model(model)`. This adapter shares the model's coefficients;
+`BufferedDualModel` adds caches for its operators.
+
+```julia
+dual = LowRankOpt.DualModel(model)
+LowRankOpt.primal_model(dual) === model # true
+```
+
+Returning to the original model preserves its objective constant and
+NLPModels metadata.
+
+Here `NLPModels.obj(model, x) = -dot(b, x)`. Scalar constraints are
+`d_lin - C_lin' * x ≥ 0`; each PSD block is
+`C[i] - sum(A[i,j] * x[j]) ⪰ 0`. `PrimalSolution` queries refer to these
+scalar decision variables. `DualSolution` queries refer to constraint
+multipliers in a `VectorizedConeVector` or `ShapedConeVector`, rather than
+being used as an indirect query for decision variables.

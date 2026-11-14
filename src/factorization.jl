@@ -6,7 +6,7 @@
 abstract type AbstractFactorization{T,F} <: AbstractMatrix{T} end
 
 function Base.size(m::AbstractFactorization)
-    n = size(left_factor(m), 1)
+    n = Int(size(left_factor(m), 1))
     return (n, n)
 end
 

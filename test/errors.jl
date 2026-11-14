@@ -40,7 +40,7 @@ function buffered_errors_allocations(
 end
 
 @testset "Dual cone feasibility is independent of the equation residual" begin
-    model = LRO.Model(
+    model = LRO.DualModel(
         [spdiagm([3.0, 0.0]), spzeros(1, 1)],
         reshape([spzeros(2, 2), spzeros(1, 1)], 2, 1),
         [0.0],
@@ -48,11 +48,11 @@ end
         spzeros(Float64, Int64, 1, 1),
         Int64[2, 1],
     )
-    x = LRO.ShapedSolution([1.0], [Matrix{Float64}(I, 2, 2), ones(1, 1)])
+    x = LRO.ShapedConeVector([1.0], [Matrix{Float64}(I, 2, 2), ones(1, 1)])
     slack =
-        LRO.ShapedSolution([1.0], [Matrix(Diagonal([-2.0, 3.0])), ones(1, 1)])
-    residual = LRO.ShapedSolution([0.0], [zeros(2, 2), zeros(1, 1)])
-    vectorized(s) = LRO.VectorizedSolution(
+        LRO.ShapedConeVector([1.0], [Matrix(Diagonal([-2.0, 3.0])), ones(1, 1)])
+    residual = LRO.ShapedConeVector([0.0], [zeros(2, 2), zeros(1, 1)])
+    vectorized(s) = LRO.VectorizedConeVector(
         [s.scalars; reduce(vcat, vec.(s.matrices))],
         model.dim,
     )
@@ -121,7 +121,7 @@ end
         A = SparseMatrixCSC{T,Int64}[
             spzeros(T, Int64, d, d) for d in dims, _ in 1:2
         ]
-        model = LRO.Model(
+        model = LRO.DualModel(
             C,
             A,
             T[3, 4],
@@ -129,7 +129,7 @@ end
             spzeros(T, Int64, 2, Int(scalar)),
             dims,
         )
-        solution(v, blocks) = LRO.ShapedSolution(
+        solution(v, blocks) = LRO.ShapedConeVector(
             scalar ? T[v] : T[],
             Matrix{T}[
                 Matrix(Diagonal(T.(b))) for
@@ -139,7 +139,7 @@ end
         x = solution(-3.0, [[-1.0, 2.0], [-2.0]])
         slack = solution(-7.0, [[-4.0, 5.0], [-6.0]])
         residual = solution(6.0, [[3.0, 4.0], [13.0]])
-        vectorized(s) = LRO.VectorizedSolution(
+        vectorized(s) = LRO.VectorizedConeVector(
             vcat(s.scalars, vec.(s.matrices)...),
             model.dim,
         )

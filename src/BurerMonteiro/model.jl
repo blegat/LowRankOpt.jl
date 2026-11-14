@@ -1,13 +1,14 @@
-mutable struct Model{S,T,CT,AT,JTB} <: NLPModels.AbstractNLPModel{T,Vector{T}}
-    model::LRO.Model{T,CT,AT}
+mutable struct Model{S,T,D<:LRO.DualModel{T},JTB} <:
+               NLPModels.AbstractNLPModel{T,Vector{T}}
+    model::D
     dim::Dimensions{S}
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
     counters::NLPModels.Counters
     jtprod_buffer::JTB
-    function Model{S}(model::LRO.Model{T,CT,AT}, ranks) where {S,T,CT,AT}
+    function Model{S}(model::D, ranks) where {S,T,D<:LRO.DualModel{T}}
         dim = Dimensions{S}(model, ranks)
         jtprod_buffer = buffer_for_jtprod(model, dim)
-        return new{S,T,CT,AT,typeof(jtprod_buffer)}(
+        return new{S,T,D,typeof(jtprod_buffer)}(
             model,
             dim,
             meta(dim, LRO.cons_constant(model)),
@@ -161,7 +162,7 @@ const _RankOne{T} = LRO.AbstractFactorization{T,<:AbstractVector{T}}
 const _LowRank{T} = LRO.AbstractFactorization{T,<:AbstractMatrix{T}}
 
 function buffer_for_jtprod(
-    model::LRO.Model{T},
+    model::LRO.DualModel{T},
     dim::Dimensions,
     i::LRO.MatrixIndex,
 ) where {T}
@@ -189,7 +190,7 @@ function buffer_for_jtprod(
     return
 end
 
-function buffer_for_jtprod(model::LRO.Model, dim::Dimensions)
+function buffer_for_jtprod(model::LRO.DualModel, dim::Dimensions)
     return buffer_for_jtprod.(model, dim, LRO.matrix_indices(model))
 end
 

@@ -7,7 +7,7 @@ function scalar_model(C::SparseMatrixCSC{T}) where {T}
     m, n = size(C)
     # NLPModels requires at least one variable, even for an empty scalar block.
     dims = iszero(n) ? Int64[1] : Int64[]
-    model = LRO.Model(
+    model = LRO.DualModel(
         [spzeros(T, d, d) for d in dims],
         [spzeros(T, d, d) for d in dims, _ in 1:m],
         zeros(T, m),
@@ -15,7 +15,7 @@ function scalar_model(C::SparseMatrixCSC{T}) where {T}
         SparseMatrixCSC{T,Int64}(C),
         dims,
     )
-    return LRO.BufferedModelForSchur(model, 1)
+    return LRO.BufferedDualModel(model, 1)
 end
 
 function scalar_schur_allocations(model, w, H)
@@ -39,7 +39,7 @@ end
             H = destination(H0)
             expected = copy(H0)
             for w in (T[1, 2, 0, 3, 4, -1], zeros(T, 6), -ones(T, 6))
-                # Exercise the scalar-slice view used by VectorizedSolution too.
+                # Exercise the scalar-slice view used by VectorizedConeVector too.
                 weights = view(vcat(w, zero(T)), 1:6)
                 contribution = C * spdiagm(w) * C'
                 expected .+= contribution
