@@ -418,14 +418,16 @@ struct _Selection{I<:AbstractVector{Int}}
     index::I
 end
 
-# Component `Aⱼ = wⱼ * U[j, :] * U[j, :]'` where `U` is either a `Matrix`, a
-# `SparseMatrixCSC` or a `_Selection`. For a `Matrix` or `SparseMatrixCSC`
-# factor, `UL` and `UR` store `U * L` and `U * R` and `gram` and `gram_right`
-# are `n × n` workspaces.
-struct _RankOneSchurComponent{T,C,F}
+# Component `Aⱼ = wⱼ * U[j, :] * U[j, :]'` with only nonzero weights stored.
+# `indices` maps each block's compact factor rows to global constraints.
+# `U` is a dense/sparse matrix or a `_Selection`; `UL` and `UR` store its
+# products with the scaling matrices. Gram workspaces need at most the
+# largest active row count, with room for any partner's active columns.
+struct _RankOneSchurComponent{T,C,F,I}
     component::C
     U::Vector{F}
-    weights::Matrix{T}
+    weights::Vector{Vector{T}}
+    indices::Vector{I}
     UL::Vector{Matrix{T}}
     UR::Vector{Matrix{T}}
     gram::Matrix{T}
@@ -435,20 +437,49 @@ struct _RankOneSchurComponent{T,C,F}
     U_transpose::Vector{F}
 end
 
+function _active_rank_one_indices(weights)
+    n = size(weights, 1)
+    if all(!iszero, weights)
+        return [Base.OneTo(n) for _ in axes(weights, 2)]
+    end
+    return [findall(!iszero, column) for column in eachcol(weights)]
+end
+
+# Avoid copies and indexed accesses when all constraints participate.
+function _active_rank_one_factor(U::AbstractMatrix, indices)
+    if indices isa Base.OneTo
+        return U
+    end
+    return U[indices, :]
+end
+function _active_rank_one_factor(U::_Selection, indices)
+    if indices isa Base.OneTo
+        return U
+    end
+    return _Selection(U.index[indices])
+end
+
 function _RankOneSchurComponent(
     component,
     U::Vector{<:AbstractMatrix{T}},
     weights::Matrix{T},
 ) where {T}
     n = size(weights, 1)
+    indices = _active_rank_one_indices(weights)
+    U = _active_rank_one_factor.(U, indices)
+    if _SPARSE_FACTOR_RATIO * sum(_nnz, U) < sum(length, U)
+        U = SparseArrays.sparse.(U)
+    end
+    nactive = maximum(length, indices; init = 0)
     return _RankOneSchurComponent(
         component,
         U,
-        weights,
+        [weights[index, slot] for (slot, index) in enumerate(indices)],
+        indices,
         [zeros(T, size(Ui)) for Ui in U],
         [zeros(T, size(Ui)) for Ui in U],
-        zeros(T, n, n),
-        zeros(T, n, n),
+        zeros(T, nactive, n),
+        zeros(T, nactive, n),
         _transposed_factors(U),
     )
 end
@@ -463,11 +494,14 @@ function _RankOneSchurComponent(
     U::Vector{<:_Selection},
     weights::Matrix{T},
 ) where {T}
+    indices = _active_rank_one_indices(weights)
+    U = _active_rank_one_factor.(U, indices)
     empty = [zeros(T, 0, 0) for _ in U]
     return _RankOneSchurComponent(
         component,
         U,
-        weights,
+        [weights[index, slot] for (slot, index) in enumerate(indices)],
+        indices,
         empty,
         empty,
         zeros(T, 0, 0),
@@ -590,9 +624,6 @@ function _schur_component(
         Ui, weights[:, slot] =
             _rank_one_factors(component.values, slot, model.msizes[i])
         push!(U, Ui)
-    end
-    if _SPARSE_FACTOR_RATIO * sum(_nnz, U) < sum(length, U)
-        U = SparseArrays.sparse.(U)
     end
     return _RankOneSchurComponent(component, U, weights)
 end
@@ -776,11 +807,12 @@ function _add_schur_pair!(
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
     left, right = _rank_one_grams(a, ia, b, ib, L, R)
-    for k in axes(H, 2), j in axes(H, 1)
-        value = a.weights[j, ia] * b.weights[k, ib] * left[j, k] * right[j, k]
-        H[j, k] += value
+    rows, columns = a.indices[ia], b.indices[ib]
+    for k in eachindex(columns), j in eachindex(rows)
+        value = a.weights[ia][j] * b.weights[ib][k] * left[j, k] * right[j, k]
+        H[rows[j], columns[k]] += value
         if !same
-            H[k, j] += value
+            H[columns[k], rows[j]] += value
         end
     end
     return nothing
@@ -804,7 +836,11 @@ function _add_schur_pair!(
 ) where {T,C,D}
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
+    if isempty(a.indices[ia]) || isempty(b.indices[ib])
+        return nothing
+    end
     left, right = _left_rows(a, ia, L), _right_rows(a, ia, L, R)
+    columns = eachindex(b.indices[ib])
     if !same
         # The transposed entries `H[k, j]` of distinct columns `k` are in the
         # same columns of `H` so the columns cannot be computed in parallel.
@@ -816,7 +852,7 @@ function _add_schur_pair!(
             ib,
             left,
             right,
-            axes(H, 2),
+            columns,
             1,
             same,
         )
@@ -827,8 +863,8 @@ function _add_schur_pair!(
     V = b.U_transpose[ib]
     work =
         2 * SparseArrays.nnz(V) * (size(left, 1) + size(right, 1)) +
-        4 * length(H)
-    _foreach_chunk(axes(H, 2), _num_chunks(axes(H, 2), work)) do c, columns
+        4 * length(a.indices[ia]) * length(columns)
+    _foreach_chunk(columns, _num_chunks(columns, work)) do c, columns
         _add_sparse_rank_one_columns!(
             H,
             a,
@@ -862,10 +898,15 @@ function _add_sparse_rank_one_columns!(
 ) where {T}
     V = b.U_transpose[ib]
     rows, values = SparseArrays.rowvals(V), SparseArrays.nonzeros(V)
-    # `U L vₖ` and `U R vₖ`
-    l, r = view(a.gram, :, c), view(a.gram_right, :, c)
+    # `U L vₖ` and `U R vₖ`, restricted to this block's active rows.
+    active_rows, active_columns = a.indices[ia], b.indices[ib]
+    row_range = eachindex(active_rows)
+    l = view(a.gram, row_range, c)
+    r = view(a.gram_right, row_range, c)
     two_sided = right !== left
     for k in columns
+        weight = b.weights[ib][k]
+        column = active_columns[k]
         fill!(l, zero(T))
         if two_sided
             fill!(r, zero(T))
@@ -877,18 +918,19 @@ function _add_sparse_rank_one_columns!(
             end
         end
         rk = two_sided ? r : l
-        weight = b.weights[k, ib]
         # Testing `same` outside the loop over the entries of the column `k`
         # makes the loop faster for many small blocks.
         if same
-            for j in axes(H, 1)
-                H[j, k] += a.weights[j, ia] * weight * l[j] * rk[j]
+            for j in row_range
+                H[active_rows[j], column] +=
+                    a.weights[ia][j] * weight * l[j] * rk[j]
             end
         else
-            for j in axes(H, 1)
-                value = a.weights[j, ia] * weight * l[j] * rk[j]
-                H[j, k] += value
-                H[k, j] += value
+            for j in row_range
+                value = a.weights[ia][j] * weight * l[j] * rk[j]
+                row = active_rows[j]
+                H[row, column] += value
+                H[column, row] += value
             end
         end
     end
@@ -907,11 +949,16 @@ function _add_schur_pair!(
 end
 
 function _rank_one_grams(a, ia, b, ib, L, R)
-    left = _gram!(a.gram, _left_rows(a, ia, L), b.U[ib])
+    rows, columns = eachindex(a.indices[ia]), eachindex(b.indices[ib])
+    left = _gram!(view(a.gram, rows, columns), _left_rows(a, ia, L), b.U[ib])
     if R === L
         return left, left
     end
-    right = _gram!(a.gram_right, _right_rows(a, ia, L, R), b.U[ib])
+    right = _gram!(
+        view(a.gram_right, rows, columns),
+        _right_rows(a, ia, L, R),
+        b.U[ib],
+    )
     return left, right
 end
 
@@ -979,12 +1026,12 @@ function _add_schur_pair!(
         return nothing
     end
     column = view(b.component.values, :, ib)
-    for j in axes(H, 1)
+    for (j, row) in enumerate(a.indices[ia])
         u, v = view(right, j, :), view(left, j, :)
         for k in eachindex(column)
-            value = a.weights[j, ia] * _bilinear_form(u, column[k], v)
-            H[j, k] += value
-            H[k, j] += value
+            value = a.weights[ia][j] * _bilinear_form(u, column[k], v)
+            H[row, k] += value
+            H[k, row] += value
         end
     end
     return nothing
@@ -997,9 +1044,8 @@ end
 function _add_sparse_rank_one_pair!(a, ia, J, left, right, H)
     d = size(left, 2)
     rows, values = SparseArrays.rowvals(J), SparseArrays.nonzeros(J)
-    for j in axes(H, 1)
-        weight = a.weights[j, ia]
-        iszero(weight) && continue
+    for (j, row) in enumerate(a.indices[ia])
+        weight = a.weights[ia][j]
         for k in axes(H, 2)
             value = zero(eltype(H))
             for l in SparseArrays.nzrange(J, k)
@@ -1007,8 +1053,8 @@ function _add_sparse_rank_one_pair!(a, ia, J, left, right, H)
                 value += right[j, p+1] * values[l] * left[j, q+1]
             end
             value *= weight
-            H[j, k] += value
-            H[k, j] += value
+            H[row, k] += value
+            H[k, row] += value
         end
     end
     return nothing
@@ -1107,11 +1153,12 @@ function _add_rank_one_matvec!(
     ia, ib = _block_slot(a.component, i), _block_slot(b.component, i)
     (iszero(ia) || iszero(ib)) && return nothing
     left, right = _rank_one_grams(a, ia, b, ib, L, R)
-    for k in eachindex(y), j in eachindex(result)
-        value = a.weights[j, ia] * b.weights[k, ib] * left[j, k] * right[j, k]
-        result[j] += value * y[k]
+    rows, columns = a.indices[ia], b.indices[ib]
+    for k in eachindex(columns), j in eachindex(rows)
+        value = a.weights[ia][j] * b.weights[ib][k] * left[j, k] * right[j, k]
+        result[rows[j]] += value * y[columns[k]]
         if !same
-            result[k] += value * y[j]
+            result[columns[k]] += value * y[rows[j]]
         end
     end
     return nothing
