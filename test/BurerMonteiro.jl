@@ -44,16 +44,24 @@ function _test_simple_lp(opt)
         @test isnothing(LRO.buffer_for_jtprod(LRO.dual_model(b.model)))
     end
     raw_sol = MOI.get(model, LRO.RawStatus(:solution))
-    sol = MOI.get(model, LRO.DualSolution())
+    cone = MOI.get(model, LRO.DualSolution())
+    solver = _backend(model).solver
+    original = LRO.primal_model(solver.model.model)
+    sol = LRO.BurerMonteiro.Solution(raw_sol, solver.model.dim)
+    @test cone[LRO.ScalarIndex] ≈
+          LRO.cone_multipliers(original, sol)[LRO.ScalarIndex]
     @test raw_sol isa Vector{Float64}
     @test sol isa LRO.BurerMonteiro.Solution{false,Float64,Vector{Float64}}
     outer = LRO.BurerMonteiro._OuterProduct(sol, sol)
     @test length(outer) == length(sol)
     @test sprint(show, outer) == "_OuterProduct($sol, $sol)"
     @test sol == raw_sol
-    if b isa DualOptimizer
-        @test abs(sol[1]) < 1e-6
-    end
+    primal = MOI.get(_backend(model), LRO.PrimalSolution())
+    @test norm(
+        NLPModels.grad(original, primal) +
+        NLPModels.jtprod(original, primal, -collect(cone)),
+        Inf,
+    ) < 1e-6
     diff_check(model)
     return
 end
