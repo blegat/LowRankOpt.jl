@@ -54,7 +54,10 @@ function _test_zero_Ai(
         @test LRO.jac(b.model, 3, i) isa (detect_rank_one ? R : S)
         @test iszero(LRO.jac(b.model, 4, i))
     end
-    buf = LRO.BufferedModelForSchur(b.model, 1)
+    buf = LRO.BufferedModelForSchur(
+        b.model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     if all_zero
         @test buf.jtprod_buffer[] isa LRO.FillArrays.Zeros
     else
@@ -117,7 +120,10 @@ function test_sparse_jtprod_buffer()
             work_ratio = work_ratio / 2,
         ) isa Matrix
 
-        buf = LRO.BufferedModelForSchur(model, 1)
+        buf = LRO.BufferedModelForSchur(
+            model;
+            dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+        )
         @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
         # A lazy zero matrix contributes nothing, including when only a
         # subset of constraints is requested. It must not use the generic
@@ -174,7 +180,10 @@ function test_sparse_jtprod_mixed_patterns()
         Int64[d],
     )
     i = LRO.MatrixIndex(1)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     buffer = buf.jtprod_buffer[i.value]
     @test buffer isa SparseArrays.SparseMatrixCSC
     @test SparseArrays.nnz(buffer) == 7
@@ -218,7 +227,10 @@ function test_dense_dual_cons_reuses_product()
             Int64[d],
         )
         original_C, original_A = deepcopy(model.C), deepcopy(model.A)
-        buf = LRO.BufferedModelForSchur(model, 1)
+        buf = LRO.BufferedModelForSchur(
+            model;
+            dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+        )
         i = LRO.MatrixIndex(1)
         buffer = buf.jtprod_buffer[i.value]
         @test buffer isa Matrix
@@ -250,7 +262,10 @@ function test_sparse_dual_cons_reuses_product()
         Int64[d],
     )
     original_A = deepcopy(model.A)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     i = LRO.MatrixIndex(1)
     buffer = buf.jtprod_buffer[i.value]
     @test buffer isa SparseArrays.SparseMatrixCSC

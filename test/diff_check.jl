@@ -227,7 +227,12 @@ function schur_test(model::LRO.BufferedModelForSchur{T}) where {T}
 end
 
 function schur_test(model::LRO.Model, κ)
-    return schur_test(LRO.BufferedModelForSchur(model, κ))
+    return schur_test(
+        LRO.BufferedModelForSchur(
+            model;
+            dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
+        ),
+    )
 end
 
 function schur_test(model::JuMP.AbstractModel, κ)

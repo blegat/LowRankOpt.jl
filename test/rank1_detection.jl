@@ -139,8 +139,14 @@ function test_detected_schur_complement()
     model = LRO.Model(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, Int64[d])
     @test eltype(only(model.A).values) <: LRO.Factorization
     reference = LRO.Model(C, arr, b, d_lin, C_lin, Int64[d])
-    buffer = LRO.BufferedModelForSchur(model, 0)
-    reference_buffer = LRO.BufferedModelForSchur(reference, 0)
+    buffer = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
+    )
+    reference_buffer = LRO.BufferedModelForSchur(
+        reference;
+        dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
+    )
     W = Matrix(Symmetric(ones(d, d) + d * I))
     i = LRO.MatrixIndex(1)
     H = zeros(n, n)
@@ -189,7 +195,13 @@ const _SDPA_MIXED = """
 2 1 2 2 1.0
 """
 
-function _build(detect; detect_one_hot = false, sdpa = _SDPA)
+function _build(
+    detect;
+    detect_one_hot = false,
+    sdpa = _SDPA,
+    solver = ConvexSolver,
+    dense_condition = nothing,
+)
     path = tempname() * ".dat-s"
     write(path, sdpa)
     src = MOI.FileFormats.SDPA.Model{Float64}()
@@ -198,7 +210,10 @@ function _build(detect; detect_one_hot = false, sdpa = _SDPA)
     model = GenericModel{Float64}(LRO.Optimizer{Float64})
     LRO.Bridges.add_all_bridges(backend(model).optimizer, Float64)
     MOI.copy_to(backend(model), src)
-    set_attribute(model, "solver", ConvexSolver)
+    set_attribute(model, "solver", solver)
+    if !isnothing(dense_condition)
+        set_attribute(model, "dense_condition", dense_condition)
+    end
     if !isnothing(detect)
         set_attribute(model, "detect_rank_one", detect)
     end
@@ -207,6 +222,33 @@ function _build(detect; detect_one_hot = false, sdpa = _SDPA)
     end
     optimize!(model) # `ConvexSolver` is a no-op: this just triggers `copy_to`
     return unsafe_backend(model).model
+end
+
+# Keeps the model given by `LRO.Optimizer`
+struct BufferedSolver <: SolverCore.AbstractOptimizationSolver
+    model::LRO.BufferedModelForSchur{Float64}
+end
+
+SolverCore.solve!(::BufferedSolver, ::LRO.Model) = nothing
+
+# The `"dense_condition"` option is consumed by `LRO.Optimizer` which gives
+# the buffered model to the solver
+function test_option_dense_condition()
+    for dense in (false, true)
+        solver = nothing
+        _build(
+            false;
+            solver = model -> (solver = BufferedSolver(model)),
+            dense_condition = c -> dense,
+        )
+        buffer = LRO.BufferedModelForSchur(solver.model)
+        @test buffer === solver.model
+        component = only(buffer.schur_buffer[3])
+        n = only(component.last_nonzero)
+        @test n > 0
+        @test only(component.last_dense) == (dense ? n : 0)
+    end
+    return
 end
 
 function test_option_disabled_keeps_sparse()
@@ -261,7 +303,10 @@ function test_option_default_detects_one_hot()
             Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
         1:sparse_model.meta.ncon,
     )
-    buffer = LRO.BufferedModelForSchur(model, 1)
+    buffer = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     @test only(only(buffer.schur_buffer[3]).U) == LRO._Selection(Base.OneTo(2))
     return
 end

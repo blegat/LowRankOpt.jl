@@ -113,6 +113,13 @@ Similarly, rank-one constraint matrices are detected by default; use
 `set_attribute(model, "detect_rank_one", false)` to disable it.
 See the docstring of `LRO.one_hot` for more details.
 
+The solvers using the Schur complement, such as Loraine, form the dense matrix
+`L Aᵢ R` for the sparse constraint matrices `Aᵢ` satisfying a dense condition.
+The default `LRO.And(LRO.MinNonzeros(8), LRO.DenseCost(100))` can be changed
+with, for instance, `set_attribute(model, "dense_condition", LRO.DenseCost(40))`
+or any Julia function of a `LRO.DenseCandidate` returning a `Bool`.
+See the docstring of `LRO.default_dense_condition` for more details.
+
 The solvers that support `LRO.SetDotProducts` are:
 
 * [DSDP.jl](https://github.com/jump-dev/DSDP.jl) : [⚠ WIP](https://github.com/jump-dev/DSDP.jl/pull/37)

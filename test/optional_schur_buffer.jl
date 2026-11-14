@@ -27,8 +27,8 @@ end
 
 @testset "Optional Schur workspaces" begin
     model, A = example()
-    full = LRO.BufferedModelForSchur(model, 8)
-    lean = LRO.BufferedModelForSchur(model, 8; schur = false)
+    full = LRO.BufferedModelForSchur(model)
+    lean = LRO.BufferedModelForSchur(model; schur = false)
     @test !isnothing(full.schur_buffer)
     @test isnothing(lean.schur_buffer)
     @test lean.model === full.model === model
@@ -55,11 +55,13 @@ end
         @test LRO.cons_constant(buffered) === model.b
     end
 
-    # Rewrapping preserves both Jacobian caches, including their sparse patterns.
-    @test LRO.BufferedModelForSchur(full, 0) === full
-    @test LRO.BufferedModelForSchur(lean, 0; schur = false) === lean
-    dropped = LRO.BufferedModelForSchur(full, 8; schur = false)
-    restored = LRO.BufferedModelForSchur(lean, 8)
+    # Rewrapping preserves both Jacobian caches, including their sparse patterns,
+    # and ignores `dense_condition` if the Schur workspaces are kept.
+    condition = LRO.MinNonzeros(0)
+    @test LRO.BufferedModelForSchur(full; dense_condition = condition) === full
+    @test LRO.BufferedModelForSchur(lean; schur = false) === lean
+    dropped = LRO.BufferedModelForSchur(full; schur = false)
+    restored = LRO.BufferedModelForSchur(lean)
     for (source, wrapped) in ((full, dropped), (lean, restored))
         @test wrapped !== source
         @test wrapped.model === source.model

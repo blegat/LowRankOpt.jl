@@ -14,20 +14,30 @@ mutable struct BufferedModelForSchur{
 end
 
 """
-    BufferedModelForSchur(model, datasparsity; schur = true)
+    BufferedModelForSchur(
+        model;
+        dense_condition = default_dense_condition(),
+        schur = true,
+    )
 
 Cache Jacobian products and, by default, Schur-complement assembly workspaces.
 Use `schur = false` when only Jacobian products are needed. Schur-complement
 assembly and matrix-vector products require the Schur workspaces.
+`dense_condition` is used when constructing new Schur workspaces, see
+[`default_dense_condition`](@ref).
 
 Wrapping an already buffered model reuses its Jacobian caches. If its Schur
-workspaces already match the requested choice, return the model unchanged.
-Otherwise, construct or drop only the Schur workspaces. `datasparsity` is
-used when constructing new Schur workspaces.
+workspaces already match the requested choice, return the model unchanged,
+even if it was built with another `dense_condition`. Otherwise, construct or
+drop only the Schur workspaces.
 """
-function BufferedModelForSchur(model::Model, datasparsity; schur::Bool = true)
+function BufferedModelForSchur(
+    model::Model;
+    dense_condition = default_dense_condition(),
+    schur::Bool = true,
+)
     schur_buffer =
-        schur ? buffer_for_schur_complement(model, datasparsity) : nothing
+        schur ? buffer_for_schur_complement(model, dense_condition) : nothing
     return BufferedModelForSchur(
         model,
         model.meta,
@@ -38,15 +48,16 @@ function BufferedModelForSchur(model::Model, datasparsity; schur::Bool = true)
 end
 
 function BufferedModelForSchur(
-    model::BufferedModelForSchur,
-    datasparsity;
+    model::BufferedModelForSchur;
+    dense_condition = default_dense_condition(),
     schur::Bool = true,
 )
     if schur == !isnothing(model.schur_buffer)
         return model
     end
     schur_buffer =
-        schur ? buffer_for_schur_complement(model.model, datasparsity) : nothing
+        schur ? buffer_for_schur_complement(model.model, dense_condition) :
+        nothing
     return BufferedModelForSchur(
         model.model,
         model.meta,
