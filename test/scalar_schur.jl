@@ -2,6 +2,7 @@ module TestScalarSchur
 
 using Test, LinearAlgebra, SparseArrays
 import LowRankOpt as LRO
+import NLPModels
 
 function scalar_model(C::SparseMatrixCSC{T}) where {T}
     m, n = size(C)
@@ -65,6 +66,11 @@ end
 
 @testset "Empty scalar Schur blocks" begin
     for T in (Float32, Float64), (m, n) in ((0, 0), (0, 3), (3, 0), (3, 4))
+        # The corresponding primal model has m variables.
+        if iszero(m) && pkgversion(NLPModels) < v"0.21.13"
+            @test_skip NLPModels.NLPModelMeta(0)
+            continue
+        end
         model = scalar_model(spzeros(T, m, n))
         w, H = ones(T, n), ones(T, m, m)
         @test LRO.add_schur_complement!(model, w, LRO.ScalarIndex, H) === H

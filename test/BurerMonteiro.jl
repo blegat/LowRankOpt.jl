@@ -205,6 +205,11 @@ function test_moi_runtests()
 end
 
 function test_no_constraints()
+    # The corresponding primal model has zero variables.
+    if pkgversion(NLPModels) < v"0.21.13"
+        @test_skip NLPModels.NLPModelMeta(0)
+        return
+    end
     model = LRO.DualModel(
         [spzeros(1, 1)],
         [ones(1, 1) for _ in 1:1, _ in 1:0],

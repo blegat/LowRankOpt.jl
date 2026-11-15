@@ -116,23 +116,31 @@ end
     @test LRO.primal_model(LRO.DualModel(model)) === model
 end
 
-@testset "Constant and unconstrained conic models" begin
-    C = sparse(Matrix{Float64}(I, 2, 2))
-    model = LRO.Model(
-        [C],
-        Matrix{typeof(C)}(undef, 1, 0),
-        Float64[],
-        spzeros(0),
-        spzeros(0, 0),
-        [2];
-        objective_constant = 3,
-    )
-    @test model.meta.nvar == 0
-    @test model.meta.ncon == 4
-    @test NLPModels.obj(model, Float64[]) == 3
-    @test NLPModels.cons(model, Float64[]) == vec(Matrix(C))
-    @test size(NLPModels.jac(model, Float64[])) == (4, 0)
-    @test isempty(NLPModels.grad(model, Float64[]))
+@testset "Constant conic models" begin
+    # Zero-variable metadata requires the upstream NLPModels fix.
+    if pkgversion(NLPModels) < v"0.21.13"
+        @test_skip NLPModels.NLPModelMeta(0)
+    else
+        C = sparse(Matrix{Float64}(I, 2, 2))
+        model = LRO.Model(
+            [C],
+            Matrix{typeof(C)}(undef, 1, 0),
+            Float64[],
+            spzeros(0),
+            spzeros(0, 0),
+            [2];
+            objective_constant = 3,
+        )
+        @test model.meta.nvar == 0
+        @test model.meta.ncon == 4
+        @test NLPModels.obj(model, Float64[]) == 3
+        @test NLPModels.cons(model, Float64[]) == vec(Matrix(C))
+        @test size(NLPModels.jac(model, Float64[])) == (4, 0)
+        @test isempty(NLPModels.grad(model, Float64[]))
+    end
+end
+
+@testset "Unconstrained conic models" begin
     model = LRO.Model(
         SparseMatrixCSC{Float64,Int}[],
         Matrix{SparseMatrixCSC{Float64,Int}}(undef, 0, 1),
