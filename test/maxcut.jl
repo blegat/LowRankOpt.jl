@@ -99,7 +99,8 @@ function _test_maxcut(;
     LRO.BurerMonteiro.grad!(solver.model, X, JtV, i)
     @test JtV.factor ≈ 2lro_model.C[] * X.factor
     fill!(JtV.factor, 0.0)
-    y = rand(lro_model.meta.ncon)
+    # These multipliers belong to the Burer-Monteiro equality constraints.
+    y = rand(solver.model.meta.ncon)
     LRO.BurerMonteiro.add_jtprod!(solver.model, X, y, JtV, i)
     if is_dual
         @test JtV.factor ≈ 2y .* X.factor
@@ -136,12 +137,13 @@ function _test_convex_solver(T)
     @test MOI.get(model, LRO.ConvexTerminationStatus()) == MOI.OPTIMAL
     @test termination_status(model) == MOI.OPTIMAL
     @test MOI.get(model, LRO.DualSolution()) isa LRO.VectorizedConeVector{T}
+    # Solver statuses use the original model's primal/dual convention.
     b.solver.stats.status = :infeasible
-    @test termination_status(model) == MOI.DUAL_INFEASIBLE
-    @test dual_status(model) == MOI.INFEASIBLE_POINT
-    b.solver.stats.status = :unbounded
     @test termination_status(model) == MOI.INFEASIBLE
     @test primal_status(model) == MOI.INFEASIBLE_POINT
+    b.solver.stats.status = :unbounded
+    @test termination_status(model) == MOI.DUAL_INFEASIBLE
+    @test dual_status(model) == MOI.INFEASIBLE_POINT
     x = LRO.VectorizedConeVector(
         collect(1:(LRO.dual_model(b.model).meta.nvar)),
         LRO.dual_model(b.model).dim,
