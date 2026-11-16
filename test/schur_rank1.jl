@@ -76,7 +76,10 @@ function test_single_block()
     sizes = [3]
     n = 4
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     W = _random_sym_blocks(T, sizes)
     H = zeros(T, n, n)
     LRO.add_schur_complement!(buf, LRO.MatrixIndex(1), W[1], H)
@@ -90,7 +93,10 @@ function test_multiple_blocks()
     sizes = [3, 2, 4]
     n = 5
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     W = _random_sym_blocks(T, sizes)
     H = zeros(T, n, n)
     for idx in LRO.matrix_indices(model)
@@ -106,7 +112,10 @@ function test_single_constraint()
     sizes = [3]
     n = 1
     model, Us, ws = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     W = _random_sym_blocks(T, sizes)
     H = zeros(T, n, n)
     LRO.add_schur_complement!(buf, LRO.MatrixIndex(1), W[1], H)
@@ -135,7 +144,10 @@ function test_negative_scalings()
     CT = LRO.Factorization{T,Vector{T},Array{T,0}}
     C = CT[LRO.Factorization(zeros(T, 2), reshape(T[zero(T)], ()))]
     model2 = LRO.Model(C, A, model.b, model.d_lin, model.C_lin, model.msizes)
-    buf = LRO.BufferedModelForSchur(model2, 1)
+    buf = LRO.BufferedModelForSchur(
+        model2;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     W = _random_sym_blocks(T, sizes; seed = 7)
     H = zeros(T, n, n)
     LRO.add_schur_complement!(buf, LRO.MatrixIndex(1), W[1], H)
@@ -160,7 +172,10 @@ function test_eval_matches_matvec()
     sizes = [3, 2]
     n = 4
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(model, 1)
+    buf = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     W_blocks = _random_sym_blocks(T, sizes)
     W = _WShim(W_blocks, T[])
     rng = Random.MersenneTwister(11)

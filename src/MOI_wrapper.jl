@@ -133,7 +133,7 @@ const SOLVER_OPTIONS = ["solver", "sub_solver", "ranks", "square_scalars"]
 
 # Options consumed while building the `Model` in `copy_to`; they must not be
 # forwarded to the solver constructor nor to `solve!`.
-const MODEL_OPTIONS = ["detect_rank_one", "detect_one_hot"]
+const MODEL_OPTIONS = ["detect_rank_one", "detect_one_hot", "dense_condition"]
 
 function MOI.optimize!(model::Optimizer)
     options = Dict{Symbol,Any}(
@@ -400,7 +400,16 @@ function MOI.copy_to(
         Symbol(key) => dest.options[key] for key in keys(dest.options) if
         key in SOLVER_OPTIONS && key != "solver"
     )
-    dest.solver = dest.options["solver"](dest.model; options...)
+    # The solvers using the Schur complement buffer the model with
+    # `BufferedModelForSchur(model)` which keeps this dense condition.
+    model = dest.model
+    if haskey(dest.options, "dense_condition")
+        model = BufferedModelForSchur(
+            model;
+            dense_condition = dest.options["dense_condition"],
+        )
+    end
+    dest.solver = dest.options["solver"](model; options...)
     index_map = MOI.Utilities.identity_index_map(src)
     vis_src = MOI.get(src, MOI.ListOfVariableIndices())
     # Just to throw a nice error saying we don't support such attributes

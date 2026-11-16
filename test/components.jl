@@ -86,8 +86,14 @@ end
 @testset "Component sums and Schur cross terms" begin
     for T in (Float32, Float64), kind in (:rank_one, :mixed), κ in (0, 1, 100)
         model, reference, full, W, x, y = _fixture(T, kind)
-        buffer = LRO.BufferedModelForSchur(model, κ)
-        reference_buffer = LRO.BufferedModelForSchur(reference, κ)
+        buffer = LRO.BufferedModelForSchur(
+            model;
+            dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
+        )
+        reference_buffer = LRO.BufferedModelForSchur(
+            reference;
+            dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
+        )
         if kind == :rank_one
             @test all(J -> J isa LRO.RankOneJacobian, buffer.jprod_buffer)
         else
@@ -216,7 +222,10 @@ end
         [Matrix(Symmetric(randn(rng, T, d, d))) for d in dims],
     )
     y = randn(rng, T, n)
-    buffer = LRO.BufferedModelForSchur(model, 1)
+    buffer = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     @test buffer.jprod_buffer[1] isa SparseMatrixCSC
     @test buffer.jprod_buffer[2] isa SparseMatrixCSC
     @test buffer.jprod_buffer[3] isa LRO.RankOneJacobian
@@ -294,7 +303,10 @@ end
         Int64[d],
     )
     @test model.A[3] == LRO.BlockColumns(legacy)
-    buffer = LRO.BufferedModelForSchur(model, 0)
+    buffer = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
+    )
     W = let R = randn(rng, T, d, d)
         R * R' + I
     end
@@ -334,7 +346,10 @@ end
     )
     # The `d` one-hot factors have `d < m * d` nonzeros so the dense
     # `m × d` factor of `RankOneJacobian` would be wasteful.
-    buffer = LRO.BufferedModelForSchur(model, 1)
+    buffer = LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
     @test only(buffer.jprod_buffer) isa SparseMatrixCSC
     y = randn(MersenneTwister(4), T, d)
     @test LRO.unsafe_jtprod(buffer, y, LRO.MatrixIndex(1)) ≈

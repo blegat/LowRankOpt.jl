@@ -32,11 +32,15 @@ end
 
 # Checks `schur_complement!` and `eval_schur_complement!` against
 # `tr(Aⱼ L Aₖ R)` computed from the dense matrices.
-function _test_schur(model; κ = 1, nscalars = 0)
+function _test_schur(
+    model;
+    dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    nscalars = 0,
+)
     rng = MersenneTwister(1)
     T = eltype(model.b)
     m = model.meta.ncon
-    buffer = LRO.BufferedModelForSchur(model, κ)
+    buffer = LRO.BufferedModelForSchur(model; dense_condition)
     idx = LRO.matrix_indices(model)
     L = LRO.ShapedSolution(
         rand(rng, T, nscalars),
@@ -99,9 +103,9 @@ function _model(C, A, b; scalars = 0)
     )
 end
 
-# Sparse matrices with one, a few and many nonzeros so that `κ` selects
-# the three regimes of the sparse component. The dense product of the matrix
-# with two nonzero columns only uses these columns.
+# Sparse matrices with one, a few and many nonzeros so that the dense
+# condition selects the three regimes of the sparse component. The dense
+# product of the matrix with two nonzero columns only uses these columns.
 function test_sparse_regimes()
     rng = MersenneTwister(2)
     d, m = 6, 6
@@ -117,8 +121,13 @@ function test_sparse_regimes()
     ]
     model =
         _model([spzeros(d, d)], reshape(entries, 1, m), zeros(m); scalars = 2)
-    for κ in (0, 3, 100)
-        buffer = _test_schur(model; κ, nscalars = 2)
+    conditions = [
+        [LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)) for κ in (0, 3, 100)]
+        # The dense constraints are not the ones with the most nonzeros
+        c -> isodd(c.nnz)
+    ]
+    for dense_condition in conditions
+        buffer = _test_schur(model; dense_condition, nscalars = 2)
         @test only(buffer.schur_buffer[3]) isa LRO._GeneralSchurComponent
     end
 end
@@ -126,17 +135,26 @@ end
 # The dense matrix `L Aᵢ R` is only formed when this is cheaper than the
 # inner products with the remaining sparse matrices. Like `thetaG51`, the
 # trace constraint is dense while the rank-one constraints with 9 nonzeros
-# are not even though they have more than `κ = 8` nonzeros.
-function test_last_dense()
+# are not even though they have more than 8 nonzeros.
+function test_dense_permutation()
     d = 1001
-    counts = [fill(1, 1001); 1001; fill(9, 5909)]
-    σ = sortperm(counts; rev = true)
-    @test LRO._last_dense(counts, σ, d, 8) == 1
-    @test LRO._last_dense(counts, σ, d, 2000) == 0
+    counts = [fill(1, 1001); 1001; fill(9, 5909); 0]
+    _count(condition, d) = LRO._dense_permutation(condition, counts, d)[2]
+    default = LRO.default_dense_condition()
+    @test _count(default, d) == 1
+    @test _count(LRO.MinNonzeros(2000), d) == 0
     # For small matrices, the dense product is cheap
-    @test LRO._last_dense(counts, σ, 10, 8) == 5910
+    @test _count(default, 10) == 5910
     # The last matrices with one nonzero are cheaper with the sparse path
-    @test 5910 < LRO._last_dense(counts, σ, 10, 0) < length(counts)
+    @test 5910 < _count(LRO.DenseCost(100), 10) < length(counts) - 1
+    @test _count(LRO.Or(LRO.MinNonzeros(8), LRO.DenseCost(100)), d) == 5910
+    # The zero matrix is never dense
+    @test _count(LRO.Not(default), d) == length(counts) - 2
+    # The dense constraints are moved first, before the trace constraint
+    σ, last_dense = LRO._dense_permutation(c -> c.nnz == 9, counts, d)
+    @test last_dense == 5909
+    @test all(==(9), counts[σ[1:last_dense]])
+    @test issorted(counts[σ[(last_dense+1):end]]; rev = true)
     return
 end
 

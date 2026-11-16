@@ -118,9 +118,9 @@ end
 
 # Adds one sparse component's contribution `𝐀ᵢᵀ (R ⊗ L) 𝐀ᵢ` to `H`.
 # Its Jacobian cache follows the layout documented in `buffer_for_jprod`.
-# `H` is assembled column by column. For a constraint `i` in the dense
-# regime, that is, one of the `last_dense[ilmi]` first entries of the
-# permutation `σ` sorting the constraints by decreasing number of nonzeros,
+# `H` is assembled column by column, visiting the constraints in the order of
+# the permutation `σ` of `_dense_permutation`. For a constraint `i` in the
+# dense regime, that is, one of the `last_dense[slot]` first entries of `σ`,
 # the dense matrix `L Aᵢ R` is formed once and all the remaining inner
 # products `⟨Aⱼ, L Aᵢ R⟩`, `j ∈ I`, are then obtained with the single
 # sparse matrix-vector product `𝐀ᵢ[:, I]ᵀ vec(L Aᵢ R)` of
@@ -128,7 +128,7 @@ end
 # dedicated low-nnz paths below, also following [FKN97].
 # /!\ L and R need to be symmetric
 function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
-    σ, last_dense = workspace.permutation, workspace.last_dense
+    σ = workspace.permutation
     column = view(workspace.component.values, :, slot)
     # The constraints that are zero on this block are the last ones of `σ`
     n = workspace.last_nonzero[slot]
@@ -136,7 +136,7 @@ function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
     for ii in 1:n
         i = σ[ii, slot]
         Ai = column[i]
-        if ii <= last_dense[slot]
+        if ii <= workspace.last_dense[slot]
             _sparse_sandwich!(WAW, AW, L, R, Ai)
             I = view(σ, ii:n, slot)
             _add_jprod!(
@@ -321,7 +321,7 @@ end
 
 # `A(y)` sparse: contract directly, never forming the `d×d` product, so the
 # cost follows the nonzeros instead of `d`. This is the same trade-off
-# `add_schur_complement!` makes per constraint matrix via `κ`/`last_dense`,
+# `add_schur_complement!` makes per constraint matrix via its dense condition,
 # here made once for `A(y)`.
 function _add_eval_schur_complement!(
     model::BufferedModelForSchur,
@@ -545,34 +545,33 @@ function _schur_component(
     return _RankOneSchurComponent(component, U, weights)
 end
 
-# Ratio between the time of an operation of the pairs of sparse matrices of
-# `_add_sparse_component!` and the time of a flop of the dense matrix product
-# `L Aᵢ R`. The former accesses `L` and `R` at random positions while the
-# latter is done by BLAS. It was estimated to be about 170 on `thetaG51` with a
-# multithreaded BLAS, so this is only a rough estimate.
-const _DENSE_COST_FACTOR = 100
-
-# Number of constraints, in the order `σ` of decreasing number of nonzeros,
-# for which `_add_sparse_component!` forms the dense matrix `L Aᵢ R`. This
-# needs `O(d³)` operations while the inner products `⟨Aᵢ, L Aⱼ R⟩` with the
-# remaining sparse matrices `Aⱼ` need `O(nnz(Aᵢ) * ∑ⱼ nnz(Aⱼ))` operations.
-# As the latter decreases along `σ`, the dense constraints are a prefix of `σ`.
-# The constraints with at most `κ` nonzeros are never dense, as in [FKN97].
-function _last_dense(counts, σ, d, κ)
+# Returns the permutation `σ` of the constraints, with `counts` nonzeros,
+# putting first the `last_dense` ones satisfying `dense_condition` and then the
+# others, both by decreasing number of nonzeros. As each pair of constraints is
+# computed by the first one in `σ`, the dense constraints compute all their
+# pairs with `L Aᵢ R`. The constraints with at most one nonzero are last, as
+# assumed by `_add_sparse_component!`. The condition is evaluated by
+# decreasing number of nonzeros, which defines `remaining` in
+# `DenseCandidate`, and moving the dense constraints first only adds
+# constraints after them. The constraints without nonzeros are never dense.
+function _dense_permutation(dense_condition, counts, d)
+    σ = sortperm(counts; rev = true)
+    dense = Vector{Bool}(undef, length(σ))
     remaining = sum(counts; init = 0)
-    last = 0
-    for i in σ
-        if counts[i] <= κ ||
-           _DENSE_COST_FACTOR * float(counts[i]) * remaining < float(d)^3
-            break
-        end
-        last += 1
+    for (ii, i) in enumerate(σ)
+        dense[ii] =
+            !iszero(counts[i]) &&
+            dense_condition(DenseCandidate(counts[i], d, remaining))
         remaining -= counts[i]
     end
-    return last
+    return [σ[dense]; σ[.!dense]], count(dense)
 end
 
-function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T}
+function _schur_component(
+    component::BlockColumns,
+    model::Model{T},
+    dense_condition,
+) where {T}
     n, p = size(component.values)
     permutation = Matrix{Int}(undef, n, p)
     last_dense = zeros(Int, p)
@@ -582,9 +581,8 @@ function _schur_component(component::BlockColumns, model::Model{T}, κ) where {T
     for (slot, i) in enumerate(component.block_ids)
         column = view(component.values, :, slot)
         counts = _nnz.(column)
-        permutation[:, slot] = sortperm(counts; rev = true)
-        last_dense[slot] =
-            _last_dense(counts, view(permutation, :, slot), model.msizes[i], κ)
+        permutation[:, slot], last_dense[slot] =
+            _dense_permutation(dense_condition, counts, model.msizes[i])
         last_nonzero[slot] = count(!iszero, counts)
         sparse[slot] = all(
             A -> A isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros},
@@ -628,10 +626,10 @@ function _schur_component(
     return _RankOneSchurComponent(component, U, weights)
 end
 
-function buffer_for_schur_complement(model::Model{T}, κ) where {T}
+function buffer_for_schur_complement(model::Model{T}, dense_condition) where {T}
     AW = [zeros(T, d, d) for d in model.msizes]
     WAW = copy.(AW)
-    components = map(A -> _schur_component(A, model, κ), model.A)
+    components = map(A -> _schur_component(A, model, dense_condition), model.A)
     factor_work = map(matrix_indices(model)) do i
         rank = _sum_columns(model.A, i.value, 0) do column
             return maximum(

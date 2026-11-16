@@ -15,7 +15,10 @@ function scalar_model(C::SparseMatrixCSC{T}) where {T}
         SparseMatrixCSC{T,Int64}(C),
         dims,
     )
-    return LRO.BufferedModelForSchur(model, 1)
+    return LRO.BufferedModelForSchur(
+        model;
+        dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
+    )
 end
 
 function scalar_schur_allocations(model, w, H)
