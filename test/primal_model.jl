@@ -53,6 +53,7 @@ import NLPModels
     @test iszero(NLPModels.hess(model, x, multipliers))
     @test iszero(NLPModels.hprod(model, x, multipliers, v))
     @test model.C[1] === C
+    @test identity.(model) === model
     @test model.b == [-1.0, 2.0]
     @test LRO.primal_model(model) === model
     for dual in (LRO.DualModel(model), LRO.dual_model(model))
@@ -77,6 +78,32 @@ import NLPModels
     @test LRO.side_dimension(model, LRO.MatrixIndex(1)) == 2
     @test !NLPModels.unconstrained(model)
     @test !NLPModels.has_bounds(model)
+end
+
+@testset "PSD block indices and coefficient validation" begin
+    C = [spzeros(1, 1), spzeros(2, 2)]
+    function build(coefficient)
+        component = LRO.BlockColumns([2], reshape([coefficient], 1, 1), 2)
+        return LRO.Model(
+            C,
+            (component,),
+            [0.0],
+            spzeros(0),
+            spzeros(1, 0),
+            [1, 2],
+        )
+    end
+    model = build(ones(2, 2))
+    indices = collect(LRO.matrix_indices(model))
+    @test indices == LRO.MatrixIndex.([1, 2])
+    @test LRO.side_dimension.(model, indices) == [1, 2]
+    @test NLPModels.cons(model, [1.0]) == [0.0, -1, -1, -1, -1]
+    @test_throws ArgumentError(
+        "constraint coefficients must have element type Float64",
+    ) build(ones(Float32, 2, 2))
+    @test_throws DimensionMismatch(
+        "constraint matrix has the wrong size for PSD block 2",
+    ) build(ones(1, 1))
 end
 
 @testset "Primal metadata preserves arithmetic type" begin
@@ -152,6 +179,7 @@ end
     @test model.meta.nvar == 1
     @test model.meta.ncon == 0
     @test NLPModels.unconstrained(model)
+    @test isempty(LRO.matrix_indices(model))
     @test isempty(NLPModels.cons(model, [1.0]))
 end
 
