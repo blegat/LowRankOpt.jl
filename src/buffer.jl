@@ -299,6 +299,32 @@ function _add_coefficient_adjoint!(V, Jv::AbstractArray, A, α = true)
     return _add_mul!(Jv, A', _vec(V), α)
 end
 
+function _add_sub_coefficient_adjoint!(V, result, A, indices, α)
+    return _add_coefficient_adjoint!(V, result, view(A, :, indices), α)
+end
+
+function _add_sub_coefficient_adjoint!(
+    V,
+    result,
+    J::RankOneCoefficients,
+    indices,
+    α,
+)
+    selected = view(J.coef, indices)
+    if length(result) != length(selected)
+        throw(DimensionMismatch("Result length must match selected columns."))
+    end
+    if isempty(selected)
+        return result
+    end
+    # Reuse the product workspace, then gather in the requested order.
+    # Computing each column once also handles repeated selected indices.
+    fill!(J.coef, zero(eltype(J.coef)))
+    _add_coefficient_adjoint!(V, J.coef, J, α)
+    result .+= selected
+    return result
+end
+
 function _merge_sparsity(
     A::SparseArrays.SparseMatrixCSC,
     B::SparseArrays.SparseMatrixCSC,
@@ -586,11 +612,11 @@ function add_sub_jtprod!(
     indices,
 )
     _require_jacobian(workspace)
-    coefficients = workspace.coefficient_buffer[i.value]
-    return _add_coefficient_adjoint!(
+    return _add_sub_coefficient_adjoint!(
         V,
         result,
-        view(coefficients, :, indices),
+        workspace.coefficient_buffer[i.value],
+        indices,
         -one(eltype(result)),
     )
 end

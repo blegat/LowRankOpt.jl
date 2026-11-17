@@ -155,6 +155,71 @@ end
     end
 end
 
+function _subset_allocations(args...)
+    return @allocated LRO.add_sub_jtprod!(args...)
+end
+
+@testset "Selected rank-one adjoint columns" begin
+    for T in (Float32, Float64)
+        model, reference, _, _, _, direction = _fixture(T, :rank_one)
+        i = LRO.MatrixIndex(1)
+        rows = (model.dim.offsets[i.value]+1):model.dim.offsets[i.value+1]
+        native_jacobian = model.jacobian[rows, :]
+        V = T[2 -0.4; 0.9 -1]
+        for input in (model, reference)
+            workspace = LRO.ModelWorkspace(input; schur = false)
+            for indices in ([3, 1], Int[], [3, 1, 3, 2, 1], 2:3, :)
+                contribution = native_jacobian[:, indices]' * vec(V)
+                initial = T.(1:length(contribution))
+                result = copy(initial)
+                @test LRO.add_sub_jtprod!(workspace, i, V, result, indices) ===
+                      result
+                @test result ≈ initial + contribution
+                # The forward product shares work storage with the adjoint.
+                LRO.unsafe_jprod(workspace, direction, i)
+                @test _subset_allocations(workspace, i, V, result, indices) == 0
+                @test result ≈ initial + 2contribution
+            end
+            for indices in ([0], [4], [1, 4])
+                result = ones(T, length(indices))
+                @test_throws BoundsError view(native_jacobian, :, indices)
+                @test_throws BoundsError LRO.add_sub_jtprod!(
+                    workspace,
+                    i,
+                    V,
+                    result,
+                    indices,
+                )
+                @test result == ones(T, length(indices))
+            end
+        end
+        workspace = LRO.ModelWorkspace(model; schur = false)
+        for indices in ([3, 1], Int[])
+            result = ones(T, length(indices) + 1)
+            @test_throws DimensionMismatch LRO.add_sub_jtprod!(
+                workspace,
+                i,
+                V,
+                result,
+                indices,
+            )
+            @test result == ones(T, length(indices) + 1)
+        end
+        # Boolean selection uses ordinary view semantics as well.
+        indices = [true, false, true]
+        result = ones(T, 2)
+        @test LRO.add_sub_jtprod!(workspace, i, V, result, indices) ≈
+              ones(T, 2) + native_jacobian[:, indices]' * vec(V)
+        @test_throws BoundsError LRO.add_sub_jtprod!(
+            workspace,
+            i,
+            V,
+            result,
+            [true, false],
+        )
+    end
+end
+
 @testset "Missing component blocks" begin
     T, n = Float64, 2
     component = LRO.BlockColumns(
