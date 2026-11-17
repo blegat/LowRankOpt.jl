@@ -383,3 +383,22 @@ function NLPModels.hprod!(
     fill!(result, zero(eltype(result)))
     return result
 end
+
+"""
+    coefficient(model::Model, j, i::MatrixIndex)
+
+Return the stored PSD coefficient `A[i,j]`. The native constraint derivative
+with respect to variable `j` is its negative.
+"""
+function coefficient(model::Model{T}, j::Integer, i::MatrixIndex) where {T}
+    return _coefficient_sum(model.A, j, i.value, side_dimension(model, i), T)
+end
+
+function norm_jac(model::Model{T}, i::MatrixIndex) where {T}
+    if iszero(model.meta.nvar)
+        return zero(T)
+    end
+    return LinearAlgebra.norm((
+        coefficient(model, j, i) for j in 1:model.meta.nvar
+    ))
+end

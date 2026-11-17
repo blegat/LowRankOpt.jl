@@ -402,16 +402,10 @@ function MOI.copy_to(
         Symbol(key) => dest.options[key] for key in keys(dest.options) if
         key in SOLVER_OPTIONS && key != "solver"
     )
-    # The solvers using the Schur complement buffer the model with
-    # `BufferedDualModel(dual_model(model))` which keeps this dense condition.
-    model = dest.model
     if haskey(dest.options, "dense_condition")
-        model = BufferedDualModel(
-            dual_model(model);
-            dense_condition = dest.options["dense_condition"],
-        )
+        options[:dense_condition] = dest.options["dense_condition"]
     end
-    dest.solver = dest.options["solver"](model; options...)
+    dest.solver = dest.options["solver"](dest.model; options...)
     index_map = MOI.Utilities.identity_index_map(src)
     vis_src = MOI.get(src, MOI.ListOfVariableIndices())
     # Just to throw a nice error saying we don't support such attributes

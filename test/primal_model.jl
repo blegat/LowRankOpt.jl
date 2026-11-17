@@ -69,10 +69,11 @@ import NLPModels
         @test dual.meta.ncon == model.meta.nvar
         @test NLPModels.obj(LRO.primal_model(dual), x) ≈ 6.4
         @test LRO.primal_model(dual).objective_constant == 7
-        buffered = LRO.BufferedDualModel(dual)
-        @test LRO.primal_model(buffered) === model
-        @test NLPModels.obj(LRO.primal_model(buffered), x) ≈ 6.4
     end
+    workspace = LRO.ModelWorkspace(model)
+    @test workspace.model === model
+    @test !(workspace isa NLPModels.AbstractNLPModel)
+    @test NLPModels.obj(workspace.model, x) ≈ 6.4
     @test LRO.num_scalars(model) == 2
     @test LRO.num_matrices(model) == 1
     @test LRO.side_dimension(model, LRO.MatrixIndex(1)) == 2

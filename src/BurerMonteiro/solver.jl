@@ -9,16 +9,13 @@ function Solver(
     sub_solver,
     ranks,
     square_scalars = false,
+    dense_condition = nothing,
     kws...,
 )
     model = Model{square_scalars}(LRO.dual_model(src), ranks)
     solver = sub_solver(model; kws...)
     stats = SolverCore.GenericExecutionStats(model)
     return Solver(model, solver, stats)
-end
-
-function Solver(src::LRO.BufferedDualModel; kws...)
-    return Solver(src.model; kws...)
 end
 
 function SolverCore.solve!(

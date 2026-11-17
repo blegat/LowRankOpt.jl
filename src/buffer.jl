@@ -1,118 +1,112 @@
-mutable struct BufferedDualModel{T,D<:DualModel{T},JB,JTB,SB} <:
-               AbstractDualModel{T}
-    model::D
-    meta::NLPModels.NLPModelMeta{T,Vector{T}}
+"""
+    ModelWorkspace(model::Model; dense_condition = default_dense_condition(),
+                   schur = true, jacobian = true)
+
+Workspaces for native Jacobian products and Schur assembly. This is not an
+NLPModels model: `model` retains the free variables, cone constraints, and
+metadata. Coefficient columns store positive `vec(A[i,j])`; the native
+Jacobian products apply the minus sign in `C[i] - sum(A[i,j] * x[j])`.
+
+Use `schur = false` for Jacobian products without Schur assembly storage.
+Use `jacobian = false, schur = false` when the solver builds its own KKT
+operators. Scalar Jacobian products remain available. Reconfiguring an
+existing workspace preserves any buffers that are still needed.
+"""
+mutable struct ModelWorkspace{T,M<:Model{T},CB,JB,SB}
+    model::M
+    coefficient_buffer::CB
     jprod_buffer::JB
-    jtprod_buffer::JTB
     schur_buffer::SB
+    scalar_jacobian_transpose::SparseArrays.SparseMatrixCSC{T,Int}
 end
 
-"""
-    BufferedDualModel(
-        model;
-        dense_condition = default_dense_condition(),
-        schur = true,
-    )
+Base.broadcastable(workspace::ModelWorkspace) = Ref(workspace)
 
-Cache Jacobian products and, by default, Schur-complement assembly workspaces.
-Use `schur = false` when only Jacobian products are needed. Schur-complement
-assembly and matrix-vector products require the Schur workspaces.
-`dense_condition` is used when constructing new Schur workspaces, see
-[`default_dense_condition`](@ref).
-
-Wrapping an already buffered model reuses its Jacobian caches. If its Schur
-workspaces already match the requested choice, return the model unchanged,
-even if it was built with another `dense_condition`. Otherwise, construct or
-drop only the Schur workspaces.
-"""
-function BufferedDualModel(
-    model::DualModel;
+function ModelWorkspace(
+    model::Model;
     dense_condition = default_dense_condition(),
     schur::Bool = true,
+    jacobian::Bool = true,
 )
-    schur_buffer =
-        schur ? buffer_for_schur_complement(model, dense_condition) : nothing
-    return BufferedDualModel(
-        model,
-        model.meta,
-        buffer_for_jprod(model),
-        buffer_for_jtprod(model),
-        schur_buffer,
-    )
-end
-
-function BufferedDualModel(
-    model::BufferedDualModel;
-    dense_condition = default_dense_condition(),
-    schur::Bool = true,
-)
-    if schur == !isnothing(model.schur_buffer)
-        return model
+    if schur && !jacobian
+        throw(ArgumentError("Schur workspaces require Jacobian buffers."))
     end
-    schur_buffer =
-        schur ? buffer_for_schur_complement(model.model, dense_condition) :
-        nothing
-    return BufferedDualModel(
-        model.model,
-        model.meta,
-        model.jprod_buffer,
-        model.jtprod_buffer,
-        schur_buffer,
+    scalar_jacobian = model.jacobian[1:num_scalars(model), :]
+    return ModelWorkspace(
+        model,
+        jacobian ? buffer_for_coefficients(model) : nothing,
+        jacobian ? buffer_for_jprod(model) : nothing,
+        schur ? buffer_for_schur_complement(model, dense_condition) : nothing,
+        SparseArrays.sparse(scalar_jacobian'),
     )
 end
 
-function _schur_buffer(model::BufferedDualModel)
-    if isnothing(model.schur_buffer)
+function ModelWorkspace(
+    workspace::ModelWorkspace;
+    dense_condition = default_dense_condition(),
+    schur::Bool = true,
+    jacobian::Bool = true,
+)
+    if schur && !jacobian
+        throw(ArgumentError("Schur workspaces require Jacobian buffers."))
+    end
+    has_jacobian = !isnothing(workspace.coefficient_buffer)
+    if jacobian == has_jacobian && schur == !isnothing(workspace.schur_buffer)
+        return workspace
+    end
+    coefficients, products = if !jacobian
+        nothing, nothing
+    elseif has_jacobian
+        workspace.coefficient_buffer, workspace.jprod_buffer
+    else
+        buffer_for_coefficients(workspace.model), buffer_for_jprod(workspace.model)
+    end
+    schur_buffer = if !schur
+        nothing
+    elseif isnothing(workspace.schur_buffer)
+        buffer_for_schur_complement(workspace.model, dense_condition)
+    else
+        workspace.schur_buffer
+    end
+    return ModelWorkspace(
+        workspace.model,
+        coefficients,
+        products,
+        schur_buffer,
+        workspace.scalar_jacobian_transpose,
+    )
+end
+
+function _require_jacobian(workspace::ModelWorkspace)
+    if isnothing(workspace.coefficient_buffer)
+        throw(
+            ArgumentError(
+                "Jacobian buffers are disabled; use jacobian = true.",
+            ),
+        )
+    end
+    return
+end
+
+function buffer_for_jprod(model::Model)
+    if iszero(num_matrices(model))
+        return nothing
+    end
+    return map(Base.Fix1(buffer_for_jprod, model), matrix_indices(model))
+end
+
+function _schur_buffer(workspace::ModelWorkspace)
+    if isnothing(workspace.schur_buffer)
         throw(ArgumentError("Schur workspaces are disabled; use schur = true."))
     end
-    return model.schur_buffer
+    return workspace.schur_buffer
 end
 
-primal_model(model::BufferedDualModel) = primal_model(model.model)
-
-num_scalars(model::BufferedDualModel) = num_scalars(model.model)
-num_matrices(model::BufferedDualModel) = num_matrices(model.model)
-matrix_indices(model::BufferedDualModel) = matrix_indices(model.model)
-side_dimension(model::BufferedDualModel, i) = side_dimension(model.model, i)
-
-#######################
-###### Objective ######
-#######################
-
-function NLPModels.obj(model::BufferedDualModel, x::AbstractVector)
-    return NLPModels.obj(model.model, x)
-end
-
-function dual_obj(model::BufferedDualModel, y::AbstractVector)
-    return dual_obj(model.model, y)
-end
-
-function grad(model::BufferedDualModel, ::Type{ScalarIndex})
-    return grad(model.model, ScalarIndex)
-end
-
-function grad(model::BufferedDualModel, i::MatrixIndex)
-    return grad(model.model, i)
-end
-
-#########################
-###### Constraints ######
-#########################
-
-cons_constant(model::BufferedDualModel) = cons_constant(model.model)
-function jac(model::BufferedDualModel, j::Integer, ::Type{ScalarIndex})
-    return jac(model.model, j, ScalarIndex)
-end
-function norm_jac(model::BufferedDualModel, i::MatrixIndex)
-    return norm_jac(model.model, i)
-end
-
-#######################
-###### J product ######
-#######################
-
-function jprod!(model, x, v, Jv, ::Type{ScalarIndex})
-    return jprod!(model.model, x, v, Jv, ScalarIndex)
+num_scalars(workspace::ModelWorkspace) = num_scalars(workspace.model)
+num_matrices(workspace::ModelWorkspace) = num_matrices(workspace.model)
+matrix_indices(workspace::ModelWorkspace) = matrix_indices(workspace.model)
+function side_dimension(workspace::ModelWorkspace, i::MatrixIndex)
+    return side_dimension(workspace.model, i)
 end
 
 function _add_vec!(_, _, _, _, offset, ::FillArrays.Zeros)
@@ -129,7 +123,7 @@ function _add_vec!(I, J, V, j, offset, A::SparseArrays.SparseMatrixCSC)
 end
 
 """
-    buffer_for_jprod(model::DualModel, i::MatrixIndex)
+    buffer_for_coefficients(model::Model, i::MatrixIndex)
 
 Return the sparse matrix collecting the vectorization of every constraint
 matrix of the `i`th PSD block:
@@ -137,24 +131,21 @@ matrix of the `i`th PSD block:
 𝐀ᵢ = [vec(Aᵢ₁) vec(Aᵢ₂) … vec(Aᵢₙ)] ∈ ℝ^(mᵢ² × n)
 ```
 where `mᵢ` is the side dimension of the block and `n` is the number of
-constraints. This is the matrix `𝒜` of [HKS24, Section 3.1], which is
+free variables. This is the matrix `𝒜` of [HKS24, Section 3.1], which is
 stated there for a single PSD block, here built once per block.
 
-It represents the linear equality-constraint operator
-`Xᵢ ↦ (⟨Aᵢⱼ, Xᵢ⟩)ⱼ` as a single matrix, so that `add_jprod!` is one
-sparse matrix-vector product. It is computed once at problem setup and
-reused at every interior-point iteration, both for the Jacobian products
-and for the dense columns of the Schur complement assembled in
-`schur.jl`.
+The native PSD Jacobian is `-𝐀ᵢ`: its JVP maps a free-variable direction
+to a matrix, and its adjoint contracts a matrix against the coefficient
+columns. The positive coefficients are also reused by Schur assembly,
+where the two Jacobian signs cancel.
 
 `SparseMatrixCSC` is stored with an offset by column.
 This means that getting view `view(A, :, I)` can be handles efficently,
 these give `SparseMatrixCSCView` (if `I` is a `UnitRange`) and
 `SparseMatrixCSCColumnSubset` otherwise.
 In `schur.jl`, we therefore get a `SparseMatrixCSCColumnSubset`.
-Since we want to use subsets of constraint indices, we use the columns
-of `A` for constraint indices and the rows of `A` for matrix indices.
-The subsets used in `schur.jl` are suffixes of the constraints sorted by
+Columns index free variables; rows index vectorized matrix entries.
+The subsets used in `schur.jl` are suffixes of the columns sorted by
 decreasing number of nonzeros, following [FKN97].
 
 [HKS24] Habibi, Soodeh, Michal Kočvara, and Michael Stingl. "Loraine -- an
@@ -164,21 +155,21 @@ Optimization Methods and Software 39.6 (2024): 1185-1215.
 "Exploiting sparsity in primal-dual interior-point methods for
 semidefinite programming." Mathematical Programming 79 (1997): 235-253.
 """
-function buffer_for_jprod(model::DualModel{T}, i::MatrixIndex) where {T}
-    J = _rank_one_jacobian(model, i)
+function buffer_for_coefficients(model::Model{T}, i::MatrixIndex) where {T}
+    J = _rank_one_coefficients(model, i)
     if !isnothing(J)
         return J
     end
-    return _jacobian_buffer(
+    return _coefficient_buffer(
         model.A,
         i.value,
         side_dimension(model, i),
-        model.meta.ncon,
+        model.meta.nvar,
         T,
     )
 end
 
-function _jacobian_buffer(components, i, d, ncon, ::Type{T}) where {T}
+function _coefficient_buffer(components, i, d, nvar, ::Type{T}) where {T}
     nnz = _sum_columns(components, i, 0) do column
         return sum(_nnz, column; init = 0)
     end
@@ -193,14 +184,15 @@ function _jacobian_buffer(components, i, d, ncon, ::Type{T}) where {T}
             offset = _add_vec!(I, J, V, j, offset, values[j, slot])
         end
     end
-    A = SparseArrays.sparse(I, J, V, d^2, ncon)
+    A = SparseArrays.sparse(I, J, V, d^2, nvar)
     return A
 end
 
-function buffer_for_jprod(model::DualModel{T}) where {T}
-    buffers = Union{SparseArrays.SparseMatrixCSC{T,Int64},RankOneJacobian{T}}[
-        buffer_for_jprod(model, i) for i in matrix_indices(model)
-    ]
+function buffer_for_coefficients(model::Model{T}) where {T}
+    buffers =
+        Union{SparseArrays.SparseMatrixCSC{T,Int64},RankOneCoefficients{T}}[
+            buffer_for_coefficients(model, i) for i in matrix_indices(model)
+        ]
     # Loraine accesses the sparse `𝐀ᵢ` directly so keep the concrete
     # element type when no block is rank-one.
     if all(J -> J isa SparseArrays.SparseMatrixCSC, buffers)
@@ -210,22 +202,24 @@ function buffer_for_jprod(model::DualModel{T}) where {T}
 end
 
 """
-    struct RankOneJacobian{T}
+    struct RankOneCoefficients{T}
         U::Vector{Matrix{T}}
         weights::Vector{Vector{T}}
     end
 
-Replaces the sparse `𝐀ᵢ` of `buffer_for_jprod` for a PSD block whose
+Replaces the sparse `𝐀ᵢ` of `buffer_for_coefficients` for a PSD block whose
 constraint matrices are all sums of rank-one matrices
 `Aᵢⱼ = ∑ₚ weights[p][j] * U[p][j, :] * U[p][j, :]'`, with one `p` per
 component. The sparse `𝐀ᵢ` would have `nnz(U[p][j, :])²` entries for each
 constraint `j` while this stores the `m × d` factors `U[p]`. The products
 are computed with dense BLAS calls on the factors:
 
-* `jprod`: `⟨Aᵢⱼ, V⟩ = ∑ₚ weights[p][j] * (U[p] * V)[j, :] ⋅ U[p][j, :]`,
-* `jtprod`: `∑ⱼ yⱼ Aᵢⱼ = ∑ₚ U[p]' * Diagonal(weights[p] .* y) * U[p]`.
+* Coefficient adjoint:
+  `⟨Aᵢⱼ, V⟩ = ∑ₚ weights[p][j] * (U[p] * V)[j, :] ⋅ U[p][j, :]`,
+* Coefficient product:
+  `∑ⱼ yⱼ Aᵢⱼ = ∑ₚ U[p]' * Diagonal(weights[p] .* y) * U[p]`.
 """
-struct RankOneJacobian{T}
+struct RankOneCoefficients{T}
     U::Vector{Matrix{T}}
     weights::Vector{Vector{T}}
     # Workspaces of size `m × d` and `m`
@@ -233,7 +227,7 @@ struct RankOneJacobian{T}
     coef::Vector{T}
 end
 
-function _rank_one_jacobian(model::DualModel{T}, i::MatrixIndex) where {T}
+function _rank_one_coefficients(model::Model{T}, i::MatrixIndex) where {T}
     d = side_dimension(model, i)
     U = Matrix{T}[]
     weights = Vector{T}[]
@@ -251,7 +245,7 @@ function _rank_one_jacobian(model::DualModel{T}, i::MatrixIndex) where {T}
     if !rank_one || isempty(U)
         return
     end
-    m = model.meta.ncon
+    m = model.meta.nvar
     # The products cost `Θ(nnz)` with the sparse `𝐀ᵢ` and `Θ(m d²)` with the
     # factors so we only use the factors if `𝐀ᵢ` has at least `m d`
     # nonzeros. This excludes, e.g., one-hot factors.
@@ -261,29 +255,34 @@ function _rank_one_jacobian(model::DualModel{T}, i::MatrixIndex) where {T}
     if nnz < m * d
         return
     end
-    return RankOneJacobian(U, weights, zeros(T, m, d), zeros(T, m))
+    return RankOneCoefficients(U, weights, zeros(T, m, d), zeros(T, m))
 end
 
-function _add_jprod!(V, Jv::AbstractVector, J::RankOneJacobian)
+function _add_coefficient_adjoint!(
+    V,
+    Jv::AbstractVector,
+    J::RankOneCoefficients,
+    α = true,
+)
     for (U, w) in zip(J.U, J.weights)
         LinearAlgebra.mul!(J.scaled, U, V)
         for k in axes(U, 2), j in eachindex(Jv)
-            Jv[j] += w[j] * J.scaled[j, k] * U[j, k]
+            Jv[j] += α * w[j] * J.scaled[j, k] * U[j, k]
         end
     end
     return Jv
 end
 
 # `vec(buffer) = 𝐀ᵢ * y`
-function _mul_jacobian!(buffer, A::SparseArrays.SparseMatrixCSC, y)
-    return LinearAlgebra.mul!(_vec(buffer), A, y)
+function _mul_coefficients!(buffer, A::SparseArrays.SparseMatrixCSC, y, α)
+    return LinearAlgebra.mul!(_vec(buffer), A, y, α, false)
 end
-function _mul_jacobian!(buffer, J::RankOneJacobian, y)
+function _mul_coefficients!(buffer, J::RankOneCoefficients, y, α)
     for (p, (U, w)) in enumerate(zip(J.U, J.weights))
         # `y` may be a `SparseVector`, compute `w .* y` once before
         # broadcasting it on the rows of `U`
         for j in eachindex(J.coef)
-            J.coef[j] = w[j] * y[j]
+            J.coef[j] = α * w[j] * y[j]
         end
         J.scaled .= J.coef .* U
         LinearAlgebra.mul!(buffer, U', J.scaled, true, !isone(p))
@@ -296,78 +295,8 @@ _vec(x::FillArrays.Zeros{T}) where {T} = FillArrays.Zeros{T}(length(x))
 _vec(x::AbstractArray) = UnsafeArrays.uview(x, :)
 _vec(x::Base.ReshapedArray) = _vec(parent(x))
 
-function _add_jprod!(V, Jv::AbstractArray, A)
-    return _add_mul!(Jv, A', _vec(V), true)
-end
-
-"""
-    add_sub_jprod!(
-        model::BufferedDualModel,
-        i::MatrixIndex,
-        V::AbstractMatrix,
-        Jv::AbstractVector,
-        I,
-    )
-
-Same as `add_jprod!` but restricted to the constraints of `I`:
-adds `⟨Aᵢⱼ, V⟩` to `Jv[k]` for the `k`th entry `j` of `I`. This is the
-product with the column subset `𝐀ᵢ[:, I]` of the buffer described in
-`buffer_for_jprod`, which is why the buffer is stored with
-constraints as columns.
-"""
-function add_sub_jprod!(
-    model::BufferedDualModel,
-    i::MatrixIndex,
-    V::AbstractMatrix,
-    Jv::AbstractVector,
-    I,
-)
-    # `view(cache, I)` would be terribly slow, only the number of elements of `I` matter here
-    A = model.jprod_buffer[i.value]
-    return _add_jprod!(V, Jv, view(A, :, I))
-end
-
-"""
-    add_jprod!(
-        model::BufferedDualModel,
-        V::AbstractMatrix,
-        Jv::AbstractVector,
-        i::MatrixIndex,
-    )
-
-Add the contribution of the `i`th PSD block to the product between the
-Jacobian of the equality constraints and `V`, that is, add `𝐀ᵢᵀ vec(V)`
-to `Jv`, whose `j`th entry is `⟨Aᵢⱼ, V⟩`. Here `𝐀ᵢ` is the buffer built
-by `buffer_for_jprod` so this is a single sparse matrix-vector
-product.
-"""
-function add_jprod!(
-    model::BufferedDualModel,
-    V::AbstractMatrix,
-    Jv::AbstractVector,
-    i::MatrixIndex,
-)
-    return _add_jprod!(V, Jv, model.jprod_buffer[i.value])
-end
-
-########################
-###### Jᵀ product ######
-########################
-
-function jtprod!(
-    model::BufferedDualModel,
-    y::AbstractVector,
-    vJ::AbstractVector,
-    ::Type{ScalarIndex},
-)
-    return jtprod!(model.model, y, vJ, ScalarIndex)
-end
-
-function buffer_for_jtprod(model::DualModel)
-    if iszero(num_matrices(model))
-        return
-    end
-    return map(Base.Fix1(buffer_for_jtprod, model), matrix_indices(model))
+function _add_coefficient_adjoint!(V, Jv::AbstractArray, A, α = true)
+    return _add_mul!(Jv, A', _vec(V), α)
 end
 
 function _merge_sparsity(
@@ -384,19 +313,19 @@ _abs(A::SparseArrays.SparseMatrixCSC) = abs.(A)
 _abs(A::FillArrays.Zeros) = A
 
 """
-    DENSE_JTPROD_DENSITY
+    DENSE_JPROD_DENSITY
 
-Maximum density of the merged constraint pattern for a sparse `jtprod` buffer.
-The work estimate controlled by `SPARSE_JTPROD_WORK_RATIO` must also favor the
+Maximum density of the merged constraint pattern for a sparse JVP buffer.
+The work estimate controlled by `SPARSE_JPROD_WORK_RATIO` must also favor the
 sparse path: density alone does not predict the cost of the Schur product.
 """
-const DENSE_JTPROD_DENSITY = 0.05
+const DENSE_JPROD_DENSITY = 0.05
 
 """
-    SPARSE_JTPROD_WORK_RATIO
+    SPARSE_JPROD_WORK_RATIO
 
 Maximum estimated sparse work relative to `d^3`, where `d` is the block size.
-The estimate is `ncon * d + nnz_A * nnz_pattern`: the first term accounts for
+The estimate is `nvar * d + nnz_A * nnz_pattern`: the first term accounts for
 column scans when filling the sparse buffer, and the second estimates the
 pairwise nonzero work of the `_dot` contractions across all constraints.
 `nnz_A` counts nonzeros across the constraint matrices, including overlaps;
@@ -405,7 +334,7 @@ pairwise nonzero work of the `_dot` contractions across all constraints.
 This is a conservative heuristic, not a flop-count crossover: dense BLAS and
 sparse scalar loops have different costs per operation. Julia v1.13.0 with
 Loraine, loading its SDPLIB examples, gave the following Schur-product timings
-(including `jtprod` fill, not full solves):
+(including matrix-product fill, not full solves):
 
 | problem  | dense   | sparse + `_dot` | selected |
 |----------|---------|-----------------|----------|
@@ -414,7 +343,7 @@ Loraine, loading its SDPLIB examples, gave the following Schur-product timings
 
 The block dimensions and stored nonzero counts are:
 
-| problem  | d   | ncon | nnz_A | nnz_pattern | pattern density |
+| problem  | d   | nvar | nnz_A | nnz_pattern | pattern density |
 |----------|-----|------|-------|-------------|-----------------|
 | maxG11   | 800 | 800  | 800   | 800         | 0.125%          |
 | thetaG11 | 801 | 2401 | 15201 | 5601        | 0.873%          |
@@ -434,16 +363,16 @@ positive-definite `W`, and a random `y`; their outputs agreed numerically.
 The crossover can vary with hardware, threading, and the distribution of
 nonzeros.
 """
-const SPARSE_JTPROD_WORK_RATIO = 0.05
+const SPARSE_JPROD_WORK_RATIO = 0.05
 
-function buffer_for_jtprod(
-    model::DualModel{T},
+function buffer_for_jprod(
+    model::Model{T},
     mat_idx::MatrixIndex;
-    density = DENSE_JTPROD_DENSITY,
-    work_ratio = SPARSE_JTPROD_WORK_RATIO,
+    density = DENSE_JPROD_DENSITY,
+    work_ratio = SPARSE_JPROD_WORK_RATIO,
 ) where {T}
     d = side_dimension(model, mat_idx)
-    ncon = model.meta.ncon
+    nvar = model.meta.nvar
     # If every `Aᵢⱼ` is zero then so is the product, and callers rely on
     # getting a `Zeros` back (`_sub` then aliases `C` instead of copying).
     nnz_A = _sum_columns(model.A, mat_idx.value, 0) do column
@@ -456,7 +385,7 @@ function buffer_for_jtprod(
     # as either cutoff is exceeded instead of merging every dense constraint.
     # They also prevent the buffer from aliasing a single nonzero constraint.
     max_nnz =
-        min(density * d^2, (work_ratio * float(d)^3 - float(ncon) * d) / nnz_A)
+        min(density * d^2, (work_ratio * float(d)^3 - float(nvar) * d) / nnz_A)
     pattern = FillArrays.Zeros{T}(d, d)
     dense = false
     _foreach_column(model.A, mat_idx.value) do values, slot
@@ -477,18 +406,6 @@ function buffer_for_jtprod(
         return zeros(T, d, d)
     end
     return pattern
-end
-
-function NLPModels.jtprod!(
-    model::BufferedDualModel,
-    _::AbstractVector,
-    y::AbstractVector,
-    vJ::AbstractVector,
-)
-    jtprod!(model, y, vJ[ScalarIndex], ScalarIndex)
-    for mat_idx in matrix_indices(model)
-        vJ[mat_idx] .= unsafe_jtprod(model, y, mat_idx)
-    end
 end
 
 _zero!(A::SparseArrays.SparseMatrixCSC) = fill!(SparseArrays.nonzeros(A), 0.0)
@@ -523,11 +440,12 @@ function _add_mul!(
     end
 end
 
-function _jtprod!(
+function _coefficient_product!(
     buffer::FillArrays.Zeros,
-    ::BufferedDualModel,
+    ::ModelWorkspace,
     ::AbstractVector,
     ::MatrixIndex,
+    α,
 )
     return buffer
 end
@@ -536,37 +454,39 @@ end
 # `vec(buffer) = 𝐀ᵢ * y = vec(∑ⱼ Aᵢⱼ yⱼ)` with a single `Θ(nnz(𝐀ᵢ))` sparse
 # matrix-vector product. `_vec` is `UnsafeArrays.uview` so it does not
 # allocate, unlike `vec` which would allocate a reshaped wrapper every call.
-function _jtprod!(
+function _coefficient_product!(
     buffer::StridedMatrix,
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     # `y` is a `SparseVector` when called from Loraine's `H_alpha`
     # preconditioner, so this must stay an `AbstractVector`.
     y::AbstractVector,
     i::MatrixIndex,
+    α,
 )
-    _mul_jacobian!(buffer, model.jprod_buffer[i.value], y)
+    _mul_coefficients!(buffer, model.coefficient_buffer[i.value], y, α)
     return buffer
 end
 
 # Sparse buffer: the result keeps the merged sparsity pattern, so it is
-# accumulated one constraint at a time. See `DENSE_JTPROD_DENSITY` for when
+# accumulated one constraint at a time. See `DENSE_JPROD_DENSITY` for when
 # this is preferred over the dense buffer above.
-function _jtprod!(
+function _coefficient_product!(
     buffer::SparseArrays.SparseMatrixCSC,
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     y::AbstractVector,
     i::MatrixIndex,
+    α,
 )
     _zero!(buffer)
     _foreach_column(model.model.A, i.value) do values, slot
-        return _add_sparse_jtprod!(buffer, values, slot, y)
+        return _add_sparse_coefficient_product!(buffer, values, slot, y, α)
     end
     return buffer
 end
 
-function _add_sparse_jtprod!(buffer, values, slot, y)
+function _add_sparse_coefficient_product!(buffer, values, slot, y, α)
     for j in eachindex(y)
-        _add_mul!(buffer, values[j, slot], y[j])
+        _add_mul!(buffer, values[j, slot], α * y[j])
     end
     return nothing
 end
@@ -586,31 +506,8 @@ function _add_vec!(I, J, V, j, offset, A::AbstractMatrix)
     return offset
 end
 
-"""
-    unsafe_jtprod(model::BufferedDualModel, y, i::MatrixIndex)
-
-Return the product between the sub-Jacobian associated to `i` and `y`:
-`∑ⱼ Aᵢⱼ yⱼ`. This function is **unsafe** because it returns
-an alias to an internal buffer `model.jtprod_buffer[i.value]` that is
-going to be reused whenever `unsafe_jprod` or `unsafe_dual_cons` is called
-is called for the same `i`.
-"""
-function unsafe_jtprod(model::BufferedDualModel, y, i::MatrixIndex)
-    buffer = model.jtprod_buffer[i.value]
-    return _jtprod!(buffer, model, y, i)
-end
-
-function dual_cons!(
-    model::BufferedDualModel,
-    y::AbstractVector,
-    res,
-    ::Type{ScalarIndex},
-)
-    return dual_cons!(model.model, y, res, ScalarIndex)
-end
-
 # Products are zero, dense, or sparse matrices. Returning an alias to C or
-# the product buffer is allowed by unsafe_dual_cons's contract.
+# the product buffer is allowed by unsafe_cons's contract.
 # Avoid subtraction of lazy zeros (FillArrays.jl issue #412).
 _sub(A::AbstractMatrix, ::FillArrays.Zeros{<:Any,2}) = A
 
@@ -630,19 +527,182 @@ end
 # Merging the objective may change the sparse product's cached pattern.
 _sub(A::AbstractMatrix, B::SparseArrays.SparseMatrixCSC) = A - B
 
-"""
-    unsafe_dual_cons(model::BufferedDualModel, y, i::MatrixIndex)
+function _unsafe_coefficient_product(
+    workspace::ModelWorkspace,
+    v,
+    i::MatrixIndex,
+    α = true,
+)
+    _require_jacobian(workspace)
+    return _coefficient_product!(
+        workspace.jprod_buffer[i.value],
+        workspace,
+        v,
+        i,
+        α,
+    )
+end
 
-Return value of the dual constraint of index `i`:
-`C - ∑ⱼ Aᵢⱼ yⱼ`. This function is **unsafe** because it may return
-an alias to the matrix `C` or the internal buffer
-`model.jtprod_buffer[i.value]`. So throw away the reference after using
-the returned value and don't call any mutating operation on it.
 """
-function unsafe_dual_cons(
-    model::BufferedDualModel,
-    y::AbstractVector,
+    unsafe_jprod(workspace::ModelWorkspace, v, i::MatrixIndex)
+
+Return the native block JVP `-sum(A[i,j] * v[j])`. The result aliases
+workspace storage and is invalidated by the next product or constraint
+calculation for this block. Do not mutate it.
+"""
+function unsafe_jprod(
+    workspace::ModelWorkspace,
+    v::AbstractVector,
     i::MatrixIndex,
 )
-    return _sub(model.model.C[i.value], unsafe_jtprod(model, y, i))
+    return _unsafe_coefficient_product(workspace, v, i, -one(eltype(v)))
+end
+
+"""
+    add_jtprod!(workspace::ModelWorkspace, V, result, i::MatrixIndex)
+
+Add the native block VJP: `result[j] -= dot(A[i,j], V)`.
+"""
+function add_jtprod!(
+    workspace::ModelWorkspace,
+    V::AbstractMatrix,
+    result::AbstractVector,
+    i::MatrixIndex,
+)
+    _require_jacobian(workspace)
+    return _add_coefficient_adjoint!(
+        V,
+        result,
+        workspace.coefficient_buffer[i.value],
+        -one(eltype(result)),
+    )
+end
+
+function add_sub_jtprod!(
+    workspace::ModelWorkspace,
+    i::MatrixIndex,
+    V::AbstractMatrix,
+    result::AbstractVector,
+    indices,
+)
+    _require_jacobian(workspace)
+    coefficients = workspace.coefficient_buffer[i.value]
+    return _add_coefficient_adjoint!(
+        V,
+        result,
+        view(coefficients, :, indices),
+        -one(eltype(result)),
+    )
+end
+
+function jprod!(
+    workspace::ModelWorkspace,
+    v::AbstractVector,
+    result::AbstractVector,
+    ::Type{ScalarIndex},
+)
+    return LinearAlgebra.mul!(result, workspace.scalar_jacobian_transpose', v)
+end
+
+function jtprod!(
+    workspace::ModelWorkspace,
+    multipliers::AbstractVector,
+    result::AbstractVector,
+    ::Type{ScalarIndex},
+)
+    return LinearAlgebra.mul!(
+        result,
+        workspace.scalar_jacobian_transpose,
+        multipliers,
+    )
+end
+
+_cone_vector(x::AbstractConeVector, ::Model) = x
+function _cone_vector(x::AbstractVector, model::Model)
+    return VectorizedConeVector(x, model.dim)
+end
+
+"""
+    jprod!(workspace::ModelWorkspace, v, result)
+
+Compute the native constraint Jacobian times a free-variable direction.
+`v` has length `model.meta.nvar`, and `result` has length `model.meta.ncon`.
+"""
+function jprod!(
+    workspace::ModelWorkspace,
+    v::AbstractVector,
+    result::AbstractVector,
+)
+    cone = _cone_vector(result, workspace.model)
+    jprod!(workspace, v, cone[ScalarIndex], ScalarIndex)
+    for i in matrix_indices(workspace)
+        cone[i] .= unsafe_jprod(workspace, v, i)
+    end
+    return result
+end
+
+"""
+    jtprod!(workspace::ModelWorkspace, multipliers, result)
+
+Compute the native constraint Jacobian adjoint times cone multipliers.
+`multipliers` has length `model.meta.ncon`, and `result` has length
+`model.meta.nvar`. PSD blocks use the Frobenius inner product.
+"""
+function jtprod!(
+    workspace::ModelWorkspace,
+    multipliers::AbstractVector,
+    result::AbstractVector,
+)
+    cone = _cone_vector(multipliers, workspace.model)
+    jtprod!(workspace, cone[ScalarIndex], result, ScalarIndex)
+    for i in matrix_indices(workspace)
+        add_jtprod!(workspace, cone[i], result, i)
+    end
+    return result
+end
+
+function cons!(
+    workspace::ModelWorkspace,
+    x::AbstractVector,
+    result::AbstractVector,
+    ::Type{ScalarIndex},
+)
+    copyto!(result, view(workspace.model.constant, 1:num_scalars(workspace)))
+    return LinearAlgebra.mul!(
+        result,
+        workspace.scalar_jacobian_transpose',
+        x,
+        true,
+        true,
+    )
+end
+
+"""
+    unsafe_cons(workspace::ModelWorkspace, x, i::MatrixIndex)
+
+Return the PSD constraint `C[i] - sum(A[i,j] * x[j])`. The result can alias
+`C[i]` or workspace storage. Do not mutate it or retain it across calls.
+"""
+function unsafe_cons(
+    workspace::ModelWorkspace,
+    x::AbstractVector,
+    i::MatrixIndex,
+)
+    return _sub(
+        workspace.model.C[i.value],
+        _unsafe_coefficient_product(workspace, x, i),
+    )
+end
+
+function cons!(
+    workspace::ModelWorkspace,
+    x::AbstractVector,
+    result::AbstractVector,
+)
+    cone = _cone_vector(result, workspace.model)
+    cons!(workspace, x, cone[ScalarIndex], ScalarIndex)
+    for i in matrix_indices(workspace)
+        cone[i] .= unsafe_cons(workspace, x, i)
+    end
+    return result
 end

@@ -3,6 +3,7 @@ module TestBuffer
 import FillArrays, SparseArrays
 using JuMP, Dualization
 include("diff_check.jl")
+include("workspace_utils.jl")
 
 # Test with zero Ai matrices
 function _test_zero_Ai(
@@ -32,42 +33,36 @@ function _test_zero_Ai(
     T = Float64
     Z = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int64},Base.OneTo{Int64}}}
     S = SparseArrays.SparseMatrixCSC{T,Int64}
-    @test LRO.dual_model(b.model).C isa Vector{matrix_in_objective ? S : Z}
+    @test b.model.C isa Vector{matrix_in_objective ? S : Z}
     if all_zero
-        @test isempty(LRO.dual_model(b.model).A)
+        @test isempty(b.model.A)
     else
         # Missing entries of a component use `Int` axes, unlike the `Int64`
         # ones built by the MOI wrapper, which differ on 32-bit systems.
         ZInt = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
         if detect_rank_one
             R = LRO._SparseRankOne{T}
-            @test only(LRO.dual_model(b.model).A).values isa
-                  Matrix{Union{ZInt,R}}
+            @test only(b.model.A).values isa Matrix{Union{ZInt,R}}
         else
-            @test only(LRO.dual_model(b.model).A).values isa
-                  Matrix{Union{S,ZInt}}
+            @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
         end
     end
     i = LRO.MatrixIndex(1)
-    @test iszero(LRO.jac(LRO.dual_model(b.model), 1, i))
-    @test iszero(LRO.jac(LRO.dual_model(b.model), 2, i))
-    @test iszero(LRO.jac(LRO.dual_model(b.model), 3, i)) == all_zero
+    @test iszero(_coefficient(b.model, 1, i))
+    @test iszero(_coefficient(b.model, 2, i))
+    @test iszero(_coefficient(b.model, 3, i)) == all_zero
     if !all_zero
-        @test LRO.jac(LRO.dual_model(b.model), 3, i) isa
-              (detect_rank_one ? R : S)
-        @test iszero(LRO.jac(LRO.dual_model(b.model), 4, i))
+        @test only(b.model.A).values[3, 1] isa (detect_rank_one ? R : S)
+        @test iszero(_coefficient(b.model, 4, i))
     end
-    buf = LRO.BufferedDualModel(
-        LRO.dual_model(b.model);
+    buf = LRO.ModelWorkspace(
+        b.model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
     if all_zero
-        @test buf.jtprod_buffer[] isa LRO.FillArrays.Zeros
+        @test buf.jprod_buffer[] isa LRO.FillArrays.Zeros
     else
-        @test all(
-            A -> buf.jtprod_buffer[] !== A,
-            only(LRO.dual_model(b.model).A).values,
-        )
+        @test all(A -> buf.jprod_buffer[] !== A, only(b.model.A).values)
     end
     for κ in 0:5
         schur_test(model, κ)
@@ -87,66 +82,72 @@ function test_zero_Ai()
     return
 end
 
-# Exercise both sides of `ncon == d`, including overlapping constraint
+# Exercise both sides of `nvar == d`, including overlapping constraint
 # patterns. The buffer choice must account for the Schur product, not just
 # the cost of filling A(y).
-function test_sparse_jtprod_buffer()
+function test_sparse_jprod_buffer()
     T = Float64
-    @testset "d=$d, ncon=$ncon" for (d, ncon) in [(20, 2), (40, 40), (80, 160)]
+    @testset "d=$d, nvar=$nvar" for (d, nvar) in [(20, 2), (40, 40), (80, 160)]
         A = [
             SparseArrays.sparse([mod1(j, d)], [mod1(j, d)], [T(j)], d, d)
-            for _ in 1:1, j in 1:ncon
+            for _ in 1:1, j in 1:nvar
         ]
-        model = LRO.DualModel(
+        model = LRO.Model(
             [SparseArrays.spzeros(T, d, d)],
             A,
-            zeros(T, ncon),
+            zeros(T, nvar),
             # `schur_test` exercises the scalar block too.
             SparseArrays.sparsevec(Int64[1], T[1], 1),
-            SparseArrays.sparse(Int64[1, 2], Int64[1, 1], T[1, 1], ncon, 1),
+            SparseArrays.sparse(Int64[1, 2], Int64[1, 1], T[1, 1], nvar, 1),
             Int64[d],
         )
         i = LRO.MatrixIndex(1)
-        buffer = LRO.buffer_for_jtprod(model, i)
+        buffer = LRO.buffer_for_jprod(model, i)
         @test buffer isa SparseArrays.SparseMatrixCSC
-        @test SparseArrays.nnz(buffer) == min(d, ncon)
-        @test LRO.buffer_for_jtprod(model, i; density = 0) isa Matrix
-        @test LRO.buffer_for_jtprod(model, i; work_ratio = 0) isa Matrix
+        @test SparseArrays.nnz(buffer) == min(d, nvar)
+        @test LRO.buffer_for_jprod(model, i; density = 0) isa Matrix
+        @test LRO.buffer_for_jprod(model, i; work_ratio = 0) isa Matrix
         # Both cutoffs include equality, independently of the other cutoff.
         density = SparseArrays.nnz(buffer) / d^2
-        work_ratio = (ncon * d + ncon * SparseArrays.nnz(buffer)) / d^3
-        @test LRO.buffer_for_jtprod(model, i; density, work_ratio = Inf) isa
+        work_ratio = (nvar * d + nvar * SparseArrays.nnz(buffer)) / d^3
+        @test LRO.buffer_for_jprod(model, i; density, work_ratio = Inf) isa
               SparseArrays.SparseMatrixCSC
-        @test LRO.buffer_for_jtprod(model, i; density = Inf, work_ratio) isa
+        @test LRO.buffer_for_jprod(model, i; density = Inf, work_ratio) isa
               SparseArrays.SparseMatrixCSC
-        @test LRO.buffer_for_jtprod(
+        @test LRO.buffer_for_jprod(
             model,
             i;
             density = Inf,
             work_ratio = work_ratio / 2,
         ) isa Matrix
 
-        buf = LRO.BufferedDualModel(
+        buf = LRO.ModelWorkspace(
             model;
             dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
         )
-        @test buf.jtprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
+        @test buf.jprod_buffer[i.value] isa SparseArrays.SparseMatrixCSC
         # A lazy zero matrix contributes nothing, including when only a
         # subset of constraints is requested. It must not use the generic
         # unsafe view, which cannot flatten FillArrays.Zeros matrices.
         V = FillArrays.Zeros{T}(d, d)
-        Jv = T.(1:ncon)
+        Jv = T.(1:nvar)
         expected_Jv = copy(Jv)
-        LRO.add_jprod!(buf, V, Jv, i)
+        LRO.add_jtprod!(buf, V, Jv, i)
         @test Jv == expected_Jv
-        I = [ncon, 1]
+        I = [nvar, 1]
         sub_Jv = expected_Jv[I]
-        LRO.add_sub_jprod!(buf, i, V, sub_Jv, I)
+        LRO.add_sub_jtprod!(buf, i, V, sub_Jv, I)
         @test sub_Jv == expected_Jv[I]
-        y = T[isodd(j) ? j : -j for j in 1:ncon]
-        expected = sum(A[1, j] * y[j] for j in 1:ncon)
-        @test LRO.unsafe_jtprod(buf, y, i) ≈ expected
-        @test LRO.unsafe_jtprod(buf, SparseArrays.sparsevec(y), i) ≈ expected
+        V = Matrix{T}(LinearAlgebra.I, d, d)
+        LRO.add_jtprod!(buf, V, Jv, i)
+        expected_Jv .-= [dot(A[1, j], V) for j in 1:nvar]
+        @test Jv == expected_Jv
+        LRO.add_sub_jtprod!(buf, i, V, sub_Jv, I)
+        @test sub_Jv == expected_Jv[I]
+        y = T[isodd(j) ? j : -j for j in 1:nvar]
+        expected = sum(A[1, j] * y[j] for j in 1:nvar)
+        @test LRO.unsafe_jprod(buf, y, i) ≈ -expected
+        @test LRO.unsafe_jprod(buf, SparseArrays.sparsevec(y), i) ≈ -expected
         for κ in 0:2
             schur_test(model, κ)
         end
@@ -154,7 +155,7 @@ function test_sparse_jtprod_buffer()
     return
 end
 
-function test_sparse_jtprod_mixed_patterns()
+function test_sparse_jprod_mixed_patterns()
     d = 20
     Z = FillArrays.Zeros(d, d)
     P = SparseArrays.sparse(
@@ -177,7 +178,7 @@ function test_sparse_jtprod_mixed_patterns()
     A = Matrix{Union{typeof(Z),typeof(P)}}(undef, 1, 4)
     A[1, :] = [Z, P, Z, Q]
     original = deepcopy(A)
-    model = LRO.DualModel(
+    model = LRO.Model(
         [SparseArrays.spzeros(d, d)],
         A,
         zeros(4),
@@ -186,11 +187,11 @@ function test_sparse_jtprod_mixed_patterns()
         Int64[d],
     )
     i = LRO.MatrixIndex(1)
-    buf = LRO.BufferedDualModel(
+    buf = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
-    buffer = buf.jtprod_buffer[i.value]
+    buffer = buf.jprod_buffer[i.value]
     @test buffer isa SparseArrays.SparseMatrixCSC
     @test SparseArrays.nnz(buffer) == 7
     rows, cols = copy(buffer.rowval), copy(buffer.colptr)
@@ -199,7 +200,7 @@ function test_sparse_jtprod_mixed_patterns()
     for y in ([1.0, 1.0, 1.0, 1.0], [2.0, -3.0, 4.0, 5.0], zeros(4))
         expected = y[2] * P + y[4] * Q
         for weights in (y, SparseArrays.sparsevec(y))
-            @test LRO.unsafe_jtprod(buf, weights, i) ≈ expected
+            @test LRO.unsafe_jprod(buf, weights, i) ≈ -expected
             @test buffer.rowval == rows
             @test buffer.colptr == cols
         end
@@ -211,18 +212,18 @@ function test_sparse_jtprod_mixed_patterns()
     return
 end
 
-function dual_cons_allocations(model, y, i)
-    return @allocated LRO.unsafe_dual_cons(model, y, i)
+function cons_allocations(model, y, i)
+    return @allocated LRO.unsafe_cons(model, y, i)
 end
 
-function test_dense_dual_cons_reuses_product()
+function test_dense_cons_reuses_product()
     d = 3
     P = SparseArrays.spdiagm([1.0, 2.0, 3.0])
     Q = SparseArrays.sparse([1, 3], [3, 1], [2.0, 2.0], d, d)
     # The objective has entries outside the constraint pattern.
     C = SparseArrays.sparse([1, 2], [2, 1], [4.0, 4.0], d, d)
     for objective in (C, FillArrays.Zeros(d, d))
-        model = LRO.DualModel(
+        model = LRO.Model(
             [objective],
             reshape([P, Q], 1, 2),
             zeros(2),
@@ -233,20 +234,20 @@ function test_dense_dual_cons_reuses_product()
             Int64[d],
         )
         original_C, original_A = deepcopy(model.C), deepcopy(model.A)
-        buf = LRO.BufferedDualModel(
+        buf = LRO.ModelWorkspace(
             model;
             dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
         )
         i = LRO.MatrixIndex(1)
-        buffer = buf.jtprod_buffer[i.value]
+        buffer = buf.jprod_buffer[i.value]
         @test buffer isa Matrix
         for y in ([2.0, -3.0], zeros(2), [-1.0, 4.0])
             expected = objective - y[1] * P - y[2] * Q
-            @test LRO.unsafe_dual_cons(buf, y, i) === buffer
+            @test LRO.unsafe_cons(buf, y, i) === buffer
             @test buffer ≈ expected
-            @test dual_cons_allocations(buf, y, i) == 0
+            @test cons_allocations(buf, y, i) == 0
             # The next product must discard the previous residual.
-            @test LRO.unsafe_jtprod(buf, y, i) ≈ y[1] * P + y[2] * Q
+            @test LRO.unsafe_jprod(buf, y, i) ≈ -y[1] * P - y[2] * Q
             @test model.C == original_C
             @test model.A == original_A
         end
@@ -254,12 +255,12 @@ function test_dense_dual_cons_reuses_product()
     return
 end
 
-function test_sparse_dual_cons_reuses_product()
+function test_sparse_cons_reuses_product()
     d = 40
     P = SparseArrays.spdiagm(Float64.(1:d))
     Q = SparseArrays.sparse([1, 3], [3, 1], [2.0, 2.0], d, d)
     objective = FillArrays.Zeros(d, d)
-    model = LRO.DualModel(
+    model = LRO.Model(
         [objective],
         reshape([P, Q], 1, 2),
         zeros(2),
@@ -268,12 +269,12 @@ function test_sparse_dual_cons_reuses_product()
         Int64[d],
     )
     original_A = deepcopy(model.A)
-    buf = LRO.BufferedDualModel(
+    buf = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
     i = LRO.MatrixIndex(1)
-    buffer = buf.jtprod_buffer[i.value]
+    buffer = buf.jprod_buffer[i.value]
     @test buffer isa SparseArrays.SparseMatrixCSC
     rows, columns = copy(buffer.rowval), copy(buffer.colptr)
     values = SparseArrays.nonzeros(buffer)
@@ -282,14 +283,14 @@ function test_sparse_dual_cons_reuses_product()
     for y in ([2.0, -3.0], zeros(2), [-1.0, 4.0])
         product = y[1] * P + y[2] * Q
         for weights in (y, SparseArrays.sparsevec(y))
-            @test LRO.unsafe_dual_cons(buf, weights, i) === buffer
+            @test LRO.unsafe_cons(buf, weights, i) === buffer
             @test buffer ≈ -product
-            @test dual_cons_allocations(buf, weights, i) == 0
+            @test cons_allocations(buf, weights, i) == 0
             @test buffer.rowval == rows
             @test buffer.colptr == columns
             @test SparseArrays.nonzeros(buffer) === values
             # Recompute the product to catch accidental sign accumulation.
-            @test LRO.unsafe_jtprod(buf, weights, i) ≈ product
+            @test LRO.unsafe_jprod(buf, weights, i) ≈ -product
             @test model.C[1] === objective
             @test model.A == original_A
         end

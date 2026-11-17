@@ -202,26 +202,6 @@ function jac(model::DualModel, j::Integer, i::MatrixIndex)
     )
 end
 
-function _coefficient_sum(::Tuple{}, j, i, d, ::Type{T}) where {T}
-    return FillArrays.Zeros{T}(d, d)
-end
-@inline function _coefficient_sum(
-    components::Tuple,
-    j,
-    i,
-    d,
-    ::Type{T},
-) where {T}
-    column = _block_column(first(components), i)
-    tail = _coefficient_sum(Base.tail(components), j, i, d, T)
-    if isnothing(column)
-        return tail
-    elseif tail isa FillArrays.Zeros
-        return column[j]
-    end
-    return column[j] + tail
-end
-
 function jac(model::DualModel, j::Integer, ::Type{ScalarIndex})
     return model.C_lin[j, :]
 end

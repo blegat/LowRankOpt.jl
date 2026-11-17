@@ -7,6 +7,8 @@ module TestComponents
 
 using Test, LinearAlgebra, SparseArrays, Random
 import LowRankOpt as LRO
+
+include("workspace_utils.jl")
 import NLPModels
 import FillArrays
 
@@ -55,8 +57,8 @@ function _fixture(::Type{T}, kind) where {T}
     b = T[1, -2, 3]
     scalars = sparsevec(Int64[], T[], 0)
     scalar_jacobian = spzeros(T, Int64, n, 0)
-    model = LRO.DualModel(C, components, b, scalars, scalar_jacobian, dims)
-    reference = LRO.DualModel(C, full, b, scalars, scalar_jacobian, dims)
+    model = LRO.Model(C, components, b, scalars, scalar_jacobian, dims)
+    reference = LRO.Model(C, full, b, scalars, scalar_jacobian, dims)
     W = LRO.ShapedConeVector(T[], [
         let R = randn(rng, T, d, d)
             R * R' + I
@@ -70,12 +72,12 @@ function _fixture(::Type{T}, kind) where {T}
     return model, reference, full, W, x, y
 end
 
-function _iteration!(buffer, W, x, y, H, Hy, Jv, Jty)
+function _iteration!(buffer, W, x, y, H, Hy, Jtx, Jy)
     fill!(H, zero(eltype(H)))
     LRO.add_schur_complement!(buffer, W, LRO.MatrixIndex, H)
     LRO.eval_schur_complement!(buffer, W, y, Hy)
-    NLPModels.jprod!(buffer, x, x, Jv)
-    NLPModels.jtprod!(buffer, x, y, Jty)
+    LRO.jtprod!(buffer, x, Jtx)
+    LRO.jprod!(buffer, y, Jy)
     return nothing
 end
 function _allocations(args...)
@@ -86,34 +88,38 @@ end
 @testset "Component sums and Schur cross terms" begin
     for T in (Float32, Float64), kind in (:rank_one, :mixed), κ in (0, 1, 100)
         model, reference, full, W, x, y = _fixture(T, kind)
-        buffer = LRO.BufferedDualModel(
+        buffer = LRO.ModelWorkspace(
             model;
             dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
         )
-        reference_buffer = LRO.BufferedDualModel(
+        reference_buffer = LRO.ModelWorkspace(
             reference;
             dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
         )
         if kind == :rank_one
-            @test all(J -> J isa LRO.RankOneJacobian, buffer.jprod_buffer)
+            @test all(
+                J -> J isa LRO.RankOneCoefficients,
+                buffer.coefficient_buffer,
+            )
         else
-            @test buffer.jprod_buffer[2] isa SparseMatrixCSC
+            @test buffer.coefficient_buffer[2] isa SparseMatrixCSC
         end
-        @test reference_buffer.jprod_buffer isa Vector{<:SparseMatrixCSC}
+        @test reference_buffer.coefficient_buffer isa Vector{<:SparseMatrixCSC}
         H = zeros(T, 3, 3)
         Hy = zeros(T, 3)
-        Jv = zeros(T, 3)
-        Jty = LRO.ShapedConeVector(T[], similar.(x.matrices))
+        Jtx = zeros(T, 3)
+        Jy = LRO.ShapedConeVector(T[], similar.(x.matrices))
         for i in LRO.matrix_indices(model), j in 1:3
-            @test LRO.jac(model, j, i) ≈ full[i.value, j]
+            @test _coefficient(model, j, i) ≈ full[i.value, j]
+            @test LRO.coefficient(model, j, i) ≈ full[i.value, j]
         end
         for i in LRO.matrix_indices(model)
             @test LRO.norm_jac(model, i) ≈
                   sqrt(sum(sum(abs2, full[i.value, j]) for j in 1:3))
-            @test LRO.unsafe_jtprod(buffer, y, i) ≈
-                  sum(y[j] * full[i.value, j] for j in 1:3)
-            @test LRO.unsafe_jtprod(buffer, sparsevec(y), i) ≈
-                  sum(y[j] * full[i.value, j] for j in 1:3)
+            @test LRO.unsafe_jprod(buffer, y, i) ≈
+                  -sum(y[j] * full[i.value, j] for j in 1:3)
+            @test LRO.unsafe_jprod(buffer, sparsevec(y), i) ≈
+                  -sum(y[j] * full[i.value, j] for j in 1:3)
         end
         expected_H = [
             sum(
@@ -121,18 +127,20 @@ end
                 i in LRO.matrix_indices(model)
             ) for j in 1:3, k in 1:3
         ]
-        _iteration!(buffer, W, x, y, H, Hy, Jv, Jty)
+        _iteration!(buffer, W, x, y, H, Hy, Jtx, Jy)
         @test H ≈ expected_H
         @test Hy ≈ expected_H * y
-        expected_Jv = [
-            sum(dot(full[i.value, j], x[i]) for i in LRO.matrix_indices(model)) for j in 1:3
+        expected_Jtx = [
+            -sum(
+                dot(full[i.value, j], x[i]) for i in LRO.matrix_indices(model)
+            ) for j in 1:3
         ]
-        @test Jv ≈ expected_Jv
-        unbuffered_Jv = similar(Jv)
-        NLPModels.jprod!(model, x, x, unbuffered_Jv)
-        @test unbuffered_Jv ≈ Jv
+        @test Jtx ≈ expected_Jtx
+        unbuffered_Jtx = similar(Jtx)
+        NLPModels.jtprod!(model, y, _flat_cone(x, model), unbuffered_Jtx)
+        @test unbuffered_Jtx ≈ Jtx
         for i in LRO.matrix_indices(model)
-            @test Jty[i] ≈ sum(y[j] * full[i.value, j] for j in 1:3)
+            @test Jy[i] ≈ -sum(y[j] * full[i.value, j] for j in 1:3)
         end
         reference_H = similar(H)
         fill!(reference_H, 0)
@@ -143,7 +151,7 @@ end
             reference_H,
         )
         @test H ≈ reference_H
-        @test _allocations(buffer, W, x, y, H, Hy, Jv, Jty) == 0
+        @test _allocations(buffer, W, x, y, H, Hy, Jtx, Jy) == 0
     end
 end
 
@@ -158,7 +166,7 @@ end
         ),
         3,
     )
-    model = LRO.DualModel(
+    model = LRO.Model(
         [spzeros(d, d) for d in (2, 1, 3)],
         (component,),
         zeros(n),
@@ -168,17 +176,17 @@ end
     )
     @test size(component) == (2, 3)
     @test isconcretetype(eltype(component.values))
-    @test iszero(LRO.jac(model, 1, LRO.MatrixIndex(1)))
-    @test size(LRO.jac(model, 1, LRO.MatrixIndex(1))) == (2, 2)
-    @test iszero(LRO.jac(model, 2, LRO.MatrixIndex(3)))
-    @test LRO.jac(model, 1, LRO.MatrixIndex(2)) == fill(2.0, 1, 1)
+    @test iszero(_coefficient(model, 1, LRO.MatrixIndex(1)))
+    @test size(_coefficient(model, 1, LRO.MatrixIndex(1))) == (2, 2)
+    @test iszero(_coefficient(model, 2, LRO.MatrixIndex(3)))
+    @test _coefficient(model, 1, LRO.MatrixIndex(2)) == fill(2.0, 1, 1)
     @test_throws ArgumentError LRO.BlockColumns(
         [2, 1],
         repeat(component.values, 1, 2),
         3,
     )
     @test_throws DimensionMismatch LRO.BlockColumns([1, 2], component.values, 3)
-    @test_throws DimensionMismatch LRO.DualModel(
+    @test_throws DimensionMismatch LRO.Model(
         model.C,
         (LRO.BlockColumns([1], component.values, 2),),
         model.b,
@@ -206,7 +214,7 @@ end
     b = T[1, -2, 3]
     scalars = sparsevec(Int64[], T[], 0)
     scalar_jacobian = spzeros(T, Int64, n, 0)
-    model = LRO.DualModel(C, A, b, scalars, scalar_jacobian, dims)
+    model = LRO.Model(C, A, b, scalars, scalar_jacobian, dims)
     rank_one, sparse_component = model.A
     @test rank_one.block_ids == [1, 3]
     @test sparse_component.block_ids == [1, 2]
@@ -222,18 +230,18 @@ end
         [Matrix(Symmetric(randn(rng, T, d, d))) for d in dims],
     )
     y = randn(rng, T, n)
-    buffer = LRO.BufferedDualModel(
+    buffer = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
-    @test buffer.jprod_buffer[1] isa SparseMatrixCSC
-    @test buffer.jprod_buffer[2] isa SparseMatrixCSC
-    @test buffer.jprod_buffer[3] isa LRO.RankOneJacobian
+    @test buffer.coefficient_buffer[1] isa SparseMatrixCSC
+    @test buffer.coefficient_buffer[2] isa SparseMatrixCSC
+    @test buffer.coefficient_buffer[3] isa LRO.RankOneCoefficients
     H = zeros(T, n, n)
     Hy = zeros(T, n)
-    Jv = zeros(T, n)
-    Jty = LRO.ShapedConeVector(T[], similar.(x.matrices))
-    _iteration!(buffer, W, x, y, H, Hy, Jv, Jty)
+    Jtx = zeros(T, n)
+    Jy = LRO.ShapedConeVector(T[], similar.(x.matrices))
+    _iteration!(buffer, W, x, y, H, Hy, Jtx, Jy)
     expected_H = [
         sum(
             dot(full[i.value, j], W[i] * full[i.value, k] * W[i]) for
@@ -242,18 +250,18 @@ end
     ]
     @test H ≈ expected_H
     @test Hy ≈ expected_H * y
-    @test Jv ≈ [
-        sum(dot(full[i.value, j], x[i]) for i in LRO.matrix_indices(model)) for
+    @test Jtx ≈ [
+        -sum(dot(full[i.value, j], x[i]) for i in LRO.matrix_indices(model)) for
         j in 1:n
     ]
-    @test NLPModels.jprod!(model, x, x, similar(Jv)) ≈ Jv
+    @test NLPModels.jtprod!(model, y, _flat_cone(x, model), similar(Jtx)) ≈ Jtx
     for i in LRO.matrix_indices(model)
-        @test Jty[i] ≈ sum(y[j] * full[i.value, j] for j in 1:n)
+        @test Jy[i] ≈ -sum(y[j] * full[i.value, j] for j in 1:n)
         for j in 1:n
-            @test LRO.jac(model, j, i) ≈ full[i.value, j]
+            @test _coefficient(model, j, i) ≈ full[i.value, j]
         end
     end
-    @test _allocations(buffer, W, x, y, H, Hy, Jv, Jty) == 0
+    @test _allocations(buffer, W, x, y, H, Hy, Jtx, Jy) == 0
 end
 
 @testset "Vector factors outside the rank-one kernel" begin
@@ -294,7 +302,7 @@ end
         Matrix(rank_one.values[j, 1]) +
         Matrix(legacy[1, j]) for _ in 1:1, j in 1:n
     ]
-    model = LRO.DualModel(
+    model = LRO.Model(
         [spzeros(T, d, d)],
         (asym, rank_one, legacy),
         zeros(T, n),
@@ -303,7 +311,7 @@ end
         Int64[d],
     )
     @test model.A[3] == LRO.BlockColumns(legacy)
-    buffer = LRO.BufferedDualModel(
+    buffer = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
     )
@@ -319,7 +327,7 @@ end
     Hy = zeros(T, n)
     LRO.eval_schur_complement!(buffer, LRO.ShapedConeVector(T[], [W]), y, Hy)
     @test Hy ≈ expected_H * y
-    @test LRO.unsafe_jtprod(buffer, y, i) ≈ sum(y[j] * full[j] for j in 1:n)
+    @test LRO.unsafe_jprod(buffer, y, i) ≈ -sum(y[j] * full[j] for j in 1:n)
 end
 
 @testset "Rank-one Jacobian only for dense enough factors" begin
@@ -336,7 +344,7 @@ end
         ),
         1,
     )
-    model = LRO.DualModel(
+    model = LRO.Model(
         [spzeros(T, d, d)],
         (one_hot,),
         ones(T, d),
@@ -345,22 +353,22 @@ end
         Int64[d],
     )
     # The `d` one-hot factors have `d < m * d` nonzeros so the dense
-    # `m × d` factor of `RankOneJacobian` would be wasteful.
-    buffer = LRO.BufferedDualModel(
+    # `m × d` factor of `RankOneCoefficients` would be wasteful.
+    buffer = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
-    @test only(buffer.jprod_buffer) isa SparseMatrixCSC
+    @test only(buffer.coefficient_buffer) isa SparseMatrixCSC
     y = randn(MersenneTwister(4), T, d)
-    @test LRO.unsafe_jtprod(buffer, y, LRO.MatrixIndex(1)) ≈
-          Diagonal(y .* (1:d))
+    @test LRO.unsafe_jprod(buffer, y, LRO.MatrixIndex(1)) ≈
+          -Diagonal(y .* (1:d))
 end
 
 @testset "Burer-Monteiro with sparse plus low-rank components" begin
     model, reference, _, _, _, y = _fixture(Float64, :mixed)
     ranks = Int64[1, 2, 1]
-    mixed = LRO.BurerMonteiro.Model{false}(model, ranks)
-    dense = LRO.BurerMonteiro.Model{false}(reference, ranks)
+    mixed = LRO.BurerMonteiro.Model{false}(LRO.dual_model(model), ranks)
+    dense = LRO.BurerMonteiro.Model{false}(LRO.dual_model(reference), ranks)
     rng = MersenneTwister(3)
     x, v = randn(rng, mixed.meta.nvar), randn(rng, mixed.meta.nvar)
     @test NLPModels.obj(mixed, x) ≈ NLPModels.obj(dense, x)

@@ -56,7 +56,8 @@ end
 
 # Computes `tr(A L B R)` for symmetric `d × d` matrices `A` and `B` given as the
 # columns `a` and `b` of the vectorized Jacobian `J` documented in
-# `buffer_for_jprod`. With `tr(A L B R) = ∑ A[p, q] L[q, r] B[r, s] R[s, p]`,
+# `buffer_for_coefficients`. Using the trace expansion
+# `tr(A L B R) = ∑ A[p, q] L[q, r] B[r, s] R[s, p]`,
 # this takes `O(nnz(A) * nnz(B))` operations while iterating over the columns
 # of `A` and `B` as in the method above takes `O(d)` operations per nonzero
 # column of `A`.
@@ -88,15 +89,7 @@ end
 _nnz(::FillArrays.Zeros) = 0
 _nnz(A::SparseArrays.SparseMatrixCSC) = SparseArrays.nnz(A)
 
-# The `jprod!` buffer is guaranteed to be the first argument of the tuple.
-# This assumption is used by Loraine.
-
-function add_schur_complement!(
-    model::BufferedDualModel,
-    W,
-    ::Type{MatrixIndex},
-    H,
-)
+function add_schur_complement!(model::ModelWorkspace, W, ::Type{MatrixIndex}, H)
     for i in matrix_indices(model)
         add_schur_complement!(model, i, W[i], H)
     end
@@ -104,7 +97,7 @@ function add_schur_complement!(
 end
 
 function add_schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     L,
     R,
     ::Type{MatrixIndex},
@@ -117,14 +110,14 @@ function add_schur_complement!(
 end
 
 # Adds one sparse component's contribution `𝐀ᵢᵀ (R ⊗ L) 𝐀ᵢ` to `H`.
-# Its Jacobian cache follows the layout documented in `buffer_for_jprod`.
+# Its Jacobian cache follows the layout documented in `buffer_for_coefficients`.
 # `H` is assembled column by column, visiting the constraints in the order of
 # the permutation `σ` of `_dense_permutation`. For a constraint `i` in the
 # dense regime, that is, one of the `last_dense[slot]` first entries of `σ`,
 # the dense matrix `L Aᵢ R` is formed once and all the remaining inner
 # products `⟨Aⱼ, L Aᵢ R⟩`, `j ∈ I`, are then obtained with the single
 # sparse matrix-vector product `𝐀ᵢ[:, I]ᵀ vec(L Aᵢ R)` of
-# `add_sub_jprod!`. The constraints with at most one nonzero use the
+# the coefficient-adjoint kernel. Columns with at most one nonzero use the
 # dedicated low-nnz paths below, also following [FKN97].
 # /!\ L and R need to be symmetric
 function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
@@ -139,7 +132,7 @@ function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
         if ii <= workspace.last_dense[slot]
             _sparse_sandwich!(WAW, AW, L, R, Ai)
             I = view(σ, ii:n, slot)
-            _add_jprod!(
+            _add_coefficient_adjoint!(
                 WAW,
                 view(H, I, i),
                 view(workspace.jacobian[slot], :, I),
@@ -217,7 +210,7 @@ end
 # Keep sparse output on the sparse-product path: repeated sparse axpy! updates
 # would search its index structure once per contribution.
 function add_schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     w::StridedVector,
     ::Type{ScalarIndex},
     H::StridedMatrix,
@@ -226,11 +219,11 @@ function add_schur_complement!(
 end
 
 function _add_scalar_schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     weight::F,
     H,
 ) where {F<:Function}
-    C = model.model.C_lin
+    C = model.scalar_jacobian_transpose
     # C * Diagonal(w) * C'
     # = sum_k w[k] * c_k * c_k'.
     # = sum_k sum_j w[k] * c_k * (conj(c_{jk}) * e_j')
@@ -264,14 +257,15 @@ end
 # and adding the contribution of the scalar block gives
 # H = ∑ᵢ 𝐀ᵢᵀ (Wᵢ ⊗ Wᵢ) 𝐀ᵢ + C_lin * Diagonal(w) * C_linᵀ
 # where the scalar block `w = W[ScalarIndex]` is the weight itself.
-function schur_complement!(model::BufferedDualModel, W::AbstractVector, H)
+function schur_complement!(model::ModelWorkspace, W::AbstractVector, H)
     return _schur_complement!(model, W, W, k -> W[ScalarIndex][k], H)
 end
 
 """
-    schur_complement!(model::BufferedDualModel, L, R, H)
+    schur_complement!(model::ModelWorkspace, L, R, H)
 
-Computes the Schur complement
+Computes the native Schur matrix `J' * W * J`. The two negative signs
+in the PSD Jacobian cancel, giving the coefficient formula
 `H[j, k] = ∑ᵢ ⟨Aᵢⱼ, Lᵢ Aᵢₖ Rᵢ⟩ + ∑ₗ C_lin[j, l] L[l] R[l] C_lin[k, l]`
 for symmetric `Lᵢ` and `Rᵢ`, where `Lᵢ = L[MatrixIndex(i)]` and
 `L[l]` is the `l`th entry of `L[ScalarIndex]`. The Nesterov-Todd direction
@@ -279,7 +273,7 @@ is obtained with `Lᵢ = Rᵢ = Wᵢ` and the Helmberg-Kojima-Monteiro direction
 with `Lᵢ = Sᵢ⁻¹` and `Rᵢ = Xᵢ`.
 """
 function schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     L::AbstractVector,
     R::AbstractVector,
     H,
@@ -300,13 +294,13 @@ function _schur_complement!(model, L, R, scalar_weight::F, H) where {F}
 end
 
 # Add `⟨Aᵢₖ, L A(y) R⟩` to `result[k]`, where `Ay` is `A(y) = ∑ⱼ Aᵢⱼ yⱼ` as
-# returned by `unsafe_jtprod`.
+# returned by `_unsafe_coefficient_product`.
 #
 # `A(y)` dense: form `L A(y) R` and contract it against `𝐀ᵢ` with one sparse
 # matrix-vector product. Two `d×d` products, so `Θ(d³)` however sparse the
 # `Aᵢₖ` are.
 function _add_eval_schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     L::AbstractMatrix,
     R::AbstractMatrix,
     Ay::AbstractMatrix,
@@ -316,7 +310,11 @@ function _add_eval_schur_complement!(
     AW, WAW, _, _ = _schur_buffer(model)
     LinearAlgebra.mul!(AW[i.value], L, Ay)
     LinearAlgebra.mul!(WAW[i.value], AW[i.value], R)
-    return add_jprod!(model, WAW[i.value], result, i)
+    return _add_coefficient_adjoint!(
+        WAW[i.value],
+        result,
+        model.coefficient_buffer[i.value],
+    )
 end
 
 # `A(y)` sparse: contract directly, never forming the `d×d` product, so the
@@ -324,7 +322,7 @@ end
 # `add_schur_complement!` makes per constraint matrix via its dense condition,
 # here made once for `A(y)`.
 function _add_eval_schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     L::AbstractMatrix,
     R::AbstractMatrix,
     Ay::SparseArrays.SparseMatrixCSC,
@@ -340,18 +338,18 @@ end
 # [HKS24, (5b)]
 # Returns the matrix equal to the sum, for each equation, of
 # ⟨A_i, WA(y)W⟩
-function eval_schur_complement!(model::BufferedDualModel, W, y, result)
+function eval_schur_complement!(model::ModelWorkspace, W, y, result)
     weight = k -> W[ScalarIndex][k]
     return _eval_schur_complement!(model, W, W, weight, y, result)
 end
 
 """
-    eval_schur_complement!(model::BufferedDualModel, L, R, y, result)
+    eval_schur_complement!(model::ModelWorkspace, L, R, y, result)
 
 Computes the product `H * y` of the Schur complement `H` computed by
 [`schur_complement!(model, L, R, H)`](@ref) with `y` without forming `H`.
 """
-function eval_schur_complement!(model::BufferedDualModel, L, R, y, result)
+function eval_schur_complement!(model::ModelWorkspace, L, R, y, result)
     weight = k -> L[ScalarIndex][k] * R[ScalarIndex][k]
     return _eval_schur_complement!(model, L, R, weight, y, result)
 end
@@ -372,7 +370,7 @@ function _eval_schur_complement!(
                 model,
                 L[i],
                 R[i],
-                unsafe_jtprod(model, y, i),
+                _unsafe_coefficient_product(model, y, i),
                 result,
                 i,
             )
@@ -381,7 +379,7 @@ function _eval_schur_complement!(
             _add_component_matvec!(components, i.value, L[i], R[i], y, result)
         end
     end
-    C = model.model.C_lin
+    C = model.scalar_jacobian_transpose
     for k in axes(C, 2)
         column = view(C, :, k)
         weight = scalar_weight(k) * LinearAlgebra.dot(column, y)
@@ -521,7 +519,7 @@ end
 # [`one_hot`](@ref).
 function _schur_component(
     component::BlockColumns{<:Union{_OneHotFactorization{T},_ZerosMatrix{T}}},
-    model::DualModel{T},
+    model::Model{T},
     _,
 ) where {T}
     n, p = size(component.values)
@@ -569,7 +567,7 @@ end
 
 function _schur_component(
     component::BlockColumns,
-    model::DualModel{T},
+    model::Model{T},
     dense_condition,
 ) where {T}
     n, p = size(component.values)
@@ -590,7 +588,7 @@ function _schur_component(
         )
         push!(
             jacobian,
-            _jacobian_buffer((component,), i, model.msizes[i], n, T),
+            _coefficient_buffer((component,), i, model.msizes[i], n, T),
         )
     end
     return _GeneralSchurComponent(
@@ -612,7 +610,7 @@ const _SPARSE_FACTOR_RATIO = 32
 
 function _schur_component(
     component::BlockColumns{<:_RankOneOrZeros{T}},
-    model::DualModel{T},
+    model::Model{T},
     _,
 ) where {T}
     n, p = size(component.values)
@@ -626,10 +624,7 @@ function _schur_component(
     return _RankOneSchurComponent(component, U, weights)
 end
 
-function buffer_for_schur_complement(
-    model::DualModel{T},
-    dense_condition,
-) where {T}
+function buffer_for_schur_complement(model::Model{T}, dense_condition) where {T}
     AW = [zeros(T, d, d) for d in model.msizes]
     WAW = copy.(AW)
     components = map(A -> _schur_component(A, model, dense_condition), model.A)
@@ -1039,7 +1034,8 @@ function _add_schur_pair!(
 end
 
 # Same as `_add_schur_pair!` for a sparse component whose matrices `Bₖ` are the
-# columns of the vectorized Jacobian `J` documented in `buffer_for_jprod`.
+# columns of the coefficient matrix documented in
+# `buffer_for_coefficients`.
 # `(R uⱼ)' Bₖ (L uⱼ)` takes `O(nnz(Bₖ))` operations while `_bilinear_form`
 # takes `O(d + nnz(Bₖ))` operations as it iterates over the columns of `Bₖ`.
 function _add_sparse_rank_one_pair!(a, ia, J, left, right, H)
@@ -1092,7 +1088,7 @@ end
 end
 
 function add_schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     i::MatrixIndex,
     W::AbstractMatrix,
     H,
@@ -1102,7 +1098,7 @@ end
 
 """
     add_schur_complement!(
-        model::BufferedDualModel,
+        model::ModelWorkspace,
         i::MatrixIndex,
         L::AbstractMatrix,
         R::AbstractMatrix,
@@ -1112,7 +1108,7 @@ end
 Adds `⟨Aᵢⱼ, L Aᵢₖ R⟩` to `H[j, k]` for symmetric matrices `L` and `R`.
 """
 function add_schur_complement!(
-    model::BufferedDualModel,
+    model::ModelWorkspace,
     i::MatrixIndex,
     L::AbstractMatrix,
     R::AbstractMatrix,

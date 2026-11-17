@@ -41,7 +41,7 @@ function _test_simple_lp(opt)
     @test dual_objective_value(model) ≈ 1
     b = unsafe_backend(model)
     if !(b isa DualOptimizer)
-        @test isnothing(LRO.buffer_for_jtprod(LRO.dual_model(b.model)))
+        @test isnothing(LRO.buffer_for_jprod(b.model))
     end
     raw_sol = MOI.get(model, LRO.RawStatus(:solution))
     sol = MOI.get(model, LRO.DualSolution())
@@ -220,7 +220,7 @@ function test_no_constraints()
     )
     @test model.meta.ncon == 0
     @test LRO.norm_jac(model, LRO.MatrixIndex(1)) == 0
-    @test LRO.buffer_for_jtprod(model, LRO.MatrixIndex(1)) isa
+    @test LRO.buffer_for_jprod(LRO.primal_model(model), LRO.MatrixIndex(1)) isa
           LRO.FillArrays.Zeros
     return
 end

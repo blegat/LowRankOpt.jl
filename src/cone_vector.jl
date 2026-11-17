@@ -25,8 +25,8 @@ function Base.getindex(
     return view(s, i)
 end
 
-struct VectorizedConeVector{T} <: AbstractConeVector{T}
-    x::Vector{T}
+struct VectorizedConeVector{T,V<:AbstractVector{T}} <: AbstractConeVector{T}
+    x::V
     dim::ConeDimensions
 end
 

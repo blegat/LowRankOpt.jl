@@ -182,3 +182,99 @@ function errors(
         err6 / obj_den,
     )
 end
+
+# Flatten shaped cone data only for the allocating default residuals.
+_native_vector(x::AbstractVector, ::Model) = x
+function _native_vector(x::ShapedConeVector{T}, model::Model) where {T}
+    result = Vector{T}(undef, model.meta.ncon)
+    cone = VectorizedConeVector(result, model.dim)
+    cone[ScalarIndex] .= x[ScalarIndex]
+    for i in matrix_indices(model)
+        cone[i] .= x[i]
+    end
+    return result
+end
+
+function _dual_cone_violation(A, ::MatrixIndex, ::Nothing)
+    return max(LinearAlgebra.eigmax(LinearAlgebra.Symmetric(A)), 0)
+end
+
+function _dual_cone_violation(
+    A,
+    i::MatrixIndex,
+    workspace::Vector{<:EigenWorkspace},
+)
+    ws = workspace[i.value]
+    ws.scratch .= .-A
+    U = LinearAlgebra.Symmetric(ws.scratch, :U)
+    if LinearAlgebra.issuccess(LinearAlgebra.cholesky!(U; check = false))
+        return zero(eltype(A))
+    end
+    ws.scratch .= .-A
+    return max(-minimum(first(eigen!(ws, ws.scratch))), 0)
+end
+
+"""
+    errors(model::Model, x; multipliers, slack = NLPModels.cons(model, x), ...)
+
+Return native primal residual, primal cone violation, stationarity residual,
+dual cone violation, signed objective gap, and complementarity. Multipliers
+use NLPModels signs: nonnegative and PSD constraint multipliers are negative
+cone elements. `slack` is the primal cone value. The residual numerators use
+Euclidean/Frobenius norms; `p` selects the data denominator norm.
+
+Pass precomputed `primal_err`, `dual_err`, `pobj`, and `dobj` to reuse solver
+storage. `workspace` may contain one `EigenWorkspace` per PSD block. Inputs
+are preserved. This cone form has a nonnegative scalar prefix and PSD blocks.
+"""
+function errors(
+    model::Model,
+    x;
+    multipliers,
+    slack = NLPModels.cons(model, x),
+    primal_err = NLPModels.cons(model, x) - _native_vector(slack, model),
+    dual_err = NLPModels.grad(model, x) +
+               NLPModels.jtprod(model, x, _native_vector(multipliers, model)),
+    pobj = NLPModels.obj(model, x),
+    dobj = model.objective_constant + LinearAlgebra.dot(
+        model.constant,
+        _native_vector(multipliers, model),
+    ),
+    workspace::Union{Nothing,Vector{<:EigenWorkspace}} = nothing,
+    p = 2,
+)
+    if p < 1
+        throw(ArgumentError("the denominator norm requires p >= 1"))
+    end
+    primal_den = 1 + LinearAlgebra.norm(model.constant, p)
+    dual_den = 1 + LinearAlgebra.norm(model.b, p)
+    S = _cone_vector(slack, model)
+    Y = _cone_vector(multipliers, model)
+    primal_cone = zero(primal_den)
+    dual_cone = zero(dual_den)
+    complementarity = zero(primal_den)
+    scalars = S[ScalarIndex]
+    dual_scalars = Y[ScalarIndex]
+    if !isempty(scalars)
+        primal_cone = max(primal_cone, -minimum(scalars))
+        dual_cone = max(dual_cone, maximum(dual_scalars))
+        complementarity -= LinearAlgebra.dot(scalars, dual_scalars)
+    end
+    for i in matrix_indices(model)
+        if isempty(S[i])
+            continue
+        end
+        primal_cone = max(primal_cone, -negative_eigmin(S[i], i, workspace))
+        dual_cone = max(dual_cone, _dual_cone_violation(Y[i], i, workspace))
+        complementarity -= LinearAlgebra.dot(S[i], Y[i])
+    end
+    obj_den = 1 + abs(pobj) + abs(dobj)
+    return (
+        LinearAlgebra.norm(primal_err) / primal_den,
+        primal_cone / primal_den,
+        LinearAlgebra.norm(dual_err) / dual_den,
+        dual_cone / dual_den,
+        (pobj - dobj) / obj_den,
+        complementarity / obj_den,
+    )
+end

@@ -18,6 +18,8 @@ import MathOptInterface as MOI
 using JuMP
 import LowRankOpt as LRO
 
+include("workspace_utils.jl")
+
 include("diff_check.jl")
 
 function test_rank_one_unit_vector()
@@ -136,15 +138,14 @@ function test_detected_schur_complement()
     b = zeros(n)
     d_lin = sparsevec(Int64[], Float64[], 0)
     C_lin = spzeros(Float64, Int64, n, 0)
-    model =
-        LRO.DualModel(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, Int64[d])
+    model = LRO.Model(C, LRO.detect_rank_one(arr), b, d_lin, C_lin, Int64[d])
     @test eltype(only(model.A).values) <: LRO.Factorization
-    reference = LRO.DualModel(C, arr, b, d_lin, C_lin, Int64[d])
-    buffer = LRO.BufferedDualModel(
+    reference = LRO.Model(C, arr, b, d_lin, C_lin, Int64[d])
+    buffer = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
     )
-    reference_buffer = LRO.BufferedDualModel(
+    reference_buffer = LRO.ModelWorkspace(
         reference;
         dense_condition = LRO.And(LRO.MinNonzeros(0), LRO.DenseCost(100)),
     )
@@ -156,8 +157,8 @@ function test_detected_schur_complement()
     LRO.add_schur_complement!(reference_buffer, i, W, expected)
     @test H ≈ expected
     y = [1.0, -2.0, 3.0]
-    @test LRO.unsafe_jtprod(buffer, y, i) ≈
-          LRO.unsafe_jtprod(reference_buffer, y, i)
+    @test LRO.unsafe_jprod(buffer, y, i) ≈
+          LRO.unsafe_jprod(reference_buffer, y, i)
     return
 end
 
@@ -222,28 +223,35 @@ function _build(
         set_attribute(model, "detect_one_hot", detect_one_hot)
     end
     optimize!(model) # `ConvexSolver` is a no-op: this just triggers `copy_to`
-    return LRO.dual_model(unsafe_backend(model).model)
+    return unsafe_backend(model).model
 end
 
-# Keeps the model given by `LRO.Optimizer`
-struct BufferedSolver <: SolverCore.AbstractOptimizationSolver
-    model::LRO.BufferedDualModel{Float64}
+# The solver receives the native model and builds its own workspace.
+struct BufferedSolver{M,W} <: SolverCore.AbstractOptimizationSolver
+    model::M
+    workspace::W
+end
+
+function BufferedSolver(model::LRO.Model; dense_condition)
+    return BufferedSolver(model, LRO.ModelWorkspace(model; dense_condition))
 end
 
 SolverCore.solve!(::BufferedSolver, ::LRO.Model) = nothing
 
-# The `"dense_condition"` option is consumed by `LRO.Optimizer` which gives
-# the buffered model to the solver
 function test_option_dense_condition()
     for dense in (false, true)
         solver = nothing
-        _build(
+        model = _build(
             false;
-            solver = model -> (solver = BufferedSolver(model)),
+            solver = (model; dense_condition) ->
+                (solver = BufferedSolver(model; dense_condition)),
             dense_condition = c -> dense,
         )
-        buffer = LRO.BufferedDualModel(solver.model)
-        @test buffer === solver.model
+        @test solver.model === model
+        @test solver.workspace.model === model
+        @test solver.model isa LRO.Model
+        buffer = LRO.ModelWorkspace(solver.workspace)
+        @test buffer === solver.workspace
         component = only(buffer.schur_buffer[3])
         n = only(component.last_nonzero)
         @test n > 0
@@ -285,9 +293,9 @@ function test_option_converts_to_rank_one()
     @test size(only(rank_one_model.A)) == size(only(sparse_model.A))
     @test all(
         j ->
-            Matrix(LRO.jac(rank_one_model, j, LRO.MatrixIndex(1))) ==
-            Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
-        1:sparse_model.meta.ncon,
+            Matrix(_coefficient(rank_one_model, j, LRO.MatrixIndex(1))) ==
+            Matrix(_coefficient(sparse_model, j, LRO.MatrixIndex(1))),
+        1:sparse_model.meta.nvar,
     )
     return
 end
@@ -300,11 +308,11 @@ function test_option_default_detects_one_hot()
     @test eltype(model.C) <: SparseMatrixCSC
     @test all(
         j ->
-            Matrix(LRO.jac(model, j, LRO.MatrixIndex(1))) ==
-            Matrix(LRO.jac(sparse_model, j, LRO.MatrixIndex(1))),
-        1:sparse_model.meta.ncon,
+            Matrix(_coefficient(model, j, LRO.MatrixIndex(1))) ==
+            Matrix(_coefficient(sparse_model, j, LRO.MatrixIndex(1))),
+        1:sparse_model.meta.nvar,
     )
-    buffer = LRO.BufferedDualModel(
+    buffer = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )

@@ -39,4 +39,23 @@ import LowRankOpt as LRO
     end
 end
 
+@testset "Cone vectors retain view-backed storage" begin
+    storage = fill(-99.0, 13)
+    slice = view(storage, 2:2:12)
+    slice .= 1:6
+    dimensions = LRO.ConeDimensions(2, [2], [2, 6])
+    cone = LRO.VectorizedConeVector(slice, dimensions)
+    @test cone.x === slice
+    @test Vector(cone) == collect(1.0:6.0)
+    @test cone[LRO.ScalarIndex] == [1.0, 2.0]
+    @test cone[LRO.MatrixIndex(1)] == [3.0 5.0; 4.0 6.0]
+    cone[LRO.MatrixIndex(1)] .= [7.0 8.0; 8.0 9.0]
+    @test slice == [1.0, 2.0, 7.0, 8.0, 8.0, 9.0]
+    @test all(==(-99.0), storage[1:2:end])
+    copied = similar(cone)
+    copied .= cone
+    @test copied == cone
+    @test copied.x !== cone.x
+end
+
 end

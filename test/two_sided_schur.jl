@@ -13,6 +13,8 @@ using Test, LinearAlgebra, SparseArrays, Random
 import FillArrays
 import LowRankOpt as LRO
 
+include("workspace_utils.jl")
+
 function runtests()
     for name in names(@__MODULE__; all = true)
         if startswith("$(name)", "test_")
@@ -39,8 +41,8 @@ function _test_schur(
 )
     rng = MersenneTwister(1)
     T = eltype(model.b)
-    m = model.meta.ncon
-    buffer = LRO.BufferedDualModel(model; dense_condition)
+    m = model.meta.nvar
+    buffer = LRO.ModelWorkspace(model; dense_condition)
     idx = LRO.matrix_indices(model)
     L = LRO.ShapedConeVector(
         rand(rng, T, nscalars),
@@ -50,7 +52,7 @@ function _test_schur(
         rand(rng, T, nscalars),
         [_spd(rng, d) for d in model.msizes],
     )
-    full = [Matrix(LRO.jac(model, j, i)) for i in idx, j in 1:m]
+    full = [Matrix(_coefficient(model, j, i)) for i in idx, j in 1:m]
     C = Matrix(model.C_lin)
     expected = [
         sum(
@@ -93,7 +95,7 @@ function _model(C, A, b; scalars = 0)
     C_lin = sparse(
         T[iszero(scalars) ? 0 : (j + l) % 2 for j in 1:m, l in 1:scalars],
     )
-    return LRO.DualModel(
+    return LRO.Model(
         C,
         A,
         b,
