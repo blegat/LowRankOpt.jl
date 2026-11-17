@@ -17,6 +17,11 @@ function example()
     return model, A
 end
 
+function adjoint_allocations(workspace, multipliers, result)
+    LRO.jtprod!(workspace, multipliers, result)
+    return @allocated LRO.jtprod!(workspace, multipliers, result)
+end
+
 function product_allocations(model, X, y, result, idx)
     return @allocated begin
         fill!(result, 0.0)
@@ -51,6 +56,19 @@ end
         LRO.jtprod!(buffered, shaped, result)
         @test result ≈ [-dot(a, X) for a in A] - model.C_lin * shaped.scalars
         @test result ≈ model.jacobian' * [shaped.scalars; vec(X)]
+        flat = [shaped.scalars; vec(X)]
+        flat_view = view([123.0; flat; 123.0], 2:(length(flat)+1))
+        for multipliers in (
+            flat,
+            flat_view,
+            LRO.VectorizedConeVector(flat, model.dim),
+            LRO.VectorizedConeVector(flat_view, model.dim),
+        )
+            fill!(result, NaN)
+            @test LRO.jtprod!(buffered, multipliers, result) === result
+            @test result ≈ model.jacobian' * flat
+            @test adjoint_allocations(buffered, multipliers, result) == 0
+        end
         native_product =
             LRO.VectorizedConeVector(zeros(model.meta.ncon), model.dim)
         LRO.jprod!(buffered, y, native_product)
@@ -184,9 +202,11 @@ end
         @test output ≈ expected
         @test all(==(123.0), output_storage[1:2:end])
     end
-    LRO.jtprod!(workspace, multipliers, adjoint)
-    @test adjoint ≈ model.jacobian' * multipliers
-    @test all(==(123.0), adjoint_storage[1:2:end])
+    for cone in (multipliers, LRO.VectorizedConeVector(multipliers, model.dim))
+        LRO.jtprod!(workspace, cone, adjoint)
+        @test adjoint ≈ model.jacobian' * multipliers
+        @test all(==(123.0), adjoint_storage[1:2:end])
+    end
     @test direction_storage == original_direction
     @test multiplier_storage == original_multipliers
 end

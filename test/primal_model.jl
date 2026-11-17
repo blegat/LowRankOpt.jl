@@ -66,6 +66,14 @@ end
     @test model.b == [-1.0, 2.0]
     @test LRO.primal_model(model) === model
     for dual in (LRO.DualModel(model), LRO.dual_model(model))
+        @test LRO.dual_model(dual) === dual
+        @test !NLPModels.has_bounds(dual)
+        scalar = fill(NaN, 2)
+        @test LRO.jtprod!(dual, x, scalar, LRO.ScalarIndex) === scalar
+        @test scalar ≈ [-0.2, 0.8]
+        fill!(scalar, NaN)
+        @test LRO.dual_cons!(dual, x, scalar, LRO.ScalarIndex) === scalar
+        @test scalar ≈ [3.2, 3.2]
         @test dual.model === model
         @test LRO.primal_model(dual) === model
         @test dual.C === model.C
@@ -107,6 +115,9 @@ end
     indices = collect(LRO.matrix_indices(model))
     @test indices == LRO.MatrixIndex.([1, 2])
     @test LRO.side_dimension.(model, indices) == [1, 2]
+    workspace = LRO.ModelWorkspace(model; schur = false)
+    @test LRO.side_dimension.(workspace, indices) == [1, 2]
+    @test LRO.side_dimension.((model, workspace), LRO.MatrixIndex(2)) == (2, 2)
     @test NLPModels.cons(model, [1.0]) == [0.0, -1, -1, -1, -1]
     @test_throws ArgumentError(
         "constraint coefficients must have element type Float64",
@@ -174,6 +185,7 @@ end
         @test NLPModels.cons(model, Float64[]) == vec(Matrix(C))
         @test size(NLPModels.jac(model, Float64[])) == (4, 0)
         @test isempty(NLPModels.grad(model, Float64[]))
+        @test LRO.norm_jac(model, LRO.MatrixIndex(1)) === 0.0
     end
 end
 

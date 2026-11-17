@@ -3,7 +3,6 @@
 import MutableArithmetics as MA
 import MathOptInterface as MOI
 import NLPModels
-import UnsafeArrays
 
 abstract type AbstractDualModel{T} <: NLPModels.AbstractNLPModel{T,Vector{T}} end
 Base.broadcastable(model::AbstractDualModel) = Ref(model)

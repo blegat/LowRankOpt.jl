@@ -679,10 +679,14 @@ function jtprod!(
     multipliers::AbstractVector,
     result::AbstractVector,
 )
-    cone = _cone_vector(multipliers, workspace.model)
-    jtprod!(workspace, cone[ScalarIndex], result, ScalarIndex)
-    for i in matrix_indices(workspace)
-        add_jtprod!(workspace, cone[i], result, i)
+    # Julia 1.10 otherwise allocates each flat block view passed to sparse
+    # multiplication. Keep the owning vector alive while using unsafe views.
+    UnsafeArrays.@uviews multipliers begin
+        cone = _cone_vector(multipliers, workspace.model)
+        jtprod!(workspace, cone[ScalarIndex], result, ScalarIndex)
+        for i in matrix_indices(workspace)
+            add_jtprod!(workspace, cone[i], result, i)
+        end
     end
     return result
 end

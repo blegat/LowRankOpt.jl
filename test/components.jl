@@ -85,6 +85,11 @@ function _allocations(args...)
     return @allocated _iteration!(args...)
 end
 
+function _adjoint_allocations(buffer, multipliers, result)
+    LRO.jtprod!(buffer, multipliers, result)
+    return @allocated LRO.jtprod!(buffer, multipliers, result)
+end
+
 @testset "Component sums and Schur cross terms" begin
     for T in (Float32, Float64), kind in (:rank_one, :mixed), κ in (0, 1, 100)
         model, reference, full, W, x, y = _fixture(T, kind)
@@ -139,6 +144,13 @@ end
         unbuffered_Jtx = similar(Jtx)
         NLPModels.jtprod!(model, y, _flat_cone(x, model), unbuffered_Jtx)
         @test unbuffered_Jtx ≈ Jtx
+        flat = _flat_cone(x, model)
+        for multipliers in (flat, LRO.VectorizedConeVector(flat, model.dim))
+            fill!(Jtx, T(NaN))
+            @test LRO.jtprod!(buffer, multipliers, Jtx) === Jtx
+            @test Jtx ≈ expected_Jtx
+            @test _adjoint_allocations(buffer, multipliers, Jtx) == 0
+        end
         for i in LRO.matrix_indices(model)
             @test Jy[i] ≈ -sum(y[j] * full[i.value, j] for j in 1:3)
         end

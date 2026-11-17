@@ -8,6 +8,7 @@ module LowRankOpt
 import FastLapackInterface
 import LinearAlgebra
 import SparseArrays
+import UnsafeArrays
 import MathOptInterface as MOI
 import NLPModels
 

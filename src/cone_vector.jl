@@ -30,6 +30,10 @@ struct VectorizedConeVector{T,V<:AbstractVector{T}} <: AbstractConeVector{T}
     dim::ConeDimensions
 end
 
+function UnsafeArrays.unsafe_uview(s::VectorizedConeVector)
+    return VectorizedConeVector(UnsafeArrays.uview(s.x), s.dim)
+end
+
 function LinearAlgebra.dot(x::VectorizedConeVector, z::VectorizedConeVector)
     return LinearAlgebra.dot(x.x, z.x)
 end
