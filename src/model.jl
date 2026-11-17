@@ -176,9 +176,16 @@ function scalar_bounds(model::Model{T}; equalities = true) where {T}
     return C, constants, rows, signs
 end
 
+function _canonical_scalar_bounds(model::Model)
+    return all(1:num_scalars(model)) do i
+        return iszero(model.meta.lcon[i]) && model.meta.ucon[i] == Inf
+    end
+end
+
 function cone_multipliers(model::Model, cone)
     if num_scalars(model) == length(model.d_lin) &&
-       iszero(num_second_order_cones(model))
+       iszero(num_second_order_cones(model)) &&
+       _canonical_scalar_bounds(model)
         return cone
     end
     _, _, rows, signs = scalar_bounds(model)
