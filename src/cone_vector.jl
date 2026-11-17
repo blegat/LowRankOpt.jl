@@ -107,7 +107,13 @@ function ShapedConeVector{T,MT}(scalars, matrices) where {T,MT}
     return ShapedConeVector{T,MT}(scalars, Vector{T}[], matrices)
 end
 num_second_order_cones(x::ShapedConeVector) = length(x.second_order)
-second_order_indices(model) = SOCIndex.(1:num_second_order_cones(model))
+_soc_index(i)::SOCIndex = SOCIndex(i)
+function second_order_indices(model)
+    return MOI.Utilities.LazyMap{SOCIndex}(
+        _soc_index,
+        Base.OneTo(num_second_order_cones(model)),
+    )
+end
 
 function Base.size(s::ShapedConeVector)
     return (

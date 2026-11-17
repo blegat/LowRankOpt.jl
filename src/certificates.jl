@@ -70,8 +70,9 @@ function infeasibility_certificate(
     end
     for idx in second_order_indices(model)
         vector = cone[idx]
-        if (LinearAlgebra.norm(view(vector, 2:length(vector)))-vector[1])/scale >
-           tol
+        if (
+            LinearAlgebra.norm(view(vector, 2:length(vector)))-vector[1]
+        )/scale > tol
             return nothing
         end
     end
