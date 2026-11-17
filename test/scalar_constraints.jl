@@ -112,4 +112,66 @@ end
     @test rows == [1, 2, 4, 4]
     @test signs == [-1, 1, -1, 1]
 end
+@testset "Original scalar rows with changed bounds" begin
+    for (lower, upper, coefficients, constants, weights, multiplier) in (
+        (0.0, Inf, [-2.0], [3.0], [3.0], 3.0),
+        (1.0, Inf, [-2.0], [2.0], [3.0], 3.0),
+        (-Inf, 7.0, [2.0], [4.0], [3.0], -3.0),
+        (0.0, 7.0, [-2.0, 2.0], [3.0, 4.0], [3.0, 2.0], 1.0),
+        (1.0, 7.0, [-2.0, 2.0], [2.0, 4.0], [3.0, 2.0], 1.0),
+        (5.0, 5.0, [-2.0, 2.0], [-2.0, 2.0], [2.0, 3.0], -1.0),
+    )
+        # The original scalar row is c(x) = 2x + 3, before changing bounds.
+        model = LRO.Model(
+            Matrix{Float64}[],
+            (),
+            [-2multiplier],
+            sparsevec([3.0]),
+            sparse(reshape([-2.0], 1, 1)),
+            Int[],
+        )
+        model.meta =
+            NLPModels.NLPModelMeta(model.meta; lcon = [lower], ucon = [upper])
+        @test LRO.num_scalars(model) == length(model.d_lin) == 1
+        @test NLPModels.cons(model, [0.4]) ≈ [3.8]
+        C, d, rows, signs = LRO.scalar_bounds(model)
+        @test Matrix(C) == reshape(coefficients, 1, :)
+        @test d == constants
+        @test rows == ones(Int, length(weights))
+        @test signs == coefficients ./ 2
+        dual = LRO.dual_model(model)
+        @test LRO.primal_model(dual) === model
+        @test dual.meta.nvar == length(weights)
+        @test dual.C_lin == C
+        @test dual.d_lin == d
+        cone = LRO.VectorizedConeVector(weights, dual.dim)
+        mapped = LRO.cone_multipliers(model, cone)
+        @test length(mapped) == model.meta.ncon == 1
+        @test mapped[LRO.ScalarIndex] == [multiplier]
+        # Cone/MOI multipliers have the opposite sign to NLPModels multipliers.
+        nlp_multipliers = -Vector(mapped)
+        @test nlp_multipliers == [-multiplier]
+        adjoint = NLPModels.jtprod(model, [0.4], nlp_multipliers)
+        @test adjoint == C * weights
+        @test NLPModels.grad(model, [0.4]) + adjoint == [0.0]
+        @test NLPModels.cons(dual, cone) == [0.0]
+        if iszero(lower) && upper == Inf
+            @test dual.C_lin === model.C_lin
+            @test dual.d_lin === model.d_lin
+            @test mapped === cone
+        end
+        C_reduced, d_reduced, rows_reduced, _ =
+            LRO.scalar_bounds(model; equalities = false)
+        if lower == upper
+            @test size(C_reduced) == (1, 0)
+            @test isempty(d_reduced)
+            @test isempty(rows_reduced)
+        else
+            reduced = LRO.dual_model(model; equalities = false)
+            @test reduced.C_lin == C_reduced == C
+            @test reduced.d_lin == d_reduced == d
+        end
+    end
+end
+
 end
