@@ -79,6 +79,41 @@ function _sample_matrices()
     return matrices
 end
 
+function test_sparse_conversion()
+    u = sparsevec([1, 4], [2.0, -1.0], 4)
+    v = sparsevec([2, 4], [1.0, 3.0], 4)
+    matrices = _sample_matrices()
+    append!(
+        matrices,
+        (
+            LRO.Factorization(spzeros(4), -2.0),
+            LRO.Factorization(Float64[], 2.0),
+            LRO.Factorization(u, 0.0),
+            LRO.Factorization(SparseVector(4, [1, 4], [0.0, 2.0]), -3.0),
+            LRO.Factorization(spzeros(4, 0), Float64[]),
+            LRO.Factorization([u v], [2.0, -3.0]),
+            LRO.Factorization([u u], [1.0, -1.0]),
+            LRO.Factorization([u v u], [1.0, 2.0, -1.0]),
+            LRO.Factorization(
+                sparsevec([1, 3], ComplexF64[1+im, -2im], 4),
+                -2.0 + 0im,
+            ),
+        ),
+    )
+    for A in matrices
+        expected = Matrix(A)
+        factor = copy(LRO.left_factor(A))
+        scaling = copy(A.scaling)
+        result = sparse(A)
+        @test result isa SparseMatrixCSC
+        @test result == expected
+        @test nnz(result) == count(!iszero, expected)
+        @test LRO.left_factor(A) == factor
+        @test A.scaling == scaling
+    end
+    return
+end
+
 function test_dot()
     matrices = _sample_matrices()
     for A in matrices

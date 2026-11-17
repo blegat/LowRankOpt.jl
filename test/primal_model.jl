@@ -4,6 +4,18 @@ using Test, LinearAlgebra, SparseArrays
 import LowRankOpt as LRO
 import NLPModels
 
+struct CountingFactor <: AbstractVector{Float64}
+    values::Vector{Float64}
+    reads::Base.RefValue{Int}
+end
+function Base.size(factor::CountingFactor)
+    return size(factor.values)
+end
+function Base.getindex(factor::CountingFactor, i::Int)
+    factor.reads[] += 1
+    return factor.values[i]
+end
+
 function _gradient_allocations(model, x, gradient)
     NLPModels.grad!(model, x, gradient)
     return @allocated NLPModels.grad!(model, x, gradient)
@@ -125,6 +137,44 @@ end
     @test_throws DimensionMismatch(
         "constraint matrix has the wrong size for PSD block 2",
     ) build(ones(1, 1))
+end
+
+@testset "Structured coefficients in the native Jacobian" begin
+    d = 32
+    values = [zeros(d - 2); 2.0; -1.0]
+    factor = CountingFactor(values, Ref(0))
+    A = LRO.Factorization(factor, -2.0)
+    component = LRO.BlockColumns([2], reshape([A], 1, 1), 2)
+    model = LRO.Model(
+        [spzeros(1, 1), spzeros(d, d)],
+        (component,),
+        [1.0],
+        sparse([3.0]),
+        spzeros(1, 1),
+        [1, d],
+    )
+    # Construction should read the factor, not scan its d by d outer product.
+    @test factor.reads[] <= 4d
+    J = reshape([0.0; 0.0; vec(2.0 * values * values')], :, 1)
+    @test NLPModels.jac(model, [0.25]) == J
+    @test model.meta.nnzj == 4
+    @test NLPModels.cons(model, [0.25]) == [3.0; zeros(1 + d^2)] + 0.25 * vec(J)
+    @test NLPModels.jprod(model, [0.25], [-2.0]) == -2.0 * vec(J)
+
+    u = sparsevec([1, 3], [2.0, -1.0], 3)
+    cancelled = LRO.Factorization([u u], [1.0, -1.0])
+    component = LRO.BlockColumns([1], reshape([cancelled], 1, 1), 1)
+    model = LRO.Model(
+        [spzeros(3, 3)],
+        (component,),
+        [1.0],
+        spzeros(0),
+        spzeros(1, 0),
+        [3],
+    )
+    @test model.meta.nnzj == 0
+    @test nnz(NLPModels.jac(model, [1.0])) == 0
+    @test iszero(NLPModels.cons(model, [1.0]))
 end
 
 @testset "Primal metadata preserves arithmetic type" begin
