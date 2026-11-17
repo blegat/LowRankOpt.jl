@@ -186,13 +186,7 @@ end
 # Flatten shaped cone data only for the allocating default residuals.
 _native_vector(x::AbstractVector, ::Model) = x
 function _native_vector(x::ShapedConeVector{T}, model::Model) where {T}
-    result = Vector{T}(undef, model.meta.ncon)
-    cone = VectorizedConeVector(result, model.dim)
-    cone[ScalarIndex] .= x[ScalarIndex]
-    for i in matrix_indices(model)
-        cone[i] .= x[i]
-    end
-    return result
+    return collect(x)
 end
 
 function _dual_cone_violation(A, ::MatrixIndex, ::Nothing)
@@ -225,7 +219,8 @@ Euclidean/Frobenius norms; `p` selects the data denominator norm.
 
 Pass precomputed `primal_err`, `dual_err`, `pobj`, and `dobj` to reuse solver
 storage. `workspace` may contain one `EigenWorkspace` per PSD block. Inputs
-are preserved. This cone form has a nonnegative scalar prefix and PSD blocks.
+are preserved. This cone form has a nonnegative scalar prefix, SOC blocks,
+and PSD blocks.
 """
 function errors(
     model::Model,
@@ -267,6 +262,14 @@ function errors(
         primal_cone = max(primal_cone, -negative_eigmin(S[i], i, workspace))
         dual_cone = max(dual_cone, _dual_cone_violation(Y[i], i, workspace))
         complementarity -= LinearAlgebra.dot(S[i], Y[i])
+    end
+    for i in second_order_indices(model)
+        s, y = S[i], Y[i]
+        primal_cone =
+            max(primal_cone, LinearAlgebra.norm(view(s, 2:length(s))) - s[1])
+        dual_cone =
+            max(dual_cone, LinearAlgebra.norm(view(y, 2:length(y))) + y[1])
+        complementarity -= LinearAlgebra.dot(s, y)
     end
     obj_den = 1 + abs(pobj) + abs(dobj)
     return (

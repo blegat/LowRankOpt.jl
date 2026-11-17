@@ -10,7 +10,9 @@ Jacobian products apply the minus sign in `C[i] - sum(A[i,j] * x[j])`.
 Use `schur = false` for Jacobian products without Schur assembly storage.
 Use `jacobian = false, schur = false` when the solver builds its own KKT
 operators. Scalar Jacobian products remain available. Reconfiguring an
-existing workspace preserves any buffers that are still needed.
+existing workspace preserves any buffers that are still needed. SOC products
+use cached native Jacobian blocks. SOC Schur systems are assembled by the
+solver; select `schur = false` for models with native SOC constraints.
 """
 mutable struct ModelWorkspace{T,M<:Model{T},CB,JB,SB}
     model::M
@@ -18,6 +20,7 @@ mutable struct ModelWorkspace{T,M<:Model{T},CB,JB,SB}
     jprod_buffer::JB
     schur_buffer::SB
     scalar_jacobian_transpose::SparseArrays.SparseMatrixCSC{T,Int}
+    soc_jacobian_transpose::Vector{SparseArrays.SparseMatrixCSC{T,Int}}
 end
 
 Base.broadcastable(workspace::ModelWorkspace) = Ref(workspace)
@@ -31,6 +34,7 @@ function ModelWorkspace(
     if schur && !jacobian
         throw(ArgumentError("Schur workspaces require Jacobian buffers."))
     end
+    _check_soc_schur(model, schur)
     scalar_jacobian = model.jacobian[1:num_scalars(model), :]
     return ModelWorkspace(
         model,
@@ -38,6 +42,7 @@ function ModelWorkspace(
         jacobian ? buffer_for_jprod(model) : nothing,
         schur ? buffer_for_schur_complement(model, dense_condition) : nothing,
         SparseArrays.sparse(scalar_jacobian'),
+        _soc_jacobian_buffers(model, jacobian),
     )
 end
 
@@ -50,6 +55,7 @@ function ModelWorkspace(
     if schur && !jacobian
         throw(ArgumentError("Schur workspaces require Jacobian buffers."))
     end
+    _check_soc_schur(workspace.model, schur)
     has_jacobian = !isnothing(workspace.coefficient_buffer)
     if jacobian == has_jacobian && schur == !isnothing(workspace.schur_buffer)
         return workspace
@@ -74,7 +80,32 @@ function ModelWorkspace(
         products,
         schur_buffer,
         workspace.scalar_jacobian_transpose,
+        jacobian && has_jacobian ? workspace.soc_jacobian_transpose :
+        _soc_jacobian_buffers(workspace.model, jacobian),
     )
+end
+
+function _check_soc_schur(model::Model, schur)
+    if schur && !iszero(num_second_order_cones(model))
+        throw(
+            ArgumentError(
+                "Native SOC blocks require a solver-specific KKT workspace; use schur = false.",
+            ),
+        )
+    end
+    return
+end
+
+function _soc_jacobian_buffers(model::Model{T}, enabled) where {T}
+    buffers = SparseArrays.SparseMatrixCSC{T,Int}[]
+    if enabled
+        cone = VectorizedConeVector(model.constant, model.dim)
+        for i in second_order_indices(model)
+            rows = Base.to_index(cone, i)
+            push!(buffers, SparseArrays.sparse(model.jacobian[rows, :]'))
+        end
+    end
+    return buffers
 end
 
 function _require_jacobian(workspace::ModelWorkspace)
@@ -661,6 +692,9 @@ function jprod!(
 )
     cone = _cone_vector(result, workspace.model)
     jprod!(workspace, v, cone[ScalarIndex], ScalarIndex)
+    for i in second_order_indices(workspace.model)
+        jprod!(workspace, v, cone[i], i)
+    end
     for i in matrix_indices(workspace)
         cone[i] .= unsafe_jprod(workspace, v, i)
     end
@@ -684,6 +718,9 @@ function jtprod!(
     UnsafeArrays.@uviews multipliers begin
         cone = _cone_vector(multipliers, workspace.model)
         jtprod!(workspace, cone[ScalarIndex], result, ScalarIndex)
+        for i in second_order_indices(workspace.model)
+            add_jtprod!(workspace, cone[i], result, i)
+        end
         for i in matrix_indices(workspace)
             add_jtprod!(workspace, cone[i], result, i)
         end
@@ -731,8 +768,60 @@ function cons!(
 )
     cone = _cone_vector(result, workspace.model)
     cons!(workspace, x, cone[ScalarIndex], ScalarIndex)
+    for i in second_order_indices(workspace.model)
+        cons!(workspace, x, cone[i], i)
+    end
     for i in matrix_indices(workspace)
         cone[i] .= unsafe_cons(workspace, x, i)
     end
     return result
+end
+
+function jprod!(
+    workspace::ModelWorkspace,
+    v::AbstractVector,
+    result::AbstractVector,
+    i::SOCIndex,
+)
+    _require_jacobian(workspace)
+    return LinearAlgebra.mul!(
+        result,
+        workspace.soc_jacobian_transpose[i.value]',
+        v,
+    )
+end
+
+function add_jtprod!(
+    workspace::ModelWorkspace,
+    multipliers::AbstractVector,
+    result::AbstractVector,
+    i::SOCIndex,
+)
+    _require_jacobian(workspace)
+    return LinearAlgebra.mul!(
+        result,
+        workspace.soc_jacobian_transpose[i.value],
+        multipliers,
+        true,
+        true,
+    )
+end
+
+function cons!(
+    workspace::ModelWorkspace,
+    x::AbstractVector,
+    result::AbstractVector,
+    i::SOCIndex,
+)
+    _require_jacobian(workspace)
+    constant =
+        VectorizedConeVector(workspace.model.constant, workspace.model.dim)
+    copyto!(result, constant[i])
+    return LinearAlgebra.mul!(
+        result,
+        workspace.soc_jacobian_transpose[i.value]',
+        x,
+        true,
+        true,
+    )
 end
