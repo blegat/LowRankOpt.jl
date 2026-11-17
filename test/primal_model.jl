@@ -4,6 +4,11 @@ using Test, LinearAlgebra, SparseArrays
 import LowRankOpt as LRO
 import NLPModels
 
+function _gradient_allocations(model, x, gradient)
+    NLPModels.grad!(model, x, gradient)
+    return @allocated NLPModels.grad!(model, x, gradient)
+end
+
 @testset "Free-variable NLPModels contract" begin
     C = sparse([2.0 0.5; 0.5 3.0])
     A = reshape([sparse([1.0 0; 0 2]), sparse([0.0 1; 1 0])], 1, 2)
@@ -27,6 +32,10 @@ import NLPModels
     @test all(==(Inf), model.meta.uvar)
     @test NLPModels.obj(model, x) ≈ 6.4
     @test NLPModels.grad(model, x) ≈ [1.0, -2.0]
+    gradient = fill(NaN, length(x))
+    @test NLPModels.grad!(model, x, gradient) === gradient
+    @test gradient ≈ [1.0, -2.0]
+    @test _gradient_allocations(model, x, gradient) == 0
     @test NLPModels.cons(model, x) ≈ expected
     @test NLPModels.jac(model, x) ≈ J
     @test model.meta.lin_nnzj == model.meta.nnzj

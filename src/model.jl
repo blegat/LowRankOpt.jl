@@ -173,7 +173,7 @@ function NLPModels.grad!(
     gradient::AbstractVector,
 )
     NLPModels.increment!(model, :neval_grad)
-    gradient .= -model.b
+    gradient .= .-model.b
     return gradient
 end
 
