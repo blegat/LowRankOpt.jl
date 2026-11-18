@@ -105,17 +105,18 @@ function diff_check(model::JuMP.AbstractModel)
 end
 
 struct ConvexSolver{T} <: SolverCore.AbstractOptimizationSolver
-    model::LRO.Model{T}
+    model::LRO.DualModel{T}
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
 end
 
-function ConvexSolver(model::LRO.Model)
+function ConvexSolver(src::Union{LRO.Model,LRO.DualModel})
+    model = LRO.dual_model(src)
     stats = SolverCore.GenericExecutionStats(model)
     return ConvexSolver(model, stats)
 end
 
-function LRO.MOI.get(solver::ConvexSolver, ::LRO.Solution)
-    return LRO.VectorizedSolution(solver.stats.solution, solver.model.dim)
+function LRO.MOI.get(solver::ConvexSolver, ::LRO.DualSolution)
+    return LRO.VectorizedConeVector(solver.stats.solution, solver.model.dim)
 end
 
 function SolverCore.solve!(::ConvexSolver, ::LRO.Model)
@@ -130,112 +131,108 @@ function _alloc_schur_complement(model, i, Wi, H)
     @test 0 == @allocated LRO.add_schur_complement!(model, i, Wi, H)
 end
 
-function schur_test(model::LRO.BufferedModelForSchur{T}, w) where {T}
-    n = model.meta.ncon
+function schur_test(workspace::LRO.ModelWorkspace, w)
+    model = workspace.model
+    T = eltype(model.b)
+    n = model.meta.nvar
     y = rand(T, n)
-
     idx = @inferred LRO.matrix_indices(model)
     if !isempty(idx)
         @inferred first(idx)
         @inferred idx[1]
     end
 
-    @test NLPModels.obj(model, w) ≈
-          dot(LRO.grad(model, LRO.ScalarIndex), w[LRO.ScalarIndex]) +
-          dot(LRO.grad.(model, idx), getindex.(Ref(w), idx))
-    @test LRO.dual_obj(model, y) ≈ dot(LRO.cons_constant(model), y)
+    # Native J maps free variables to cone entries; J' maps them back.
+    Jv, vJ = similar(w), similar(y)
+    LRO.jprod!(workspace, y, Jv)
+    LRO.jtprod!(workspace, w, vJ)
+    @test Vector(Jv) ≈ model.jacobian * y
+    @test vJ ≈ model.jacobian' * Vector(w)
+    @test dot(Jv, w) ≈ dot(y, vJ)
+    @test 0 == @allocated LRO.jprod!(workspace, y, Jv)
+    @test 0 == @allocated LRO.jtprod!(workspace, w, vJ)
+    LRO.cons!(workspace, y, Jv)
+    @test Vector(Jv) ≈ NLPModels.cons(model, y)
 
-    @test LRO.jac(model, 1, LRO.ScalarIndex) ==
-          LRO.jac(model.model, 1, LRO.ScalarIndex)
-    @test LRO.norm_jac.(model, idx) == LRO.norm_jac.(model.model, idx)
-    @test LRO.side_dimension.(model, idx) ==
-          LRO.side_dimension.(model.model, idx)
-    if !isempty(idx)
-        @test LRO.side_dimension.([model], idx[1]) ==
-              [LRO.side_dimension(model, idx[1])]
-    end
-
-    Jv = similar(y)
-    vJ = similar(w)
-    NLPModels.jprod!(model, w, w, Jv)
-    NLPModels.jtprod!(model, w, y, vJ)
-    @test 0 == @allocated NLPModels.jtprod!(model, w, y, vJ)
-    @test dot(Jv, y) ≈ dot(vJ, w)
-
-    H = zeros(n, n)
-    H = LRO.schur_complement!(model, w, H)
+    H = zeros(T, n, n)
+    LRO.schur_complement!(workspace, w, H)
     Hy = similar(y)
-    LRO.eval_schur_complement!(model, w, y, Hy)
+    LRO.eval_schur_complement!(workspace, w, y, Hy)
     @test Hy ≈ H * y
     if T == Float64
-        @test 0 == @allocated LRO.eval_schur_complement!(model, w, y, Hy)
+        @test 0 == @allocated LRO.eval_schur_complement!(workspace, w, y, Hy)
     end
-    # Reuse the workspaces for a different right-hand side, then assemble H again.
-    LRO.eval_schur_complement!(model, w, -y, Hy)
+    # Reuse the workspaces for another right-hand side, then assemble again.
+    LRO.eval_schur_complement!(workspace, w, -y, Hy)
     @test Hy ≈ -(H * y)
     H_again = similar(H)
-    LRO.schur_complement!(model, w, H_again)
+    LRO.schur_complement!(workspace, w, H_again)
     @test H_again ≈ H
-    for i in LRO.matrix_indices(model)
+    for i in idx
         Wi = @inferred w[i]
-        _alloc_schur_complement(model, i, Wi, H)
+        _alloc_schur_complement(workspace, i, Wi, H)
     end
-    for i in LRO.matrix_indices(model)
-        @test model.jtprod_buffer[i.value] isa
+    for i in idx
+        @test workspace.jprod_buffer[i.value] isa
               Union{FillArrays.Zeros,Matrix,SparseArrays.SparseMatrixCSC}
-        ret = LRO.unsafe_jtprod(model, y, i)
-        @test ret === model.jtprod_buffer[i.value]
-        ret = LRO.unsafe_dual_cons(model, y, i)
-        # `Matrix` when the jtprod buffer is involved, but `unsafe_dual_cons`
-        # may also alias `C` itself, which is sparse.
+        ret = LRO.unsafe_jprod(workspace, y, i)
+        @test ret === workspace.jprod_buffer[i.value]
+        rows = (model.dim.offsets[i.value]+1):model.dim.offsets[i.value+1]
+        expected = reshape(model.jacobian[rows, :] * y, size(model.C[i.value]))
+        @test ret ≈ expected
+        ret = LRO.unsafe_cons(workspace, y, i)
         @test ret isa
               Union{Matrix,SparseArrays.SparseMatrixCSC,FillArrays.Zeros}
-        Aty =
-            sum(LRO.jac(model.model, j, i) * y[j] for j in 1:(model.meta.ncon))
-        @test ret ≈ model.model.C[i.value] - Aty
-        if Aty isa FillArrays.Zeros
-            @test ret === model.model.C[i.value]
-        elseif model.model.C[i.value] isa FillArrays.Zeros
-            @test ret === model.jtprod_buffer[i.value]
+        @test ret ≈ model.C[i.value] + expected
+        if workspace.jprod_buffer[i.value] isa FillArrays.Zeros
+            @test ret === model.C[i.value]
+        elseif model.C[i.value] isa FillArrays.Zeros
+            @test ret === workspace.jprod_buffer[i.value]
         end
     end
-    # Loraine's `H_alpha` preconditioner builds the low-rank correction to
-    # the Schur complement one constraint at a time: `prec_alpha_S!` calls
-    # `unsafe_jtprod` with a *sparse* `y` (a column of the constraint
-    # matrix), not with a dense one like the interior-point iteration does.
-    # So `unsafe_jtprod` must accept any `AbstractVector` and agree with the
-    # dense result; restricting it to `StridedVector` type-errors there
-    # without failing anything else in this suite.
+    # Preconditioners also call the block product with sparse directions.
     y_sparse = SparseArrays.sparsevec(y)
-    for i in LRO.matrix_indices(model)
-        dense = copy(LRO.unsafe_jtprod(model, y, i))
-        @test LRO.unsafe_jtprod(model, y_sparse, i) ≈ dense
+    for i in idx
+        dense = copy(LRO.unsafe_jprod(workspace, y, i))
+        @test LRO.unsafe_jprod(workspace, y_sparse, i) ≈ dense
     end
-
-    dcons = ones(LRO.num_scalars(model))
-    LRO.dual_cons!(model, y, dcons, LRO.ScalarIndex)
-    @test dcons ≈ model.model.d_lin - model.model.C_lin' * y
+    ns = LRO.num_scalars(model)
+    scalar = ones(T, ns)
+    LRO.jprod!(workspace, y, scalar, LRO.ScalarIndex)
+    @test scalar ≈ model.jacobian[1:ns, :] * y
+    LRO.jtprod!(workspace, w[LRO.ScalarIndex], vJ, LRO.ScalarIndex)
+    @test vJ ≈ model.jacobian[1:ns, :]' * w[LRO.ScalarIndex]
+    LRO.cons!(workspace, y, scalar, LRO.ScalarIndex)
+    @test scalar ≈ model.constant[1:ns] + model.jacobian[1:ns, :] * y
+    return
 end
 
-function schur_test(model::LRO.BufferedModelForSchur{T}) where {T}
-    w = rand(T, model.meta.nvar)
-    W = LRO.VectorizedSolution(w, model.model.dim)
+function schur_test(workspace::LRO.ModelWorkspace)
+    model = workspace.model
+    w = rand(eltype(model.b), model.meta.ncon)
+    W = LRO.VectorizedConeVector(w, model.dim)
     for i in LRO.matrix_indices(model)
         W[i] .= W[i] .+ W[i]'
     end
-    return schur_test(model, W)
+    return schur_test(workspace, W)
 end
 
 function schur_test(model::LRO.Model, κ)
     return schur_test(
-        LRO.BufferedModelForSchur(
+        LRO.ModelWorkspace(
             model;
             dense_condition = LRO.And(LRO.MinNonzeros(κ), LRO.DenseCost(100)),
         ),
     )
 end
 
+schur_test(model::LRO.DualModel, κ) = schur_test(LRO.primal_model(model), κ)
+
 function schur_test(model::JuMP.AbstractModel, κ)
-    b = _backend(model)
-    return schur_test(b.solver.model, κ)
+    return schur_test(_backend(model).model, κ)
 end
+
+function LRO.MOI.get(solver::ConvexSolver, ::LRO.PrimalSolution)
+    return solver.stats.multipliers
+end
+LRO.MOI.get(solver::ConvexSolver, ::LRO.DualObjective) = -solver.stats.objective

@@ -14,6 +14,8 @@ using Test
 using LinearAlgebra
 using SparseArrays
 import LowRankOpt as LRO
+
+include("workspace_utils.jl")
 import Random
 
 # Build a tiny `LRO.Model` whose constraint matrices share the
@@ -46,15 +48,15 @@ end
 
 # Brute-force: H[j,k] = Σ_i ⟨A_{i,j}, W_i A_{i,k} W_i⟩, no rank-1 trick.
 function _brute_force_H(model, W_blocks::Vector{<:AbstractMatrix})
-    n = model.meta.ncon
+    n = model.meta.nvar
     T = eltype(model.b)
     H = zeros(T, n, n)
     for idx in LRO.matrix_indices(model)
         i = idx.value
         Wi = W_blocks[i]
         for j in 1:n, k in 1:n
-            Aj = Matrix(LRO.jac(model, j, idx))
-            Ak = Matrix(LRO.jac(model, k, idx))
+            Aj = Matrix(_coefficient(model, j, idx))
+            Ak = Matrix(_coefficient(model, k, idx))
             H[j, k] += tr(Aj * Wi * Ak * Wi)
         end
     end
@@ -76,7 +78,7 @@ function test_single_block()
     sizes = [3]
     n = 4
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(
+    buf = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
@@ -93,7 +95,7 @@ function test_multiple_blocks()
     sizes = [3, 2, 4]
     n = 5
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(
+    buf = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
@@ -112,7 +114,7 @@ function test_single_constraint()
     sizes = [3]
     n = 1
     model, Us, ws = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(
+    buf = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
@@ -144,7 +146,7 @@ function test_negative_scalings()
     CT = LRO.Factorization{T,Vector{T},Array{T,0}}
     C = CT[LRO.Factorization(zeros(T, 2), reshape(T[zero(T)], ()))]
     model2 = LRO.Model(C, A, model.b, model.d_lin, model.C_lin, model.msizes)
-    buf = LRO.BufferedModelForSchur(
+    buf = LRO.ModelWorkspace(
         model2;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )
@@ -157,7 +159,7 @@ function test_negative_scalings()
 end
 
 # Shim supporting `W[MatrixIndex(i)]` and `W[LRO.ScalarIndex]` indexing
-# the way `LRO.VectorizedSolution` does on the solver side.
+# the way `LRO.VectorizedConeVector` does on the solver side.
 struct _WShim{T}
     blocks::Vector{Matrix{T}}
     scalars::Vector{T}
@@ -172,7 +174,7 @@ function test_eval_matches_matvec()
     sizes = [3, 2]
     n = 4
     model, _, _ = _rank1_model(T, sizes, n)
-    buf = LRO.BufferedModelForSchur(
+    buf = LRO.ModelWorkspace(
         model;
         dense_condition = LRO.And(LRO.MinNonzeros(1), LRO.DenseCost(100)),
     )

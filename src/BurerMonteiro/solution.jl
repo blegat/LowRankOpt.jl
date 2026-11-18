@@ -7,7 +7,7 @@ struct Dimensions{S}
     offsets::Vector{Int64}
 end
 
-function Dimensions{S}(model::LRO.Model, ranks) where {S}
+function Dimensions{S}(model::LRO.DualModel, ranks) where {S}
     side_dimensions =
         [LRO.side_dimension(model, i) for i in LRO.matrix_indices(model)]
     num_scalars = LRO.num_scalars(model)

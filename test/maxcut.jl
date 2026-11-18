@@ -99,7 +99,8 @@ function _test_maxcut(;
     LRO.BurerMonteiro.grad!(solver.model, X, JtV, i)
     @test JtV.factor ≈ 2lro_model.C[] * X.factor
     fill!(JtV.factor, 0.0)
-    y = rand(lro_model.meta.ncon)
+    # These multipliers belong to the Burer-Monteiro equality constraints.
+    y = rand(solver.model.meta.ncon)
     LRO.BurerMonteiro.add_jtprod!(solver.model, X, y, JtV, i)
     if is_dual
         @test JtV.factor ≈ 2y .* X.factor
@@ -135,32 +136,37 @@ function _test_convex_solver(T)
     b.solver.stats.status = :first_order
     @test MOI.get(model, LRO.ConvexTerminationStatus()) == MOI.OPTIMAL
     @test termination_status(model) == MOI.OPTIMAL
-    @test MOI.get(model, LRO.Solution()) isa LRO.VectorizedSolution{T}
+    @test MOI.get(model, LRO.DualSolution()) isa LRO.VectorizedConeVector{T}
+    # Solver statuses use the original model's primal/dual convention.
     b.solver.stats.status = :infeasible
-    @test termination_status(model) == MOI.DUAL_INFEASIBLE
-    @test dual_status(model) == MOI.INFEASIBLE_POINT
-    b.solver.stats.status = :unbounded
     @test termination_status(model) == MOI.INFEASIBLE
     @test primal_status(model) == MOI.INFEASIBLE_POINT
-    x = LRO.VectorizedSolution(collect(1:(b.model.meta.nvar)), b.model.dim)
+    b.solver.stats.status = :unbounded
+    @test termination_status(model) == MOI.DUAL_INFEASIBLE
+    @test dual_status(model) == MOI.INFEASIBLE_POINT
+    x = LRO.VectorizedConeVector(
+        collect(1:(LRO.dual_model(b.model).meta.nvar)),
+        LRO.dual_model(b.model).dim,
+    )
     sim = similar(x)
     @test sim isa typeof(x)
     sim .= x
     @test sim == x
-    X = LRO.ShapedSolution(
+    X = LRO.ShapedConeVector(
         Vector(x[LRO.ScalarIndex]),
-        [Matrix(x[i]) for i in LRO.matrix_indices(b.model)],
+        [Matrix(x[i]) for i in LRO.matrix_indices(LRO.dual_model(b.model))],
     )
-    y = collect(1:(b.model.meta.ncon))
-    @test LRO.jac(b.model, 1, LRO.MatrixIndex(1)) ==
+    y = collect(1:(LRO.dual_model(b.model).meta.ncon))
+    @test LRO.jac(LRO.dual_model(b.model), 1, LRO.MatrixIndex(1)) ==
           sparse([1], [1], [-1], 4, 4)
-    @test LRO.jac(b.model, 1, LRO.ScalarIndex) == sparsevec([1, 2], [-1, 1], 8)
-    @test LRO.norm_jac(b.model, LRO.MatrixIndex(1)) == 4
+    @test LRO.jac(LRO.dual_model(b.model), 1, LRO.ScalarIndex) ==
+          sparsevec([1, 2], [-1, 1], 8)
+    @test LRO.norm_jac(LRO.dual_model(b.model), LRO.MatrixIndex(1)) == 4
     grad = similar(x)
-    NLPModels.grad!(b.model, X, grad)
+    NLPModels.grad!(LRO.dual_model(b.model), X, grad)
     @test Vector(grad) == [
-        Vector(LRO.grad(b.model, LRO.ScalarIndex));
-        LRO.grad(b.model, LRO.MatrixIndex(1))[:]
+        Vector(LRO.grad(LRO.dual_model(b.model), LRO.ScalarIndex));
+        LRO.grad(LRO.dual_model(b.model), LRO.MatrixIndex(1))[:]
     ]
     # The objective has eight nonzero entries, all with absolute value 1.
     # pobj = 4, dobj = -7.5. The slack is x, so complementarity is dot(x, x).
@@ -177,9 +183,9 @@ function _test_convex_solver(T)
         @test err[5] ≈ 23 / 25
         @test err[6] ≈ (204 + 4696) / 12.5
     end
-    schur_test(b.model, 0)
-    schur_test(b.model, 1)
-    schur_test(b.model, 2)
+    schur_test(LRO.dual_model(b.model), 0)
+    schur_test(LRO.dual_model(b.model), 1)
+    schur_test(LRO.dual_model(b.model), 2)
     return
 end
 

@@ -8,7 +8,9 @@ module LowRankOpt
 import FastLapackInterface
 import LinearAlgebra
 import SparseArrays
+import UnsafeArrays
 import MathOptInterface as MOI
+import NLPModels
 
 include("sets.jl")
 include("factorization.jl")
@@ -17,9 +19,10 @@ include("distance_to_set.jl")
 include("Test/Test.jl")
 include("Bridges/Bridges.jl")
 
-include("solution.jl")
+include("cone_vector.jl")
 include("block_columns.jl")
 include("model.jl")
+include("dual_model.jl")
 include("dense_condition.jl")
 include("buffer.jl")
 include("schur.jl")

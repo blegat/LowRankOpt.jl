@@ -19,15 +19,15 @@ import LowRankOpt as LRO
     )
         flat = vcat(scalars, vec.(matrices)...)
         other_flat = vcat(other_scalars, vec.(other_matrices)...)
-        dims = LRO.Dimensions(
+        dims = LRO.ConeDimensions(
             length(scalars),
             size.(matrices, 1),
             cumsum([length(scalars); length.(matrices)]),
         )
-        shaped = LRO.ShapedSolution(scalars, matrices)
-        other_shaped = LRO.ShapedSolution(other_scalars, other_matrices)
-        vectorized = LRO.VectorizedSolution(flat, dims)
-        other_vectorized = LRO.VectorizedSolution(other_flat, dims)
+        shaped = LRO.ShapedConeVector(scalars, matrices)
+        other_shaped = LRO.ShapedConeVector(other_scalars, other_matrices)
+        vectorized = LRO.VectorizedConeVector(flat, dims)
+        other_vectorized = LRO.VectorizedConeVector(other_flat, dims)
         @test LRO.num_matrices(dims) == length(matrices)
         for (x, y) in ((shaped, other_shaped), (vectorized, other_vectorized))
             @test LRO.num_matrices(x) == length(matrices)
@@ -37,6 +37,25 @@ import LowRankOpt as LRO
             @test norm(x) ≈ norm(flat)
         end
     end
+end
+
+@testset "Cone vectors retain view-backed storage" begin
+    storage = fill(-99.0, 13)
+    slice = view(storage, 2:2:12)
+    slice .= 1:6
+    dimensions = LRO.ConeDimensions(2, [2], [2, 6])
+    cone = LRO.VectorizedConeVector(slice, dimensions)
+    @test cone.x === slice
+    @test Vector(cone) == collect(1.0:6.0)
+    @test cone[LRO.ScalarIndex] == [1.0, 2.0]
+    @test cone[LRO.MatrixIndex(1)] == [3.0 5.0; 4.0 6.0]
+    cone[LRO.MatrixIndex(1)] .= [7.0 8.0; 8.0 9.0]
+    @test slice == [1.0, 2.0, 7.0, 8.0, 8.0, 9.0]
+    @test all(==(-99.0), storage[1:2:end])
+    copied = similar(cone)
+    copied .= cone
+    @test copied == cone
+    @test copied.x !== cone.x
 end
 
 end

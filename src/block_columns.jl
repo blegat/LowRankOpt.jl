@@ -165,3 +165,23 @@ function _matrix_components(A::AbstractMatrix)
         unique(typeof(value) for value in A if !(value isa FillArrays.Zeros))
     return Tuple(_typed_component(M, A) for M in types)
 end
+
+function _coefficient_sum(::Tuple{}, j, i, d, ::Type{T}) where {T}
+    return FillArrays.Zeros{T}(d, d)
+end
+@inline function _coefficient_sum(
+    components::Tuple,
+    j,
+    i,
+    d,
+    ::Type{T},
+) where {T}
+    column = _block_column(first(components), i)
+    tail = _coefficient_sum(Base.tail(components), j, i, d, T)
+    if isnothing(column)
+        return tail
+    elseif tail isa FillArrays.Zeros
+        return column[j]
+    end
+    return column[j] + tail
+end
