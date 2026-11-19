@@ -27,6 +27,7 @@ const OptimizerCache{T} = MOI.Utilities.GenericModel{
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
+    soc_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
     scalar_rows::Dict{MOI.ConstraintIndex,UnitRange{Int}}
     lin_cones::Union{Nothing,NNGCones{T}}
@@ -39,6 +40,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
         return new{T}(
             nothing,
             nothing,
+            Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
             Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
             Dict{MOI.ConstraintIndex,UnitRange{Int}}(),
             nothing,
@@ -63,6 +65,7 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.model = nothing
     optimizer.lin_cones = nothing
     empty!(optimizer.lmi_id)
+    empty!(optimizer.soc_id)
     empty!(optimizer.scalar_rows)
     optimizer.objective_constant = NaN
     return
@@ -125,7 +128,8 @@ end
 const BOUNDED_SCALAR{T} =
     Union{MOI.EqualTo{T},MOI.GreaterThan{T},MOI.LessThan{T},MOI.Interval{T}}
 const BOUNDED_VECTOR = Union{MOI.Zeros,MOI.Nonpositives}
-const SUPPORTED_CONES = Union{NNG,PSD,LOW,BOUNDED_VECTOR}
+const SECOND_ORDER = Union{MOI.SecondOrderCone,MOI.RotatedSecondOrderCone}
+const SUPPORTED_CONES = Union{NNG,PSD,LOW,BOUNDED_VECTOR,SECOND_ORDER}
 function MOI.supports_constraint(
     ::Optimizer{T},
     ::Type{MOI.ScalarAffineFunction{T}},
@@ -184,25 +188,81 @@ function _instantiate(A::_MatrixBuilder{T}) where {T}
     end
 end
 
-function _instantiate(A::Array{_MatrixBuilder{T}}) where {T}
-    if isempty(A)
-        return Array{
-            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
-        }(
-            undef,
-            size(A),
-        )
-    else
-        I = _instantiate.(A)
-        if !isconcretetype(eltype(I))
-            # If we have for instance FillArrays.Zeros but also low-rank,
-            # the eltype is `AbstractMatrix` which is going to cause dynamic dispatch
-            # every time it is accessed. Instead, we want a small `Union` as Julia
-            # handles it much more efficiently, see https://julialang.org/blog/2018/08/union-splitting/
-            I = convert(Array{Union{unique(typeof.(I))...}}, I)
-        end
-        return I
+function _matrix_builder!(
+    blocks::Vector{Dict{Int,_MatrixBuilder{T}}},
+    i,
+    j,
+    d,
+) where {T}
+    return get!(blocks[i], j) do
+        return _MatrixBuilder{T}(d)
     end
+end
+
+function _coefficient_component(
+    ::Type{M},
+    entries,
+    n,
+    msizes,
+) where {M<:AbstractMatrix}
+    ids = sort!(unique(first(entry) for entry in entries))
+    slots = Dict(i => k for (k, i) in enumerate(ids))
+    T = eltype(M)
+    columns = [Dict{Int,M}() for i in ids]
+    for (i, j, matrix) in entries
+        columns[slots[i]][j] = matrix::M
+    end
+    values = SparseBlockCoefficients(
+        columns,
+        _ZerosMatrix{T}[
+            FillArrays.Zeros{T}(Int(msizes[i]), Int(msizes[i])) for i in ids
+        ],
+        Int(n),
+    )
+    return BlockColumns(ids, values, length(msizes))
+end
+
+# Build homogeneous block columns directly from present MOI coefficients.
+# Missing variables need no matrix builder or per-entry zero matrix.
+function _coefficient_data(
+    blocks::Vector{Dict{Int,_MatrixBuilder{T}}},
+    msizes,
+    n,
+) where {T}
+    costs = AbstractMatrix{T}[]
+    types = DataType[]
+    entries = Dict{DataType,Vector{Tuple{Int,Int,AbstractMatrix{T}}}}()
+    for (i, builders) in enumerate(blocks)
+        constant = get(builders, 1, nothing)
+        push!(
+            costs,
+            isnothing(constant) ? FillArrays.Zeros{T}(msizes[i], msizes[i]) :
+            _instantiate(constant),
+        )
+        for (j, builder) in builders
+            if j == 1
+                continue
+            end
+            matrix = _instantiate(builder)
+            if _matrix_iszero(matrix)
+                continue
+            end
+            M = typeof(matrix)
+            if !haskey(entries, M)
+                push!(types, M)
+                entries[M] = Tuple{Int,Int,AbstractMatrix{T}}[]
+            end
+            push!(entries[M], (i, j-1, matrix))
+        end
+    end
+    if isempty(costs)
+        typed_costs = _ZerosMatrix{T}[]
+    else
+        typed_costs = convert(Vector{Union{unique(typeof.(costs))...}}, costs)
+    end
+    components =
+        Tuple(_coefficient_component(M, entries[M], n, msizes) for M in types)
+    return typed_costs, components
 end
 
 function __add!(A::_MatrixBuilder, i, j, v)
@@ -313,7 +373,7 @@ function _add_constraints(
     ::Type{VAF{T}},
     ::Type{S},
 ) where {T,S}
-    if S <: BOUNDED_VECTOR
+    if S <: Union{BOUNDED_VECTOR,SECOND_ORDER}
         return
     end
     for ci in MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},S}())
@@ -325,12 +385,15 @@ function _add_constraints(
         push!(msizes, d)
         lmi_id = length(msizes)
         dest.lmi_id[ci] = lmi_id
-        for k in axes(A, 2)
-            A[lmi_id, k] = _MatrixBuilder{T}(d)
-        end
+        A[lmi_id] = Dict{Int,_MatrixBuilder{T}}()
         for row in eachindex(func.constants)
             if !iszero(func.constants[row])
-                _add!(A[lmi_id, 1], row, func.constants[row], set)
+                _add!(
+                    _matrix_builder!(A, lmi_id, 1, d),
+                    row,
+                    func.constants[row],
+                    set,
+                )
             end
         end
         # If the structure is one-hot, we treat the constraint as if it was
@@ -344,17 +407,24 @@ function _add_constraints(
             col = 1 + scalar.variable.value
             row, coef = term.output_index, -scalar.coefficient
             if one_hot
-                _add_one_hot!(A[lmi_id, col], row, coef, set)
+                _add_one_hot!(
+                    _matrix_builder!(A, lmi_id, col, d),
+                    row,
+                    coef,
+                    set,
+                )
             else
-                _add!(A[lmi_id, col], row, coef, set)
+                _add!(_matrix_builder!(A, lmi_id, col, d), row, coef, set)
             end
         end
         # Same as for `one_hot`, the rank-one structure is then the same as
         # if the matrices were given as rank-one factorizations, see the
         # "Explicit structure" section of the docstring of `one_hot`.
         if !one_hot && get(dest.options, "detect_rank_one", true)
-            for col in axes(A, 2)[2:end]
-                _detect_rank_one!(A[lmi_id, col])
+            for (col, builder) in A[lmi_id]
+                if col != 1
+                    _detect_rank_one!(builder)
+                end
             end
         end
     end
@@ -380,10 +450,10 @@ function MOI.copy_to(
     C_lin = -convert(SM, C_lin')
     n = MOI.get(src, MOI.NumberOfVariables())
     constraint_types = MOI.get(src, MOI.ListOfConstraintTypesPresent())
-    nlmi = sum(constraint_types) do (F, S)
+    nlmi = sum(constraint_types; init = 0) do (F, S)
         return _nlmi(src, F, S)
     end
-    A = Matrix{_MatrixBuilder{T}}(undef, nlmi, n + 1)
+    A = Vector{Dict{Int,_MatrixBuilder{T}}}(undef, nlmi)
     empty!(dest.lmi_id)
     msizes = Int64[]
     for (F, S) in constraint_types
@@ -398,9 +468,10 @@ function MOI.copy_to(
     end
     b = dest.max_sense ? b0 : -b0
 
+    costs, coefficients = _coefficient_data(A, msizes, n)
     dest.model = Model(
-        _instantiate(A[:, 1]),
-        _instantiate(A[:, 2:end]),
+        costs,
+        coefficients,
         b,
         convert(
             SparseArrays.SparseVector{T,Int64},
@@ -412,6 +483,7 @@ function MOI.copy_to(
                              dest.objective_constant,
     )
     _copy_scalar_constraints!(dest, src, constraint_types)
+    _copy_soc_constraints!(dest, src, constraint_types)
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
     options = copy(dest.options)
     dest.lin_cones = Cd_lin.sets
@@ -516,6 +588,12 @@ end
 function MOI.get(optimizer::Optimizer, attr::MOI.PrimalStatus)
     if attr.result_index > MOI.get(optimizer, MOI.ResultCount())
         return MOI.NO_SOLUTION
+    elseif get(
+        optimizer.solver.stats.solver_specific,
+        :primal_certificate,
+        false,
+    )
+        return MOI.INFEASIBILITY_CERTIFICATE
     elseif MOI.get(optimizer, MOI.TerminationStatus()) in
            [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
@@ -534,6 +612,9 @@ function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
         optimizer.model,
         MOI.get(optimizer.solver, PrimalSolution()),
     )
+    if get(optimizer.solver.stats.solver_specific, :primal_certificate, false)
+        val -= optimizer.model.objective_constant
+    end
     return optimizer.max_sense ? -val : val
 end
 
@@ -551,9 +632,10 @@ function MOI.get(
     attr::MOI.DualObjectiveValue,
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
-    val =
-        MOI.get(optimizer.solver, DualObjective()) +
-        optimizer.model.objective_constant
+    val = MOI.get(optimizer.solver, DualObjective())
+    if !get(optimizer.solver.stats.solver_specific, :dual_certificate, false)
+        val += optimizer.model.objective_constant
+    end
     return optimizer.max_sense ? -val : val
 end
 
@@ -563,6 +645,8 @@ function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
     elseif MOI.get(optimizer, MOI.TerminationStatus()) in
            [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
+    elseif get(optimizer.solver.stats.solver_specific, :dual_certificate, false)
+        return MOI.INFEASIBILITY_CERTIFICATE
     elseif MOI.get(optimizer, MOI.TerminationStatus()) == MOI.DUAL_INFEASIBLE
         return MOI.INFEASIBLE_POINT
     else
@@ -684,4 +768,64 @@ function MOI.get(
     values =
         MOI.get(optimizer, DualSolution())[ScalarIndex][optimizer.scalar_rows[ci]]
     return S <: BOUNDED_SCALAR ? only(values) : values
+end
+
+function _copy_soc_constraints!(dest::Optimizer{T}, src, types) where {T}
+    rows, cols, values = Int[], Int[], T[]
+    constants, dimensions = T[], Int[]
+    for (F, S) in types
+        if !(S <: SECOND_ORDER)
+            continue
+        end
+        for ci in MOI.get(src, MOI.ListOfConstraintIndices{F,S}())
+            func = MOI.get(src, MOI.CanonicalConstraintFunction(), ci)
+            offset = length(constants)
+            push!(dimensions, length(func.constants))
+            dest.soc_id[ci] = length(dimensions)
+            rotated = S <: MOI.RotatedSecondOrderCone
+            c = rotated ? rotate_soc(func.constants) : func.constants
+            append!(constants, c)
+            for term in func.terms
+                i, t = term.output_index, term.scalar_term
+                if rotated && i <= 2
+                    for j in 1:2
+                        push!(rows, offset+j)
+                        push!(cols, t.variable.value)
+                        push!(
+                            values,
+                            t.coefficient*(
+                                i == 2 && j == 2 ? -1 : 1
+                            )/sqrt(T(2)),
+                        )
+                    end
+                else
+                    push!(rows, offset+i)
+                    push!(cols, t.variable.value)
+                    push!(values, t.coefficient)
+                end
+            end
+        end
+    end
+    if !isempty(dimensions)
+        J = SparseArrays.sparse(
+            rows,
+            cols,
+            values,
+            length(constants),
+            dest.model.meta.nvar,
+        )
+        append_second_order_constraints!(dest.model, J, constants, dimensions)
+    end
+    return
+end
+
+function MOI.get(
+    optimizer::Optimizer{T},
+    attr::MOI.ConstraintDual,
+    ci::MOI.ConstraintIndex{VAF{T},S},
+) where {T,S<:SECOND_ORDER}
+    MOI.check_result_index_bounds(optimizer, attr)
+    vector = MOI.get(optimizer, DualSolution())[SOCIndex(optimizer.soc_id[ci])]
+    return S <: MOI.RotatedSecondOrderCone ? rotate_soc(vector) :
+           collect(vector)
 end
