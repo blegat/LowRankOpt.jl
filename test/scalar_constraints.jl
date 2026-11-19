@@ -1,7 +1,32 @@
 module TestScalarConstraints
 using Test, LinearAlgebra, SparseArrays
+using JuMP
 import LowRankOpt as LRO
 import NLPModels
+import Percival
+
+@testset "MOI bounds and duals for mixed constraint types" begin
+    model = Model(LRO.Optimizer)
+    set_attribute(model, "solver", LRO.BurerMonteiro.Solver)
+    set_attribute(model, "sub_solver", Percival.PercivalSolver)
+    set_attribute(model, "ranks", Int[])
+    set_silent(model)
+    @variable(model, x[1:8])
+    @constraint(model, positive, [x[1] - 1, x[2] - 2] in Nonnegatives())
+    @constraint(model, upper, 2x[3] <= 6)
+    @constraint(model, interval, 8 <= 2x[4] <= 12)
+    @constraint(model, negative, [x[5] - 5, x[6] - 6] in Nonpositives())
+    @constraint(model, fixed, [x[7] - 7, x[8] - 8] in Zeros())
+    @objective(model, Min, dot([1, 2, -6, 8, -5, -6, 7, -8], x))
+    optimize!(model)
+    @test termination_status(model) == MOI.LOCALLY_SOLVED
+    @test value.(x) ≈ 1:8 atol = 1e-5
+    @test dual(positive) ≈ [1, 2] atol = 1e-5
+    @test dual(upper) ≈ -3 atol = 1e-5
+    @test dual(interval) ≈ 4 atol = 1e-5
+    @test dual(negative) ≈ [-5, -6] atol = 1e-5
+    @test dual(fixed) ≈ [7, -8] atol = 1e-5
+end
 
 @testset "Bounded rows and explicit dualization" begin
     model = LRO.Model(

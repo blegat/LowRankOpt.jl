@@ -103,16 +103,15 @@ Base.view(s::ShapedConeVector, ::Type{ScalarIndex}) = s.scalars
 Base.view(s::ShapedConeVector, i::MatrixIndex) = s.matrices[i.value]
 
 function Base.getindex(s::ShapedConeVector, i::Integer)
-    @boundscheck checkbounds(s, i)
-    if i <= length(s.scalars)
+    offset = length(s.scalars)
+    if 1 <= i <= offset
         return s.scalars[i]
     end
-    i -= length(s.scalars)
     for matrix in s.matrices
-        if i <= length(matrix)
-            return matrix[i]
+        if offset < i <= offset + length(matrix)
+            return matrix[i-offset]
         end
-        i -= length(matrix)
+        offset += length(matrix)
     end
-    return throw(BoundsError(s, i))
+    return throw(BoundsError(s, (i,)))
 end
