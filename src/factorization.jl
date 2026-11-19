@@ -90,6 +90,17 @@ end
 left_factor(m::Factorization) = m.factor
 right_factor(m::Factorization) = m.factor
 
+# Preserve factor sparsity instead of visiting every entry of the matrix.
+function SparseArrays.sparse(A::Factorization{T,<:AbstractVector}) where {T}
+    U = SparseArrays.sparse(A.factor)
+    return SparseArrays.dropzeros!((U * only(A.scaling)) * U')
+end
+
+function SparseArrays.sparse(A::Factorization{T,<:AbstractMatrix}) where {T}
+    U = SparseArrays.sparse(A.factor)
+    return SparseArrays.dropzeros!((U * LinearAlgebra.Diagonal(A.scaling)) * U')
+end
+
 function Base.promote_rule(
     ::Type{Factorization{T,M,S1}},
     ::Type{Factorization{T,V,S2}},

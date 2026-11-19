@@ -97,7 +97,7 @@ function Model(
         _foreach_column(components, i) do coefficients, slot
             for j in axes(coefficients, 1)
                 coefficient = coefficients[j, slot]
-                if iszero(coefficient)
+                if _matrix_iszero(coefficient)
                     continue
                 end
                 I, J, V = SparseArrays.findnz(SparseArrays.sparse(coefficient))
