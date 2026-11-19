@@ -86,7 +86,8 @@ The original model is available as `primal_model(adapter)`.
 """
 function dual_model(model::Model; equalities = true)
     if num_scalars(model) == length(model.d_lin) &&
-       iszero(num_second_order_cones(model))
+       iszero(num_second_order_cones(model)) &&
+       _canonical_scalar_bounds(model)
         return DualModel(
             model,
             model.C,
