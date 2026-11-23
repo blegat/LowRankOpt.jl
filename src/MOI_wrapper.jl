@@ -689,9 +689,9 @@ function _copy_soc_constraints!(dest::Optimizer{T}, src, types) where {T}
                         push!(cols, t.variable.value)
                         push!(
                             values,
-                            t.coefficient*(
-                                i == 2 && j == 2 ? -1 : 1
-                            )/sqrt(T(2)),
+                            t.coefficient*(i == 2 && j == 2 ? -1 : 1)/sqrt(
+                                T(2),
+                            ),
                         )
                     end
                 else
