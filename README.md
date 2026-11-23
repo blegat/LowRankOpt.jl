@@ -254,6 +254,24 @@ Construct it directly from `C, A, b, d_lin, C_lin, msizes`:
 model = LowRankOpt.Model(C, A, b, d_lin, C_lin, msizes)
 ```
 
+An MOI solver can opt in to native scalar affine constraint sets by defining
+`LowRankOpt.supports_scalar_constraint` for its solver constructor. For
+example, a solver that reads equality rows from `model.meta.jfix` can define
+
+```julia
+function LowRankOpt.supports_scalar_constraint(
+    ::Type{MySolver}, ::Type{<:MOI.EqualTo}, options,
+)
+    return true
+end
+```
+
+An equality then reaches the solver as one row with equal lower and upper
+bounds. By default, MOI bridges scalar constraints into the supported cones.
+For Burer–Monteiro, an equality becomes two opposite inequalities and MOI
+maps their duals back to the original equality. Use
+`JuMP.print_active_bridges(model)` to inspect the reformulation.
+
 Algorithms such as Burer–Monteiro explicitly request the cone-variable
 formulation through `LowRankOpt.DualModel(model)` or
 `LowRankOpt.dual_model(model)`. This adapter shares the model's coefficients;

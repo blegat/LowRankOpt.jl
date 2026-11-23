@@ -15,6 +15,12 @@ struct NativeSolver{S} <: SolverCore.AbstractOptimizationSolver
     stats::S
 end
 
+LRO.supports_scalar_constraint(::Type{NativeSolver}, S, options) = true
+
+function MOI.get(solver::NativeSolver, ::LRO.DualSolution)
+    return LRO.ShapedConeVector(-solver.stats.multipliers, Matrix{Float64}[])
+end
+
 function NativeSolver(model::LRO.Model)
     return NativeSolver(SolverCore.GenericExecutionStats(model))
 end
@@ -23,6 +29,55 @@ function SolverCore.solve!(solver::NativeSolver, ::LRO.Model)
     SolverCore.set_solution!(solver.stats, [2.0, 3.0])
     SolverCore.set_status!(solver.stats, :first_order)
     return
+end
+
+@testset "Native scalar affine rows" begin
+    for (set, lower, upper) in (
+        (MOI.EqualTo(4.0), 4.0, 4.0),
+        (MOI.GreaterThan(3.0), 3.0, Inf),
+        (MOI.LessThan(5.0), -Inf, 5.0),
+        (MOI.Interval(3.0, 5.0), 3.0, 5.0),
+    )
+        model = Model(
+            optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver),
+        )
+        @variable(model, x)
+        @variable(model, y)
+        @constraint(model, [y - 3] in Nonnegatives())
+        row = @constraint(model, 2x in set)
+        optimize!(model)
+        opt = unsafe_backend(model)
+        @test MOI.supports_constraint(
+            opt,
+            MOI.ScalarAffineFunction{Float64},
+            typeof(set),
+        )
+        @test opt.model.jacobian == [0 1; 2 0]
+        @test opt.model.meta.lcon == [0, lower]
+        @test opt.model.meta.ucon == [Inf, upper]
+        SolverCore.set_constraint_multipliers!(opt.solver.stats, [-1.0, -2.0])
+        @test dual(row) == 2
+        attr = MOI.RawOptimizerAttribute("solver")
+        @test_throws MOI.SetAttributeNotAllowed MOI.set(
+            opt,
+            attr,
+            LRO.BurerMonteiro.Solver,
+        )
+        @test MOI.get(opt, attr) === NativeSolver
+        MOI.set(opt, attr, NativeSolver)
+        @test MOI.get(opt, attr) === NativeSolver
+    end
+end
+
+@testset "Unbridged copy rejects unsupported scalar rows" begin
+    src = MOI.Utilities.Model{Float64}()
+    x = MOI.add_variable(src)
+    F = MOI.ScalarAffineFunction{Float64}
+    MOI.add_constraint(src, convert(F, x), MOI.LessThan(2.0))
+    @test_throws MOI.UnsupportedConstraint{F,MOI.LessThan{Float64}} MOI.copy_to(
+        LRO.Optimizer(),
+        src,
+    )
 end
 
 @testset "Native solver result attributes" begin
