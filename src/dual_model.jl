@@ -87,16 +87,15 @@ rows require a solver that supports free equality multipliers. The original
 model is available as `primal_model(adapter)`.
 """
 function dual_model(model::Model)
-    if any(i -> model.meta.lcon[i] == model.meta.ucon[i], 1:num_scalars(model))
+    if !isempty(model.d_eq)
         throw(ArgumentError("dual_model does not support scalar equalities."))
     end
-    C_lin, d_lin, _, _ = scalar_bounds(model)
     return DualModel(
         model,
         model.C,
         model.A,
-        SparseArrays.sparsevec(d_lin),
-        C_lin,
+        model.d_lin,
+        model.C_lin,
         model.msizes,
     )
 end

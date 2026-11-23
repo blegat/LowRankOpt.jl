@@ -242,7 +242,7 @@ julia> MOI.Utilities.distance_to_set(dual(con_ref), dual_set)
 ### Primal and dual model interfaces
 
 `LowRankOpt.Model` exposes ordinary scalar decision variables through
-NLPModels. Its constraint vector contains bounded scalar constraints first,
+NLPModels. Its constraint vector contains nonnegative and equality rows first,
 then PSD blocks identified by `model.dim`. The PSD entries have free
 componentwise metadata bounds; positive semidefiniteness is a block
 restriction handled by conic solvers.
@@ -263,8 +263,8 @@ LowRankOpt.support_cone(::Type{MySolver}, ::Type{MOI.Zeros}) = true
 
 MOI vectorizes scalar inputs. The solver receives two sparse coefficient
 matrices with one column per constraint row. They define
-`d_lin - C_lin' * x ≥ 0` and `d_eq - C_eq' * x = 0`. The NLPModels constraint vector starts with
-the inequality rows, then the equality rows. JuMP returns each dual in
+`d_lin - C_lin' * x ≥ 0` and `d_eq - C_eq' * x = 0`. NLPModels lists the
+inequality rows first, then the equality rows. JuMP returns each dual in
 the shape of the original constraint. Each native equality row has one
 free multiplier. A solver must opt into `MOI.Zeros` to receive these rows.
 Use `JuMP.print_active_bridges(model)` to inspect reformulations applied by MOI.

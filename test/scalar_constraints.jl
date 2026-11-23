@@ -2,7 +2,6 @@ module TestScalarConstraints
 using Test, LinearAlgebra, SparseArrays
 using JuMP
 import LowRankOpt as LRO
-import NLPModels
 import Percival
 
 @testset "MOI bounds and duals for mixed constraint types" begin
@@ -66,64 +65,5 @@ end
         d_eq = c,
         C_eq = spzeros(2, 1),
     )
-end
-
-@testset "Bounded rows and explicit dualization" begin
-    model = LRO.Model(
-        Matrix{Float64}[],
-        (),
-        [-1.0, 2.0],
-        sparsevec(Float64[]),
-        spzeros(2, 0),
-        Int[];
-        objective_constant = 7,
-    )
-    J = sparse([1.0 2; 3 4; 7 8])
-    c = [1.0, 2, 4]
-    LRO.append_scalar_constraints!(model, J, c, [0.0, -Inf, -1], [Inf, 5, 2])
-    @test model.meta.jrng == [3]
-    @test NLPModels.cons(model, [2.0, 3]) ≈ J*[2.0, 3] + c
-    dual = LRO.dual_model(model)
-    @test LRO.primal_model(dual) === model
-    @test LRO.primal_model(dual).objective_constant == 7
-    @test Matrix(dual.C_lin) ≈ hcat(-J[1, :], J[2, :], -J[3, :], J[3, :])
-    @test dual.d_lin ≈ [1, 3, 5, -2]
-    cone = LRO.VectorizedConeVector(collect(1.0:4), dual.dim)
-    @test LRO.cone_multipliers(model, cone)[LRO.ScalarIndex] ≈ [1, -2, -1]
-
-    LRO.append_scalar_constraints!(model, sparse([5.0 6]), [3.0], [3.0], [3.0])
-    @test model.meta.jfix == [4]
-    C, d, rows, signs = LRO.scalar_bounds(model, 1:3)
-    @test C == dual.C_lin
-    @test d == dual.d_lin
-    @test rows == [1, 2, 3, 3]
-    @test signs == [-1, 1, -1, 1]
-    @test_throws ArgumentError LRO.scalar_bounds(model)
-    @test_throws ArgumentError("dual_model does not support scalar equalities.") LRO.dual_model(
-        model,
-    )
-    @test_throws ArgumentError LRO.cone_multipliers(model, cone)
-    @test_throws ArgumentError LRO.BurerMonteiro.Solver(
-        model;
-        sub_solver = Percival.PercivalSolver,
-        ranks = Int[],
-    )
-end
-
-@testset "An original inequality changed to an equality" begin
-    model = LRO.Model(
-        Matrix{Float64}[],
-        (),
-        [1.0],
-        spzeros(1),
-        sparse(ones(1, 1)),
-        Int[],
-    )
-    cone = LRO.VectorizedConeVector([1.0], model.dim)
-    model.meta = NLPModels.NLPModelMeta(model.meta; lcon = [2.0], ucon = [2.0])
-    @test_throws ArgumentError("dual_model does not support scalar equalities.") LRO.dual_model(
-        model,
-    )
-    @test_throws ArgumentError LRO.cone_multipliers(model, cone)
 end
 end
