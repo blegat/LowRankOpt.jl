@@ -51,9 +51,13 @@ function _test_simple_lp(opt)
     @test length(outer) == length(sol)
     @test sprint(show, outer) == "_OuterProduct($sol, $sol)"
     @test sol == raw_sol
-    if b isa DualOptimizer
-        @test abs(sol[1]) < 1e-6
-    end
+    original = _backend(model).model
+    primal = MOI.get(_backend(model), LRO.PrimalSolution())
+    @test norm(
+        NLPModels.grad(original, primal) +
+        NLPModels.jtprod(original, primal, -collect(sol)),
+        Inf,
+    ) < 1e-6
     diff_check(model)
     return
 end

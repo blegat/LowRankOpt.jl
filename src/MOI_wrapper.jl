@@ -3,10 +3,11 @@ import NLPModelsJuMP
 
 const VAF{T} = MOI.VectorAffineFunction{T}
 const NNG = MOI.Nonnegatives
+const ZRO = MOI.Zeros
 const PSD = MOI.PositiveSemidefiniteConeTriangle
 const LOW{W} = LinearCombinationInSet{W,PSD}
 
-MOI.Utilities.@product_of_sets(NNGCones, NNG)
+MOI.Utilities.@product_of_sets(LinearCones, NNG, ZRO)
 
 const OptimizerCache{T} = MOI.Utilities.GenericModel{
     T,
@@ -20,7 +21,7 @@ const OptimizerCache{T} = MOI.Utilities.GenericModel{
             MOI.Utilities.OneBasedIndexing,
         },
         Vector{T},
-        NNGCones{T},
+        LinearCones{T},
     },
 }
 
@@ -28,7 +29,8 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
-    lin_cones::Union{Nothing,NNGCones{T}}
+    lin_cones::Union{Nothing,LinearCones{T}}
+    constraint_sets::Vector{Type}
     max_sense::Bool
     objective_constant::T
     silent::Bool
@@ -40,6 +42,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
             nothing,
             Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
             nothing,
+            Type[],
             false,
             0.0,
             false,
@@ -60,6 +63,7 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.solver = nothing
     optimizer.model = nothing
     optimizer.lin_cones = nothing
+    empty!(optimizer.constraint_sets)
     empty!(optimizer.lmi_id)
     optimizer.objective_constant = NaN
     return
@@ -88,6 +92,20 @@ function MOI.supports(::Optimizer, param::MOI.RawOptimizerAttribute)
 end
 
 function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
+    if !isempty(optimizer.constraint_sets)
+        options = merge(optimizer.options, Dict(param.name => value))
+        solver = cone_solver(get(options, "solver", nothing), options)
+        for S in optimizer.constraint_sets
+            if !support_cone(solver, S)
+                throw(
+                    MOI.SetAttributeNotAllowed(
+                        param,
+                        "The copied model contains $S constraints. Select the solver configuration before copying so MOI can bridge them.",
+                    ),
+                )
+            end
+        end
+    end
     optimizer.options[param.name] = value
     return
 end
@@ -119,14 +137,36 @@ function MOI.supports(
     return true
 end
 
-const SUPPORTED_CONES = Union{NNG,PSD,LOW}
+const SUPPORTED_CONES = Union{NNG,ZRO,PSD,LOW}
+
+"""
+    support_cone(solver, S)
+
+Return whether the solver accepts vector affine constraints in the MOI set
+type `S`. Solvers accept nonnegative and PSD blocks by default. Opt into
+equality blocks by defining `support_cone(::Type{MySolver}, ::Type{MOI.Zeros})`.
+"""
+support_cone(solver, S) = S <: Union{NNG,PSD,LOW}
+
+"""
+    cone_solver(solver, options)
+
+Return the solver or component whose type determines cone support. The
+default returns the solver constructor. A configurable solver can select
+its component using its raw optimizer attributes before MOI chooses bridges.
+"""
+cone_solver(solver, options) = solver
 
 function MOI.supports_constraint(
-    ::Optimizer{T},
+    optimizer::Optimizer{T},
     ::Type{VAF{T}},
-    ::Type{<:SUPPORTED_CONES},
+    S::Type{<:SUPPORTED_CONES},
 ) where {T}
-    return true
+    options = optimizer.options
+    return support_cone(
+        cone_solver(get(options, "solver", nothing), options),
+        S,
+    )
 end
 
 const SOLVER_OPTIONS = ["solver", "sub_solver", "ranks", "square_scalars"]
@@ -246,7 +286,7 @@ function _add_constraints(
     _,
     _,
     ::Type{VAF{T}},
-    ::Type{NNG},
+    ::Type{<:Union{NNG,ZRO}},
 ) where {T}
     return
 end
@@ -346,7 +386,7 @@ function _add_constraints(
 end
 
 function _nlmi(src, ::Type{F}, ::Type{S}) where {F,S}
-    if S == NNG
+    if !(S <: Union{PSD,LOW})
         return 0
     else
         return MOI.get(src, MOI.NumberOfConstraints{F,S}())
@@ -362,15 +402,24 @@ function MOI.copy_to(
     SM = SparseArrays.SparseMatrixCSC{T,Int64}
     C_lin = convert(SM, Cd_lin.coefficients)
     C_lin = -convert(SM, C_lin')
+    n_ineq = MOI.Utilities.num_rows(Cd_lin.sets, NNG)
+    eq = (n_ineq+1):size(C_lin, 2)
+    C_eq = C_lin[:, eq]
+    if !isempty(eq)
+        C_lin = C_lin[:, 1:n_ineq]
+    end
     n = MOI.get(src, MOI.NumberOfVariables())
     constraint_types = MOI.get(src, MOI.ListOfConstraintTypesPresent())
-    nlmi = sum(constraint_types) do (F, S)
+    nlmi = sum(constraint_types; init = 0) do (F, S)
         return _nlmi(src, F, S)
     end
     A = Matrix{_MatrixBuilder{T}}(undef, nlmi, n + 1)
     empty!(dest.lmi_id)
     msizes = Int64[]
     for (F, S) in constraint_types
+        if !MOI.supports_constraint(dest, F, S)
+            throw(MOI.UnsupportedConstraint{F,S}())
+        end
         _add_constraints(dest, src, A, msizes, F, S)
     end
     dest.max_sense = MOI.get(src, MOI.ObjectiveSense()) == MOI.MAX_SENSE
@@ -386,18 +435,17 @@ function MOI.copy_to(
         _instantiate(A[:, 1]),
         _instantiate(A[:, 2:end]),
         b,
-        convert(
-            SparseArrays.SparseVector{T,Int64},
-            SparseArrays.sparsevec(Cd_lin.constants),
-        ),
+        SparseArrays.sparsevec(view(Cd_lin.constants, 1:n_ineq)),
         C_lin,
         msizes;
+        d_eq = SparseArrays.sparsevec(view(Cd_lin.constants, eq)),
+        C_eq,
         objective_constant = dest.max_sense ? -dest.objective_constant :
                              dest.objective_constant,
     )
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
-    options = copy(dest.options)
-    dest.lin_cones = Cd_lin.sets
+    dest.lin_cones = deepcopy(Cd_lin.sets)
+    append!(dest.constraint_sets, S for (_, S) in constraint_types)
     options = Dict{Symbol,Any}(
         Symbol(key) => dest.options[key] for key in keys(dest.options) if
         key in SOLVER_OPTIONS && key != "solver"
@@ -590,8 +638,8 @@ end
 function MOI.get(
     optimizer::Optimizer{T},
     attr::MOI.ConstraintDual,
-    ci::MOI.ConstraintIndex{VAF{T},NNG},
-) where {T}
+    ci::MOI.ConstraintIndex{VAF{T},S},
+) where {T,S<:Union{NNG,ZRO}}
     MOI.check_result_index_bounds(optimizer, attr)
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
     sol = MOI.get(optimizer, DualSolution())
