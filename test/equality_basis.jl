@@ -1,27 +1,23 @@
 module TestEqualityBasis
 using Test, LinearAlgebra
 import LowRankOpt as LRO
-import MathOptInterface as MOI
+import SparseArrays
+
 function model(A, b)
-    T=eltype(A)
-    source=MOI.Utilities.Model{T}()
-    x=MOI.add_variables(source, size(A, 2))
-    for i in axes(A, 1)
-        terms=[
-            MOI.ScalarAffineTerm(A[i, j], x[j]) for
-            j in axes(A, 2) if !iszero(A[i, j])
-        ]
-        MOI.add_constraint(
-            source,
-            MOI.ScalarAffineFunction(terms, zero(T)),
-            MOI.EqualTo(T(b[i])),
-        )
-    end
-    optimizer=LRO.Optimizer{T}()
-    MOI.set(optimizer, MOI.RawOptimizerAttribute("solver"), _->nothing)
-    MOI.copy_to(optimizer, source)
-    return optimizer.model
+    T = eltype(A)
+    n = size(A, 2)
+    return LRO.Model(
+        Matrix{T}[],
+        (),
+        zeros(T, n),
+        SparseArrays.spzeros(T, 0),
+        SparseArrays.spzeros(T, n, 0),
+        Int[];
+        d_eq = SparseArrays.sparsevec(-b),
+        C_eq = SparseArrays.sparse(-transpose(A)),
+    )
 end
+
 @testset "Verified equality dependencies" begin
     m=model([1.0 1; 2 2], [1.0, 2])
     rows=LRO.equality_basis(m)
