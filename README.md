@@ -290,9 +290,11 @@ multipliers in a `VectorizedConeVector` or `ShapedConeVector`, rather than
 being used as an indirect query for decision variables.
 
 
-SOC outputs use standard Lorentz coordinates. Rotated SOCs are converted
-orthogonally, and their MOI multipliers are converted back. Cone vectors
-support `SOCIndex` alongside `ScalarIndex` and `MatrixIndex`.
+Solvers opt into standard Lorentz cone blocks with
+`LowRankOpt.support_cone(::Type{MySolver}, ::Type{MOI.SecondOrderCone}) = true`.
+MOI bridges rotated cones and maps their multipliers back to the original
+coordinates. Cone vectors support `SOCIndex` alongside `ScalarIndex` and
+`MatrixIndex`.
 
 Explicit dual conversion lifts each SOC to a PSD arrow and recovers native
 cone multipliers through its adjoint. Burer–Monteiro automatically uses
