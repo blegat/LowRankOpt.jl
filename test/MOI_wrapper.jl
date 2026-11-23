@@ -15,7 +15,7 @@ struct NativeSolver{S} <: SolverCore.AbstractOptimizationSolver
     stats::S
 end
 
-LRO.supports_equalities(::Type{NativeSolver}, options) = true
+LRO.support_cone(::Type{NativeSolver}, ::Type{MOI.Zeros}) = true
 
 function MOI.get(solver::NativeSolver, ::LRO.DualSolution)
     return LRO.ShapedConeVector(-solver.stats.multipliers, Matrix{Float64}[])
@@ -32,6 +32,9 @@ function SolverCore.solve!(solver::NativeSolver, ::LRO.Model)
 end
 
 @testset "Scalar and vector inputs give the solver the same two blocks" begin
+    @test LRO.support_cone(NativeSolver, MOI.Zeros)
+    @test !LRO.support_cone(LRO.BurerMonteiro.Solver, MOI.Zeros)
+    @test LRO.support_cone(LRO.BurerMonteiro.Solver, MOI.Nonnegatives)
     for grouped in (true, false)
         factory =
             optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver)

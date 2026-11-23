@@ -30,6 +30,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     model::Union{Nothing,Model{T}}
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
     lin_cones::Union{Nothing,LinearCones{T}}
+    constraint_sets::Vector{Type}
     max_sense::Bool
     objective_constant::T
     silent::Bool
@@ -41,6 +42,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
             nothing,
             Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
             nothing,
+            Type[],
             false,
             0.0,
             false,
@@ -61,6 +63,7 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.solver = nothing
     optimizer.model = nothing
     optimizer.lin_cones = nothing
+    empty!(optimizer.constraint_sets)
     empty!(optimizer.lmi_id)
     optimizer.objective_constant = NaN
     return
@@ -89,16 +92,18 @@ function MOI.supports(::Optimizer, param::MOI.RawOptimizerAttribute)
 end
 
 function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
-    cones = optimizer.lin_cones
-    if !isnothing(cones) && MOI.Utilities.num_rows(cones, ZRO) > 0
+    if !isempty(optimizer.constraint_sets)
         options = merge(optimizer.options, Dict(param.name => value))
-        if !supports_equalities(get(options, "solver", nothing), options)
-            throw(
-                MOI.SetAttributeNotAllowed(
-                    param,
-                    "The model contains native equality rows. Select this configuration before copying the model so MOI can bridge them.",
-                ),
-            )
+        solver = cone_solver(get(options, "solver", nothing), options)
+        for S in optimizer.constraint_sets
+            if !support_cone(solver, S)
+                throw(
+                    MOI.SetAttributeNotAllowed(
+                        param,
+                        "The copied model contains $S constraints. Select the solver configuration before copying so MOI can bridge them.",
+                    ),
+                )
+            end
         end
     end
     optimizer.options[param.name] = value
@@ -132,34 +137,36 @@ function MOI.supports(
     return true
 end
 
-const SUPPORTED_CONES = Union{NNG,PSD,LOW}
+const SUPPORTED_CONES = Union{NNG,ZRO,PSD,LOW}
 
 """
-    supports_equalities(solver, options)
+    support_cone(solver, S)
 
-Return whether the solver constructor accepts vector affine functions in
-`MOI.Zeros`. The default is false. `options` contains the raw optimizer
-attributes for solvers whose equality support depends on their configuration.
+Return whether the solver accepts vector affine constraints in the MOI set
+type `S`. Solvers accept nonnegative and PSD blocks by default. Opt into
+equality blocks by defining `support_cone(::Type{MySolver}, ::Type{MOI.Zeros})`.
 """
-supports_equalities(solver, options) = false
+support_cone(solver, S) = S <: Union{NNG,PSD,LOW}
+
+"""
+    cone_solver(solver, options)
+
+Return the solver or component whose type determines cone support. The
+default returns the solver constructor. A configurable solver can select
+its component using its raw optimizer attributes before MOI chooses bridges.
+"""
+cone_solver(solver, options) = solver
 
 function MOI.supports_constraint(
     optimizer::Optimizer{T},
     ::Type{VAF{T}},
-    ::Type{ZRO},
+    S::Type{<:SUPPORTED_CONES},
 ) where {T}
-    return supports_equalities(
-        get(optimizer.options, "solver", nothing),
-        optimizer.options,
+    options = optimizer.options
+    return support_cone(
+        cone_solver(get(options, "solver", nothing), options),
+        S,
     )
-end
-
-function MOI.supports_constraint(
-    ::Optimizer{T},
-    ::Type{VAF{T}},
-    ::Type{<:SUPPORTED_CONES},
-) where {T}
-    return true
 end
 
 const SOLVER_OPTIONS = ["solver", "sub_solver", "ranks", "square_scalars"]
@@ -438,6 +445,7 @@ function MOI.copy_to(
     )
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
     dest.lin_cones = deepcopy(Cd_lin.sets)
+    append!(dest.constraint_sets, S for (_, S) in constraint_types)
     options = Dict{Symbol,Any}(
         Symbol(key) => dest.options[key] for key in keys(dest.options) if
         key in SOLVER_OPTIONS && key != "solver"

@@ -258,7 +258,7 @@ For linear constraints, the MOI wrapper accepts vector affine functions in
 `MOI.Nonnegatives`. A solver can also accept `MOI.Zeros` by defining
 
 ```julia
-LowRankOpt.supports_equalities(::Type{MySolver}, options) = true
+LowRankOpt.support_cone(::Type{MySolver}, ::Type{MOI.Zeros}) = true
 ```
 
 MOI vectorizes scalar inputs. The solver receives two sparse coefficient
