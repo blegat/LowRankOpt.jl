@@ -77,9 +77,9 @@ function equality_basis(model::Model{T}; tolerance = zero(T)) where {T}
     permutation=isempty(factor.pcol) ? collect(1:length(core)) : factor.pcol
     independent=permutation[1:r]
     dependent=permutation[(r+1):end]
-    coefficients=LinearAlgebra.UpperTriangular(
-        factor.R[1:r, 1:r],
-    )\Matrix(factor.R[1:r, (r+1):end])
+    coefficients=LinearAlgebra.UpperTriangular(factor.R[1:r, 1:r])\Matrix(
+        factor.R[1:r, (r+1):end],
+    )
     transpose_A=SparseArrays.sparse(transpose(A))
     for (j, dependency) in enumerate(dependent)
         candidate=view(coefficients, :, j)
