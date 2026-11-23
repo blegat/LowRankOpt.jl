@@ -265,9 +265,9 @@ MOI vectorizes scalar inputs. The solver receives two sparse coefficient
 matrices with one column per constraint row. They define
 `d_lin - C_lin' * x ≥ 0` and `d_eq - C_eq' * x = 0`. The NLPModels constraint vector starts with
 the inequality rows, then the equality rows. JuMP returns each dual in
-the shape of the original constraint. For solvers such as Burer–Monteiro,
-MOI splits equalities into opposite inequalities. Use
-`JuMP.print_active_bridges(model)` to see the transformations.
+the shape of the original constraint. Each native equality row has one
+free multiplier. A solver must opt into `MOI.Zeros` to receive these rows.
+Use `JuMP.print_active_bridges(model)` to inspect reformulations applied by MOI.
 
 Algorithms such as Burer–Monteiro explicitly request the cone-variable
 formulation through `LowRankOpt.DualModel(model)` or

@@ -72,9 +72,7 @@ end
         @test opt.model.meta.jfix == [4, 5, 6]
         @test opt.model.jacobian == -hcat(opt.model.C_lin, opt.model.C_eq)'
         @test LRO.NLPModels.cons(opt.model, [2.0, 3.0]) == [1, 1, 2, 0, 0, 0]
-        @test LRO.dual_model(opt.model; equalities = false).C_lin ==
-              opt.model.C_lin
-        @test size(LRO.dual_model(opt.model).C_lin) == (2, 9)
+        @test_throws ArgumentError LRO.dual_model(opt.model)
         SolverCore.set_constraint_multipliers!(
             opt.solver.stats,
             [-1.0, -2, -3, 4, -5, 6],

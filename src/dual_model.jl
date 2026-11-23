@@ -82,10 +82,13 @@ end
     dual_model(model::Model)
 
 Create a cone-variable adapter sharing the original model's coefficients.
-The original model is available as `primal_model(adapter)`.
+Its scalar cone variables are nonnegative. Models with scalar equality
+rows require a solver that supports free equality multipliers. The original
+model is available as `primal_model(adapter)`.
 """
-function dual_model(model::Model; equalities = true)
-    if num_scalars(model) == length(model.d_lin)
+function dual_model(model::Model)
+    if num_scalars(model) == length(model.d_lin) &&
+       _canonical_scalar_bounds(model)
         return DualModel(
             model,
             model.C,
@@ -95,7 +98,7 @@ function dual_model(model::Model; equalities = true)
             model.msizes,
         )
     end
-    C, d, _, _ = scalar_bounds(model; equalities)
+    C, d, _, _ = scalar_bounds(model)
     return DualModel(
         model,
         model.C,

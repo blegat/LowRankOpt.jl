@@ -171,14 +171,20 @@ function Model(C, A::Matrix{<:AbstractMatrix}, b, d_lin, C_lin, msizes; kws...)
     return Model(C, _matrix_components(A), b, d_lin, C_lin, msizes; kws...)
 end
 
-# Each finite bound contributes one nonnegative slack. Equality rows can be
-# retained separately by solvers with an augmented KKT system.
-function scalar_bounds(model::Model{T}; equalities = true) where {T}
+# Each finite inequality bound contributes one nonnegative slack.
+function scalar_bounds(
+    model::Model{T},
+    indices = 1:num_scalars(model),
+) where {T}
     rows, signs, constants = Int[], T[], T[]
-    for i in 1:num_scalars(model)
+    for i in indices
         l, u = model.meta.lcon[i], model.meta.ucon[i]
-        if !equalities && l == u
-            continue
+        if l == u
+            throw(
+                ArgumentError(
+                    "Scalar row $i is an equality and requires a free multiplier.",
+                ),
+            )
         end
         if isfinite(l)
             push!(rows, i)
@@ -198,8 +204,15 @@ function scalar_bounds(model::Model{T}; equalities = true) where {T}
     return C, constants, rows, signs
 end
 
+function _canonical_scalar_bounds(model::Model)
+    return all(1:num_scalars(model)) do i
+        return iszero(model.meta.lcon[i]) && model.meta.ucon[i] == Inf
+    end
+end
+
 function cone_multipliers(model::Model, cone)
-    if num_scalars(model) == length(model.d_lin)
+    if num_scalars(model) == length(model.d_lin) &&
+       _canonical_scalar_bounds(model)
         return cone
     end
     _, _, rows, signs = scalar_bounds(model)
