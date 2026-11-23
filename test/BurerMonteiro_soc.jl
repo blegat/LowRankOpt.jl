@@ -17,6 +17,15 @@ import MathOptInterface as MOI
     JuMP.@objective(m, Min, t+2)
     JuMP.optimize!(m)
     o = JuMP.unsafe_backend(m)
+    F = MOI.VectorAffineFunction{Float64}
+    @test !MOI.supports_constraint(LRO.Optimizer(), F, MOI.SecondOrderCone)
+    @test MOI.supports_constraint(o, F, MOI.SecondOrderCone)
+    @test !MOI.supports_constraint(o, F, MOI.RotatedSecondOrderCone)
+    @test_throws MOI.SetAttributeNotAllowed MOI.set(
+        o,
+        MOI.RawOptimizerAttribute("solver"),
+        nothing,
+    )
     @test JuMP.termination_status(m) == MOI.LOCALLY_SOLVED
     @test JuMP.value(t) ≈ 5 atol=1e-4
     @test JuMP.objective_value(m) ≈ 7 atol=1e-4

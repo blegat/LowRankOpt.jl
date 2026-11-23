@@ -140,8 +140,8 @@ function MOI.supports(
     return true
 end
 
-const SECOND_ORDER = Union{MOI.SecondOrderCone,MOI.RotatedSecondOrderCone}
-const SUPPORTED_CONES = Union{NNG,ZRO,PSD,LOW,SECOND_ORDER}
+const SOC = MOI.SecondOrderCone
+const SUPPORTED_CONES = Union{NNG,ZRO,PSD,LOW,SOC}
 
 """
     support_cone(solver, S)
@@ -150,7 +150,7 @@ Return whether the solver accepts vector affine constraints in the MOI set
 type `S`. Solvers accept nonnegative and PSD blocks by default. Opt into
 equality blocks by defining `support_cone(::Type{MySolver}, ::Type{MOI.Zeros})`.
 """
-support_cone(solver, S) = S <: Union{NNG,PSD,LOW,SECOND_ORDER}
+support_cone(solver, S) = S <: Union{NNG,PSD,LOW}
 
 """
     cone_solver(solver, options)
@@ -290,7 +290,7 @@ function _add_constraints(
     _,
     _,
     ::Type{VAF{T}},
-    ::Type{<:Union{NNG,ZRO}},
+    ::Type{<:Union{NNG,ZRO,SOC}},
 ) where {T}
     return
 end
@@ -344,9 +344,6 @@ function _add_constraints(
     ::Type{VAF{T}},
     ::Type{S},
 ) where {T,S}
-    if S <: SECOND_ORDER
-        return
-    end
     for ci in MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},S}())
         # No need to map with `index_map` since we have the same indices thanks to
         # the `MatrixOfConstraints`
@@ -450,7 +447,7 @@ function MOI.copy_to(
         objective_constant = dest.max_sense ? -dest.objective_constant :
                              dest.objective_constant,
     )
-    _copy_soc_constraints!(dest, src, constraint_types)
+    _copy_soc_constraints!(dest, src)
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
     dest.lin_cones = deepcopy(Cd_lin.sets)
     append!(dest.constraint_sets, S for (_, S) in constraint_types)
@@ -666,40 +663,19 @@ function MOI.get(
     return sol[ScalarIndex][rows]
 end
 
-function _copy_soc_constraints!(dest::Optimizer{T}, src, types) where {T}
+function _copy_soc_constraints!(dest::Optimizer{T}, src) where {T}
     rows, cols, values = Int[], Int[], T[]
     constants, dimensions = T[], Int[]
-    for (F, S) in types
-        if !(S <: SECOND_ORDER)
-            continue
-        end
-        for ci in MOI.get(src, MOI.ListOfConstraintIndices{F,S}())
-            func = MOI.get(src, MOI.CanonicalConstraintFunction(), ci)
-            offset = length(constants)
-            push!(dimensions, length(func.constants))
-            dest.soc_id[ci] = length(dimensions)
-            rotated = S <: MOI.RotatedSecondOrderCone
-            c = rotated ? rotate_soc(func.constants) : func.constants
-            append!(constants, c)
-            for term in func.terms
-                i, t = term.output_index, term.scalar_term
-                if rotated && i <= 2
-                    for j in 1:2
-                        push!(rows, offset+j)
-                        push!(cols, t.variable.value)
-                        push!(
-                            values,
-                            t.coefficient*(i == 2 && j == 2 ? -1 : 1)/sqrt(
-                                T(2),
-                            ),
-                        )
-                    end
-                else
-                    push!(rows, offset+i)
-                    push!(cols, t.variable.value)
-                    push!(values, t.coefficient)
-                end
-            end
+    for ci in MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},SOC}())
+        func = MOI.get(src, MOI.CanonicalConstraintFunction(), ci)
+        offset = length(constants)
+        push!(dimensions, length(func.constants))
+        dest.soc_id[ci] = length(dimensions)
+        append!(constants, func.constants)
+        for term in func.terms
+            push!(rows, offset + term.output_index)
+            push!(cols, term.scalar_term.variable.value)
+            push!(values, term.scalar_term.coefficient)
         end
     end
     if !isempty(dimensions)
@@ -718,10 +694,9 @@ end
 function MOI.get(
     optimizer::Optimizer{T},
     attr::MOI.ConstraintDual,
-    ci::MOI.ConstraintIndex{VAF{T},S},
-) where {T,S<:SECOND_ORDER}
+    ci::MOI.ConstraintIndex{VAF{T},SOC},
+) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
     vector = MOI.get(optimizer, DualSolution())[SOCIndex(optimizer.soc_id[ci])]
-    return S <: MOI.RotatedSecondOrderCone ? rotate_soc(vector) :
-           collect(vector)
+    return collect(vector)
 end

@@ -4,6 +4,8 @@ struct Solver{S,T,D,JTB,ST} <: SolverCore.AbstractOptimizationSolver
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
 end
 
+LRO.support_cone(::Type{Solver}, ::Type{MOI.SecondOrderCone}) = true
+
 function Solver(
     src::Union{LRO.Model,LRO.DualModel};
     sub_solver,
