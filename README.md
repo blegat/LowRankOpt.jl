@@ -254,23 +254,20 @@ Construct it directly from `C, A, b, d_lin, C_lin, msizes`:
 model = LowRankOpt.Model(C, A, b, d_lin, C_lin, msizes)
 ```
 
-An MOI solver can opt in to native scalar affine constraint sets by defining
-`LowRankOpt.supports_scalar_constraint` for its solver constructor. For
-example, a solver that reads equality rows from `model.meta.jfix` can define
+For linear constraints, the MOI wrapper accepts vector affine functions in
+`MOI.Nonnegatives`. A solver can also accept `MOI.Zeros` by defining
 
 ```julia
-function LowRankOpt.supports_scalar_constraint(
-    ::Type{MySolver}, ::Type{<:MOI.EqualTo}, options,
-)
-    return true
-end
+LowRankOpt.supports_equalities(::Type{MySolver}, options) = true
 ```
 
-An equality then reaches the solver as one row with equal lower and upper
-bounds. By default, MOI bridges scalar constraints into the supported cones.
-For Burer–Monteiro, an equality becomes two opposite inequalities and MOI
-maps their duals back to the original equality. Use
-`JuMP.print_active_bridges(model)` to inspect the reformulation.
+MOI vectorizes scalar inputs. The solver receives two sparse coefficient
+matrices with one column per constraint row. They define
+`d_lin - C_lin' * x ≥ 0` and `d_eq - C_eq' * x = 0`. The NLPModels constraint vector starts with
+the inequality rows, then the equality rows. JuMP returns each dual in
+the shape of the original constraint. For solvers such as Burer–Monteiro,
+MOI splits equalities into opposite inequalities. Use
+`JuMP.print_active_bridges(model)` to see the transformations.
 
 Algorithms such as Burer–Monteiro explicitly request the cone-variable
 formulation through `LowRankOpt.DualModel(model)` or

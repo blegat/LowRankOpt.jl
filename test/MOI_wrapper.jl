@@ -15,7 +15,7 @@ struct NativeSolver{S} <: SolverCore.AbstractOptimizationSolver
     stats::S
 end
 
-LRO.supports_scalar_constraint(::Type{NativeSolver}, S, options) = true
+LRO.supports_equalities(::Type{NativeSolver}, options) = true
 
 function MOI.get(solver::NativeSolver, ::LRO.DualSolution)
     return LRO.ShapedConeVector(-solver.stats.multipliers, Matrix{Float64}[])
@@ -31,32 +31,53 @@ function SolverCore.solve!(solver::NativeSolver, ::LRO.Model)
     return
 end
 
-@testset "Native scalar affine rows" begin
-    for (set, lower, upper) in (
-        (MOI.EqualTo(4.0), 4.0, 4.0),
-        (MOI.GreaterThan(3.0), 3.0, Inf),
-        (MOI.LessThan(5.0), -Inf, 5.0),
-        (MOI.Interval(3.0, 5.0), 3.0, 5.0),
-    )
-        model = Model(
-            optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver),
-        )
+@testset "Scalar and vector inputs give the solver the same two blocks" begin
+    for grouped in (true, false)
+        factory =
+            optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver)
+        model =
+            direct_model(MOI.instantiate(factory; with_bridge_type = Float64))
         @variable(model, x)
         @variable(model, y)
-        @constraint(model, [y - 3] in Nonnegatives())
-        row = @constraint(model, 2x in set)
+        if grouped
+            eq = (@constraint(model, [2x - 4, 3y - 9, x + y - 5] in Zeros()),)
+            ge = (
+                @constraint(model, [x - 1, y - 2, x + y - 3] in Nonnegatives()),
+            )
+        else
+            e = @constraint(model, 2x == 4)
+            g = @constraint(model, 1x >= 1)
+            eq = (e, @constraint(model, [3y - 9, x + y - 5] in Zeros()))
+            ge = (g, @constraint(model, [y - 2, x + y - 3] in Nonnegatives()))
+        end
         optimize!(model)
         opt = unsafe_backend(model)
         @test MOI.supports_constraint(
             opt,
-            MOI.ScalarAffineFunction{Float64},
-            typeof(set),
+            MOI.VectorAffineFunction{Float64},
+            MOI.Zeros,
         )
-        @test opt.model.jacobian == [0 1; 2 0]
-        @test opt.model.meta.lcon == [0, lower]
-        @test opt.model.meta.ucon == [Inf, upper]
-        SolverCore.set_constraint_multipliers!(opt.solver.stats, [-1.0, -2.0])
-        @test dual(row) == 2
+        @test !MOI.supports_constraint(
+            opt,
+            MOI.ScalarAffineFunction{Float64},
+            MOI.EqualTo{Float64},
+        )
+        @test opt.model.C_lin == [-1 0 -1; 0 -1 -1]
+        @test opt.model.d_lin == [-1, -2, -3]
+        @test opt.model.C_eq == [-2 0 -1; 0 -3 -1]
+        @test opt.model.d_eq == [-4, -9, -5]
+        @test opt.model.meta.jfix == [4, 5, 6]
+        @test opt.model.jacobian == -hcat(opt.model.C_lin, opt.model.C_eq)'
+        @test LRO.NLPModels.cons(opt.model, [2.0, 3.0]) == [1, 1, 2, 0, 0, 0]
+        @test LRO.dual_model(opt.model; equalities = false).C_lin ==
+              opt.model.C_lin
+        @test size(LRO.dual_model(opt.model).C_lin) == (2, 9)
+        SolverCore.set_constraint_multipliers!(
+            opt.solver.stats,
+            [-1.0, -2, -3, 4, -5, 6],
+        )
+        @test vcat(dual.(ge)...) == [1, 2, 3]
+        @test vcat(dual.(eq)...) == [-4, 5, -6]
         attr = MOI.RawOptimizerAttribute("solver")
         @test_throws MOI.SetAttributeNotAllowed MOI.set(
             opt,
@@ -69,15 +90,35 @@ end
     end
 end
 
-@testset "Unbridged copy rejects unsupported scalar rows" begin
+@testset "Unbridged copy requires equality support" begin
     src = MOI.Utilities.Model{Float64}()
     x = MOI.add_variable(src)
-    F = MOI.ScalarAffineFunction{Float64}
-    MOI.add_constraint(src, convert(F, x), MOI.LessThan(2.0))
-    @test_throws MOI.UnsupportedConstraint{F,MOI.LessThan{Float64}} MOI.copy_to(
+    F = MOI.VectorAffineFunction{Float64}
+    MOI.add_constraint(src, MOI.Utilities.vectorize([2.0 * x]), MOI.Zeros(1))
+    @test !MOI.supports_constraint(LRO.Optimizer(), F, MOI.Zeros)
+    @test_throws MOI.UnsupportedConstraint{F,MOI.Zeros} MOI.copy_to(
         LRO.Optimizer(),
         src,
     )
+end
+
+@testset "Copied constraint duals survive reuse of the MOI cache" begin
+    opt = LRO.Optimizer()
+    MOI.set(opt, MOI.RawOptimizerAttribute("solver"), NativeSolver)
+    src = MOI.Utilities.Model{Float64}()
+    x, y = MOI.add_variables(src, 2)
+    eq = MOI.add_constraint(
+        src,
+        MOI.Utilities.vectorize([2.0 * x, 3.0 * y]),
+        MOI.Zeros(2),
+    )
+    cache = MOI.default_cache(opt, Float64)
+    index_map = MOI.copy_to(cache, src)
+    ci = MOI.copy_to(opt, cache)[index_map[eq]]
+    MOI.empty!(cache)
+    MOI.optimize!(opt)
+    SolverCore.set_constraint_multipliers!(opt.solver.stats, [1.0, -2.0])
+    @test MOI.get(opt, MOI.ConstraintDual(), ci) == [-1, 2]
 end
 
 @testset "Native solver result attributes" begin

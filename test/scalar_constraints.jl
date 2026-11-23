@@ -44,6 +44,30 @@ import Percival
     @test dual(fixed) ≈ [7, -8] atol = 1e-5
 end
 
+@testset "Linear block dimensions" begin
+    b = [1.0]
+    c = spzeros(1)
+    C = spzeros(1, 1)
+    @test_throws DimensionMismatch LRO.Model(
+        Matrix{Float64}[],
+        (),
+        b,
+        c,
+        spzeros(1, 0),
+        Int[],
+    )
+    @test_throws DimensionMismatch LRO.Model(
+        Matrix{Float64}[],
+        (),
+        b,
+        c,
+        C,
+        Int[];
+        d_eq = c,
+        C_eq = spzeros(2, 1),
+    )
+end
+
 @testset "Bounded rows and explicit dualization" begin
     model = LRO.Model(
         Matrix{Float64}[],

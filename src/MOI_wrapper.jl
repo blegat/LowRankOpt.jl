@@ -3,10 +3,11 @@ import NLPModelsJuMP
 
 const VAF{T} = MOI.VectorAffineFunction{T}
 const NNG = MOI.Nonnegatives
+const ZRO = MOI.Zeros
 const PSD = MOI.PositiveSemidefiniteConeTriangle
 const LOW{W} = LinearCombinationInSet{W,PSD}
 
-MOI.Utilities.@product_of_sets(NNGCones, NNG)
+MOI.Utilities.@product_of_sets(LinearCones, NNG, ZRO)
 
 const OptimizerCache{T} = MOI.Utilities.GenericModel{
     T,
@@ -20,7 +21,7 @@ const OptimizerCache{T} = MOI.Utilities.GenericModel{
             MOI.Utilities.OneBasedIndexing,
         },
         Vector{T},
-        NNGCones{T},
+        LinearCones{T},
     },
 }
 
@@ -28,8 +29,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
-    scalar_rows::Dict{MOI.ConstraintIndex{MOI.ScalarAffineFunction{T}},Int}
-    lin_cones::Union{Nothing,NNGCones{T}}
+    lin_cones::Union{Nothing,LinearCones{T}}
     max_sense::Bool
     objective_constant::T
     silent::Bool
@@ -40,7 +40,6 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
             nothing,
             nothing,
             Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
-            Dict{MOI.ConstraintIndex{MOI.ScalarAffineFunction{T}},Int}(),
             nothing,
             false,
             0.0,
@@ -63,7 +62,6 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.model = nothing
     optimizer.lin_cones = nothing
     empty!(optimizer.lmi_id)
-    empty!(optimizer.scalar_rows)
     optimizer.objective_constant = NaN
     return
 end
@@ -90,23 +88,17 @@ function MOI.supports(::Optimizer, param::MOI.RawOptimizerAttribute)
     return true
 end
 
-_set_type(::MOI.ConstraintIndex{F,S}) where {F,S} = S
-
 function MOI.set(optimizer::Optimizer, param::MOI.RawOptimizerAttribute, value)
-    if !isempty(optimizer.scalar_rows)
-        # MOI has already copied these rows without a bridge.
+    cones = optimizer.lin_cones
+    if !isnothing(cones) && MOI.Utilities.num_rows(cones, ZRO) > 0
         options = merge(optimizer.options, Dict(param.name => value))
-        solver = get(options, "solver", nothing)
-        for ci in keys(optimizer.scalar_rows)
-            S = _set_type(ci)
-            if !supports_scalar_constraint(solver, S, options)
-                throw(
-                    MOI.SetAttributeNotAllowed(
-                        param,
-                        "The model contains native $S rows. Select this configuration before copying the model so MOI can bridge them.",
-                    ),
-                )
-            end
+        if !supports_equalities(get(options, "solver", nothing), options)
+            throw(
+                MOI.SetAttributeNotAllowed(
+                    param,
+                    "The model contains native equality rows. Select this configuration before copying the model so MOI can bridge them.",
+                ),
+            )
         end
     end
     optimizer.options[param.name] = value
@@ -140,29 +132,24 @@ function MOI.supports(
     return true
 end
 
-const BOUNDED_SCALAR{T} =
-    Union{MOI.EqualTo{T},MOI.GreaterThan{T},MOI.LessThan{T},MOI.Interval{T}}
 const SUPPORTED_CONES = Union{NNG,PSD,LOW}
 
 """
-    supports_scalar_constraint(solver, S, options)
+    supports_equalities(solver, options)
 
-Return whether the solver constructor accepts a scalar affine function in
-the set type `S` as one bounded row of `Model`. The default is false.
-Solvers that use native NLPModels bounds can specialize this method for
-the sets they handle. `options` contains the raw optimizer attributes.
-MOI bridges reformulate the other sets.
+Return whether the solver constructor accepts vector affine functions in
+`MOI.Zeros`. The default is false. `options` contains the raw optimizer
+attributes for solvers whose equality support depends on their configuration.
 """
-supports_scalar_constraint(solver, S, options) = false
+supports_equalities(solver, options) = false
 
 function MOI.supports_constraint(
     optimizer::Optimizer{T},
-    ::Type{MOI.ScalarAffineFunction{T}},
-    S::Type{<:BOUNDED_SCALAR{T}},
+    ::Type{VAF{T}},
+    ::Type{ZRO},
 ) where {T}
-    return supports_scalar_constraint(
+    return supports_equalities(
         get(optimizer.options, "solver", nothing),
-        S,
         optimizer.options,
     )
 end
@@ -292,7 +279,7 @@ function _add_constraints(
     _,
     _,
     ::Type{VAF{T}},
-    ::Type{NNG},
+    ::Type{<:Union{NNG,ZRO}},
 ) where {T}
     return
 end
@@ -408,9 +395,15 @@ function MOI.copy_to(
     SM = SparseArrays.SparseMatrixCSC{T,Int64}
     C_lin = convert(SM, Cd_lin.coefficients)
     C_lin = -convert(SM, C_lin')
+    n_ineq = MOI.Utilities.num_rows(Cd_lin.sets, NNG)
+    eq = (n_ineq+1):size(C_lin, 2)
+    C_eq = C_lin[:, eq]
+    if !isempty(eq)
+        C_lin = C_lin[:, 1:n_ineq]
+    end
     n = MOI.get(src, MOI.NumberOfVariables())
     constraint_types = MOI.get(src, MOI.ListOfConstraintTypesPresent())
-    nlmi = sum(constraint_types) do (F, S)
+    nlmi = sum(constraint_types; init = 0) do (F, S)
         return _nlmi(src, F, S)
     end
     A = Matrix{_MatrixBuilder{T}}(undef, nlmi, n + 1)
@@ -419,9 +412,8 @@ function MOI.copy_to(
     for (F, S) in constraint_types
         if !MOI.supports_constraint(dest, F, S)
             throw(MOI.UnsupportedConstraint{F,S}())
-        elseif !(F <: MOI.ScalarAffineFunction)
-            _add_constraints(dest, src, A, msizes, F, S)
         end
+        _add_constraints(dest, src, A, msizes, F, S)
     end
     dest.max_sense = MOI.get(src, MOI.ObjectiveSense()) == MOI.MAX_SENSE
     obj = MOI.get(src, MOI.ObjectiveFunction{MOI.ScalarAffineFunction{T}}())
@@ -436,19 +428,16 @@ function MOI.copy_to(
         _instantiate(A[:, 1]),
         _instantiate(A[:, 2:end]),
         b,
-        convert(
-            SparseArrays.SparseVector{T,Int64},
-            SparseArrays.sparsevec(Cd_lin.constants),
-        ),
+        SparseArrays.sparsevec(view(Cd_lin.constants, 1:n_ineq)),
         C_lin,
         msizes;
+        d_eq = SparseArrays.sparsevec(view(Cd_lin.constants, eq)),
+        C_eq,
         objective_constant = dest.max_sense ? -dest.objective_constant :
                              dest.objective_constant,
     )
-    _copy_scalar_constraints!(dest, src, constraint_types)
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
-    options = copy(dest.options)
-    dest.lin_cones = Cd_lin.sets
+    dest.lin_cones = deepcopy(Cd_lin.sets)
     options = Dict{Symbol,Any}(
         Symbol(key) => dest.options[key] for key in keys(dest.options) if
         key in SOLVER_OPTIONS && key != "solver"
@@ -641,61 +630,10 @@ end
 function MOI.get(
     optimizer::Optimizer{T},
     attr::MOI.ConstraintDual,
-    ci::MOI.ConstraintIndex{VAF{T},NNG},
-) where {T}
+    ci::MOI.ConstraintIndex{VAF{T},S},
+) where {T,S<:Union{NNG,ZRO}}
     MOI.check_result_index_bounds(optimizer, attr)
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
     sol = MOI.get(optimizer, DualSolution())
     return sol[ScalarIndex][rows]
-end
-
-_scalar_bounds(set::MOI.EqualTo) = (set.value, set.value)
-_scalar_bounds(set::MOI.GreaterThan) = (set.lower, Inf)
-_scalar_bounds(set::MOI.LessThan) = (-Inf, set.upper)
-_scalar_bounds(set::MOI.Interval) = (set.lower, set.upper)
-
-function _copy_scalar_constraints!(dest::Optimizer{T}, src, types) where {T}
-    rows, cols, vals = Int[], Int[], T[]
-    constants, lower, upper = T[], T[], T[]
-    ns = num_scalars(dest.model)
-    for (F, S) in types
-        if !(F <: MOI.ScalarAffineFunction)
-            continue
-        end
-        for ci in MOI.get(src, MOI.ListOfConstraintIndices{F,S}())
-            f = MOI.get(src, MOI.CanonicalConstraintFunction(), ci)
-            l, u = _scalar_bounds(MOI.get(src, MOI.ConstraintSet(), ci))
-            push!(constants, f.constant)
-            push!(lower, l)
-            push!(upper, u)
-            row = length(constants)
-            for term in f.terms
-                push!(rows, row)
-                push!(cols, term.variable.value)
-                push!(vals, term.coefficient)
-            end
-            dest.scalar_rows[ci] = ns + row
-        end
-    end
-    if !isempty(constants)
-        J = SparseArrays.sparse(
-            rows,
-            cols,
-            vals,
-            length(constants),
-            dest.model.meta.nvar,
-        )
-        append_scalar_constraints!(dest.model, J, constants, lower, upper)
-    end
-    return
-end
-
-function MOI.get(
-    optimizer::Optimizer{T},
-    attr::MOI.ConstraintDual,
-    ci::MOI.ConstraintIndex{MOI.ScalarAffineFunction{T},S},
-) where {T,S<:BOUNDED_SCALAR{T}}
-    MOI.check_result_index_bounds(optimizer, attr)
-    sol = MOI.get(optimizer, DualSolution())
-    return sol[ScalarIndex][optimizer.scalar_rows[ci]]
 end

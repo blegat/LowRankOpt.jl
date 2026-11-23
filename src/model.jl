@@ -3,16 +3,17 @@ abstract type AbstractModel{T} <: NLPModels.AbstractNLPModel{T,Vector{T}} end
 Base.broadcastable(model::AbstractModel) = Ref(model)
 
 """
-    Model(C, A, b, d_lin, C_lin, msizes; objective_constant = 0)
+    Model(C, A, b, d_lin, C_lin, msizes; d_eq, C_eq, objective_constant = 0)
 
 Affine conic model with ordinary scalar decision variables. The model owns
 its coefficient data and NLPModels metadata. Constraint outputs are ordered
-as a nonnegative scalar prefix followed by PSD blocks identified by `dim`.
+as nonnegative rows, equality rows, and PSD blocks identified by `dim`.
 The PSD entries have free componentwise metadata bounds; positive
 semidefiniteness is a block constraint.
 
 The objective is `-b' * x + objective_constant`; scalar constraints are
-`d_lin - C_lin' * x`, and PSD constraints are
+`d_lin - C_lin' * x ≥ 0` and `d_eq - C_eq' * x = 0`. Pass the equality
+block with the `d_eq` and `C_eq` keywords. PSD constraints are
 `C[i] - sum(A[i,j] * x[j])`. Matrix outputs use full column-major
 vectorization, so Jacobian adjoints use the Frobenius inner product.
 
@@ -26,6 +27,8 @@ mutable struct Model{T,C<:AbstractMatrix{T},A<:Tuple} <: AbstractModel{T}
     b::Vector{T}
     d_lin::SparseArrays.SparseVector{T,Int64}
     C_lin::SparseArrays.SparseMatrixCSC{T,Int64}
+    d_eq::SparseArrays.SparseVector{T,Int64}
+    C_eq::SparseArrays.SparseMatrixCSC{T,Int64}
     msizes::Vector{Int64}
     dim::ConeDimensions
     meta::NLPModels.NLPModelMeta{T,Vector{T}}
@@ -44,6 +47,8 @@ function Model(
     d_lin::SparseArrays.SparseVector{T},
     C_lin::SparseArrays.SparseMatrixCSC{T},
     msizes::AbstractVector{<:Integer};
+    d_eq = SparseArrays.spzeros(T, 0),
+    C_eq = SparseArrays.spzeros(T, length(b), 0),
     objective_constant = zero(T),
 ) where {T,CT<:AbstractMatrix{T}}
     components = map(_as_component, A)
@@ -77,20 +82,33 @@ function Model(
     end
     d_lin = convert(SparseArrays.SparseVector{T,Int64}, d_lin)
     C_lin = convert(SparseArrays.SparseMatrixCSC{T,Int64}, C_lin)
+    d_eq = convert(SparseArrays.SparseVector{T,Int64}, d_eq)
+    C_eq = convert(SparseArrays.SparseMatrixCSC{T,Int64}, C_eq)
     msizes = convert(Vector{Int64}, msizes)
     n = length(b)
-    ns = length(d_lin)
+    if size(C_lin) != (n, length(d_lin)) || size(C_eq) != (n, length(d_eq))
+        throw(
+            DimensionMismatch(
+                "Each linear block must have one row per variable and one column per constraint.",
+            ),
+        )
+    end
+    ns = length(d_lin) + length(d_eq)
     dim = ConeDimensions(ns, msizes, ns .+ [0; cumsum(abs2.(msizes))])
     m = Int(length(dim))
     rows, cols, values = Int[], Int[], T[]
-    for k in axes(C_lin, 2), p in SparseArrays.nzrange(C_lin, k)
-        push!(rows, k)
-        push!(cols, SparseArrays.rowvals(C_lin)[p])
-        push!(values, -SparseArrays.nonzeros(C_lin)[p])
+    for (block, offset) in ((C_lin, 0), (C_eq, length(d_lin)))
+        for k in axes(block, 2), p in SparseArrays.nzrange(block, k)
+            push!(rows, offset + k)
+            push!(cols, SparseArrays.rowvals(block)[p])
+            push!(values, -SparseArrays.nonzeros(block)[p])
+        end
     end
     constant = zeros(T, m)
+    constant[1:length(d_lin)] .= d_lin
+    eq = (length(d_lin)+1):ns
+    constant[eq] .= d_eq
     constraint = VectorizedConeVector(constant, dim)
-    constraint[ScalarIndex] .= d_lin
     for (i, d) in enumerate(msizes)
         constraint[MatrixIndex(i)] .= C[i]
         offset = dim.offsets[i]
@@ -114,7 +132,9 @@ function Model(
     SparseArrays.dropzeros!(jacobian)
     rows, cols, _ = SparseArrays.findnz(jacobian)
     lower = fill(T(-Inf), m)
-    lower[1:dim.num_scalars] .= zero(T)
+    lower[1:ns] .= zero(T)
+    upper = fill(T(Inf), m)
+    upper[eq] .= zero(T)
     meta = NLPModels.NLPModelMeta{T,Vector{T}}(
         n;
         ncon = m,
@@ -123,7 +143,7 @@ function Model(
         lin_nnzj = length(rows),
         nln_nnzj = 0,
         lcon = lower,
-        ucon = fill(T(Inf), m),
+        ucon = upper,
         lin = collect(1:m),
         minimize = true,
     )
@@ -133,6 +153,8 @@ function Model(
         b,
         d_lin,
         C_lin,
+        d_eq,
+        C_eq,
         msizes,
         dim,
         meta,
