@@ -172,10 +172,16 @@ function Model(C, A::Matrix{<:AbstractMatrix}, b, d_lin, C_lin, msizes; kws...)
 end
 
 # Each finite inequality bound contributes one nonnegative slack.
-function scalar_bounds(
-    model::Model{T},
-    indices = 1:num_scalars(model),
-) where {T}
+function scalar_bounds(model::Model{T}) where {T}
+    if _canonical_scalar_bounds(model)
+        rows = eachindex(model.d_lin)
+        signs = FillArrays.Fill(-one(T), length(rows))
+        return model.C_lin, model.d_lin, rows, signs
+    end
+    return scalar_bounds(model, 1:num_scalars(model))
+end
+
+function scalar_bounds(model::Model{T}, indices) where {T}
     rows, signs, constants = Int[], T[], T[]
     for i in indices
         l, u = model.meta.lcon[i], model.meta.ucon[i]
@@ -205,14 +211,16 @@ function scalar_bounds(
 end
 
 function _canonical_scalar_bounds(model::Model)
+    if num_scalars(model) != length(model.d_lin)
+        return false
+    end
     return all(1:num_scalars(model)) do i
         return iszero(model.meta.lcon[i]) && model.meta.ucon[i] == Inf
     end
 end
 
 function cone_multipliers(model::Model, cone)
-    if num_scalars(model) == length(model.d_lin) &&
-       _canonical_scalar_bounds(model)
+    if _canonical_scalar_bounds(model)
         return cone
     end
     _, _, rows, signs = scalar_bounds(model)

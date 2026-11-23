@@ -99,7 +99,9 @@ end
     @test rows == [1, 2, 3, 3]
     @test signs == [-1, 1, -1, 1]
     @test_throws ArgumentError LRO.scalar_bounds(model)
-    @test_throws ArgumentError LRO.dual_model(model)
+    @test_throws ArgumentError("dual_model does not support scalar equalities.") LRO.dual_model(
+        model,
+    )
     @test_throws ArgumentError LRO.cone_multipliers(model, cone)
     @test_throws ArgumentError LRO.BurerMonteiro.Solver(
         model;
@@ -119,7 +121,9 @@ end
     )
     cone = LRO.VectorizedConeVector([1.0], model.dim)
     model.meta = NLPModels.NLPModelMeta(model.meta; lcon = [2.0], ucon = [2.0])
-    @test_throws ArgumentError LRO.dual_model(model)
+    @test_throws ArgumentError("dual_model does not support scalar equalities.") LRO.dual_model(
+        model,
+    )
     @test_throws ArgumentError LRO.cone_multipliers(model, cone)
 end
 end
