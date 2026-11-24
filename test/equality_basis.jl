@@ -43,4 +43,17 @@ end
     @test length(LRO.equality_basis(rounded; tolerance = 1e-10))==1
     @test length(LRO.equality_basis(rounded; tolerance = 1e-14))==2
 end
+
+@testset "Peeling and verifying separate dependencies" begin
+    # Peeling the first row leaves the second as the only active row in column 1.
+    @test LRO.equality_basis(model([1.0 1; 1 0], [2.0, 1.0])) == [1, 2]
+    m = model([1.0 0; 1 0; 0 1; 0 1], [1.0, 1, 2, 2])
+    rows = LRO.equality_basis(m)
+    @test count(in(1:2), rows) == count(in(3:4), rows) == 1
+    # The input is finite, but the QR solve can overflow while checking the
+    # duplicate row. Its inconsistent right-hand side requires retaining it.
+    m = model(1.1e308 .* [1 1; 1 -1; 1 1], [0.0, 0, 1])
+    @test LRO.equality_basis(m) == [1, 2, 3]
+end
+
 end
