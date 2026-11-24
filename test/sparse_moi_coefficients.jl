@@ -101,4 +101,29 @@ end
         @test empty.meta.nvar == empty.meta.ncon == 0
     end
 end
+
+@testset "Zero contributions in a factored PSD constraint" begin
+    factors = LRO.positive_semidefinite_factorization.([[1.0, 2], zeros(2)])
+    set = LRO.LinearCombinationInSet{LRO.WITHOUT_SET}(
+        MOI.PositiveSemidefiniteConeTriangle(2),
+        LRO.TriangleVectorization.(factors),
+    )
+    source = MOI.Utilities.UniversalFallback(MOI.Utilities.Model{Float64}())
+    x, y = MOI.add_variables(source, 2)
+    MOI.add_constraint(
+        source,
+        MOI.Utilities.vectorize([-1.0 * x, -1.0 * y]),
+        set,
+    )
+    model = captured(source)
+    @test collect(keys(only(only(model.A).values.columns))) == [1]
+    @test NLPModels.cons(model, [1.0, 3.0]) == -vec([1 2; 2 4])
+
+    builder = LRO._MatrixBuilder{Float64}(2)
+    LRO._add!(builder, 1, 0.0, set)
+    empty_matrix = LRO._instantiate(builder)
+    @test empty_matrix isa LRO.FillArrays.Zeros
+    @test size(empty_matrix) == (2, 2)
+end
+
 end
