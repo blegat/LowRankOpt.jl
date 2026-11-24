@@ -189,4 +189,38 @@ end
     end
 end
 
+@testset "Native solver infeasibility certificates" begin
+    factory = optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver)
+    for sense in (MOI.MIN_SENSE, MOI.MAX_SENSE)
+        model = Model(factory)
+        @variable(model, x)
+        @variable(model, y)
+        @objective(model, Min, (sense == MOI.MIN_SENSE ? -1 : 1) * (x + y) + 7)
+        set_objective_sense(model, sense)
+        optimize!(model)
+        stats = unsafe_backend(model).solver.stats
+        SolverCore.set_status!(stats, :unbounded)
+        SolverCore.set_solver_specific!(stats, :primal_certificate, true)
+        @test termination_status(model) == MOI.DUAL_INFEASIBLE
+        @test primal_status(model) == MOI.INFEASIBILITY_CERTIFICATE
+        @test [value(x), value(y)] == [2, 3]
+        @test objective_value(model) == (sense == MOI.MIN_SENSE ? -5 : 5)
+    end
+
+    model = Model(factory)
+    @variable(model, x[1:2])
+    c = @constraint(model, [sum(x) - 1, -sum(x)] in Nonnegatives())
+    @objective(model, Min, 7)
+    optimize!(model)
+    stats = unsafe_backend(model).solver.stats
+    SolverCore.set_status!(stats, :infeasible)
+    SolverCore.set_constraint_multipliers!(stats, [-1.0, -1.0])
+    SolverCore.set_solver_specific!(stats, :dual_certificate, true)
+    SolverCore.set_solver_specific!(stats, :dual_objective, 1.0)
+    @test termination_status(model) == MOI.INFEASIBLE
+    @test dual_status(model) == MOI.INFEASIBILITY_CERTIFICATE
+    @test dual(c) == [1, 1]
+    @test dual_objective_value(model) == 1
+end
+
 end

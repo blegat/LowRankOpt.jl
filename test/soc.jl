@@ -49,11 +49,43 @@ end
     flat = collect(1.0:8)
     vector = LRO.VectorizedConeVector(flat, dim)
     shaped = LRO.ShapedConeVector([1.0], [[2.0, 3, 4]], [[5.0 7; 6 8]])
-    @test vector[LRO.SOCIndex(1)] == [2, 3, 4]
+    @test only(LRO.second_order_indices(vector)) == LRO.SOCIndex(1)
+    @test getindex.((vector, shaped), LRO.SOCIndex(1)) == ([2, 3, 4], [2, 3, 4])
     @test vector[LRO.MatrixIndex(1)] == [5 7; 6 8]
     @test collect(shaped) == flat
     @test dot(shaped, shaped) ≈ dot(flat, flat)
     @test LRO.num_second_order_cones(shaped) == 1
     @test LRO.num_matrices(shaped) == 1
 end
+
+@testset "SOC lift preserves existing PSD blocks" begin
+    model = LRO.Model(
+        [fill(3.0, 1, 1)],
+        reshape([fill(2.0, 1, 1)], 1, 1),
+        [0.0],
+        spzeros(0),
+        spzeros(1, 0),
+        [1],
+    )
+    psd = fill(4.0, 1, 1)
+    cone = LRO.ShapedConeVector(Float64[], [psd])
+    @test LRO.cone_multipliers(model, cone) === cone
+
+    LRO.append_second_order_constraints!(
+        model,
+        sparse([1.0; -1;;]),
+        [2.0, 0],
+        [2],
+    )
+    dual = LRO.dual_model(model)
+    @test dual.msizes == [1, 2]
+    @test first(dual.A).values === only(model.A).values
+    @test LRO.jac(dual, 1, LRO.MatrixIndex(1)) == fill(2.0, 1, 1)
+    @test LRO.jac(dual, 1, LRO.MatrixIndex(2)) == [-1 1; 1 -1]
+    cone = LRO.ShapedConeVector(Float64[], [psd, [3.0 1; 1 2]])
+    recovered = LRO.cone_multipliers(model, cone)
+    @test recovered[LRO.SOCIndex(1)] == [5, 2]
+    @test recovered[LRO.MatrixIndex(1)] === psd
+end
+
 end

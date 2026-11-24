@@ -4,12 +4,12 @@ import LowRankOpt as LRO
 
 @testset "Conic Farkas certificates" begin
     model = LRO.Model(
-        Matrix{Float64}[],
+        [zeros(0, 0)],
         (),
         zeros(2),
         sparsevec([1.0, -2.0]),
         sparse([1.0 0; 0 -1]),
-        Int[],
+        [0],
     )
     LRO.append_second_order_constraints!(
         model,
@@ -20,6 +20,8 @@ import LowRankOpt as LRO
     lambda = [1.0, 1.0, 1.0, -1.0]
     @test LRO.infeasibility_certificate(model, lambda) ≈ 1
     @test LRO.infeasibility_certificate(model, 2lambda) ≈ 2
+    # The adjoint vanishes, but the SOC multiplier (1, -2) is outside the cone.
+    @test isnothing(LRO.infeasibility_certificate(model, [1.0, 2, 1, -2]))
     @test isnothing(LRO.infeasibility_certificate(model, -lambda))
     @test isnothing(LRO.infeasibility_certificate(model, [0.0, 1, 1, -1]))
     @test isnothing(LRO.infeasibility_certificate(model, fill(Inf, 4)))

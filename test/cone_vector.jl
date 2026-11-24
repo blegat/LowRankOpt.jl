@@ -25,7 +25,10 @@ import LowRankOpt as LRO
             cumsum([length(scalars); length.(matrices)]),
         )
         shaped = LRO.ShapedConeVector(scalars, matrices)
-        other_shaped = LRO.ShapedConeVector(other_scalars, other_matrices)
+        other_shaped = LRO.ShapedConeVector{Float64,Matrix{Float64}}(
+            other_scalars,
+            other_matrices,
+        )
         vectorized = LRO.VectorizedConeVector(flat, dims)
         other_vectorized = LRO.VectorizedConeVector(other_flat, dims)
         @test collect(shaped) == flat
