@@ -13,16 +13,18 @@ import SolverCore
 # A native solver uses the default result accessors, unlike Burer-Monteiro.
 struct NativeSolver{S} <: SolverCore.AbstractOptimizationSolver
     stats::S
+    dim::LRO.ConeDimensions
 end
 
 LRO.support_cone(::Type{NativeSolver}, ::Type{MOI.Zeros}) = true
+LRO.support_cone(::Type{NativeSolver}, ::Type{MOI.SecondOrderCone}) = true
 
 function MOI.get(solver::NativeSolver, ::LRO.DualSolution)
-    return LRO.ShapedConeVector(-solver.stats.multipliers, Matrix{Float64}[])
+    return LRO.VectorizedConeVector(-solver.stats.multipliers, solver.dim)
 end
 
 function NativeSolver(model::LRO.Model)
-    return NativeSolver(SolverCore.GenericExecutionStats(model))
+    return NativeSolver(SolverCore.GenericExecutionStats(model), model.dim)
 end
 
 function SolverCore.solve!(solver::NativeSolver, ::LRO.Model)
@@ -94,6 +96,32 @@ end
         MOI.set(opt, attr, NativeSolver)
         @test MOI.get(opt, attr) === NativeSolver
     end
+end
+
+@testset "A solver can opt into native SOC blocks" begin
+    model = Model(
+        optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver),
+    )
+    @variable(model, x)
+    @variable(model, y)
+    c = @constraint(model, [x + y, 3, 4] in SecondOrderCone())
+    optimize!(model)
+    opt = unsafe_backend(model)
+    @test opt.model.dim.second_order_dimensions == [3]
+    @test isempty(opt.model.msizes)
+    @test LRO.NLPModels.cons(opt.model, [2.0, 3.0]) == [5, 3, 4]
+    SolverCore.set_constraint_multipliers!(opt.solver.stats, [-1.0, 0.6, 0.8])
+    @test dual(c) ≈ [1, -0.6, -0.8]
+    @test_throws MOI.SetAttributeNotAllowed MOI.set(
+        opt,
+        MOI.RawOptimizerAttribute("solver"),
+        LRO.BurerMonteiro.Solver,
+    )
+    @test_throws ArgumentError LRO.BurerMonteiro.Solver(
+        opt.model;
+        sub_solver = nothing,
+        ranks = Int[],
+    )
 end
 
 @testset "Unbridged copy requires equality support" begin

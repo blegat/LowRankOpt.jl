@@ -4,8 +4,6 @@ struct Solver{S,T,D,JTB,ST} <: SolverCore.AbstractOptimizationSolver
     stats::SolverCore.GenericExecutionStats{T,Vector{T},Vector{T},Any}
 end
 
-LRO.support_cone(::Type{Solver}, ::Type{MOI.SecondOrderCone}) = true
-
 function Solver(
     src::Union{LRO.Model,LRO.DualModel};
     sub_solver,
@@ -14,10 +12,12 @@ function Solver(
     dense_condition = nothing,
     kws...,
 )
-    primal = LRO.primal_model(src)
-    if length(ranks) == LRO.num_matrices(primal) &&
-       LRO.num_second_order_cones(primal) > 0
-        ranks = vcat(ranks, primal.dim.second_order_dimensions)
+    if src isa LRO.Model && !iszero(LRO.num_second_order_cones(src))
+        throw(
+            ArgumentError(
+                "Burer–Monteiro requires second-order cones to be bridged.",
+            ),
+        )
     end
     model = Model{square_scalars}(LRO.dual_model(src), ranks)
     solver = sub_solver(model; kws...)
@@ -44,10 +44,7 @@ function MOI.get(solver::Solver, ::LRO.ConvexTerminationStatus)
 end
 
 function MOI.get(solver::Solver, ::LRO.DualSolution)
-    return LRO.cone_multipliers(
-        LRO.primal_model(solver.model.model),
-        Solution(solver.stats.solution, solver.model.dim),
-    )
+    return Solution(solver.stats.solution, solver.model.dim)
 end
 
 # Burer-Monteiro solves the explicitly dualized model.

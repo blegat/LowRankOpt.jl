@@ -296,9 +296,13 @@ MOI bridges rotated cones and maps their multipliers back to the original
 coordinates. Cone vectors support `SOCIndex` alongside `ScalarIndex` and
 `MatrixIndex`.
 
-Explicit dual conversion lifts each SOC to a PSD arrow and recovers native
-cone multipliers through its adjoint. Burer–Monteiro automatically uses
-full ranks for these lifted blocks when `ranks` specifies native PSD blocks.
+With Burer–Monteiro, MOI bridges SOC constraints before loading the solver.
+For example, a three-dimensional SOC becomes a 2×2 PSD block. Include a
+rank for that block in `ranks`. Use `JuMP.print_active_bridges(model)` to see
+the reformulation.
+
+Explicit dual conversion also provides a PSD arrow representation for
+callers that request it with `LowRankOpt.dual_model(model)`.
 Conic Farkas and recession certificates are checked independently of solver
 termination heuristics by `infeasibility_certificate` and
 `recession_certificate`.
