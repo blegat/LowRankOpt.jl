@@ -37,22 +37,15 @@ function _test_zero_Ai(
     if all_zero
         @test isempty(b.model.A)
     else
-        # Missing entries of a component use `Int` axes, unlike the `Int64`
-        # ones built by the MOI wrapper, which differ on 32-bit systems.
-        ZInt = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}}
-        if detect_rank_one
-            R = LRO._SparseRankOne{T}
-            @test only(b.model.A).values isa Matrix{Union{ZInt,R}}
-        else
-            @test only(b.model.A).values isa Matrix{Union{S,ZInt}}
-        end
+        M = detect_rank_one ? LRO._SparseRankOne{T} : S
+        @test only(b.model.A).values isa LRO.SparseBlockCoefficients{M}
     end
     i = LRO.MatrixIndex(1)
     @test iszero(_coefficient(b.model, 1, i))
     @test iszero(_coefficient(b.model, 2, i))
     @test iszero(_coefficient(b.model, 3, i)) == all_zero
     if !all_zero
-        @test only(b.model.A).values[3, 1] isa (detect_rank_one ? R : S)
+        @test only(b.model.A).values[3, 1] isa M
         @test iszero(_coefficient(b.model, 4, i))
     end
     buf = LRO.ModelWorkspace(

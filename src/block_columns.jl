@@ -178,8 +178,9 @@ function Base.getindex(A::SparseBlockCoefficients, i::Int, j::Int)
     @boundscheck checkbounds(A, i, j)
     return get(A.columns[j], i, A.zeros[j])
 end
-_coefficient_indices(A::AbstractMatrix, slot) = axes(A, 1)
-_coefficient_indices(A::SparseBlockCoefficients, slot) = keys(A.columns[slot])
+# Index by row or iterate over the coefficients stored in this column.
+_stored_column(A::AbstractMatrix, slot) = view(A, :, slot)
+_stored_column(A::SparseBlockCoefficients, slot) = A.columns[slot]
 
 function _coefficient_sum(::Tuple{}, j, i, d, ::Type{T}) where {T}
     return FillArrays.Zeros{T}(d, d)

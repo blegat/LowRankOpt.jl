@@ -61,7 +61,7 @@ end
     end
 end
 
-@testset "Dense component and empty coefficient blocks" begin
+@testset "Dense coefficient block" begin
     source = MOI.Utilities.Model{Float64}()
     x = MOI.add_variable(source)
     MOI.add_constraint(
@@ -76,19 +76,29 @@ end
     @test only(model.A).values isa
           LRO.SparseBlockCoefficients{SparseMatrixCSC{Float64,Int64}}
     @test NLPModels.cons(model, [2.0]) ≈ [2, 0, 0, 2]
-    constant = MOI.Utilities.Model{Float64}()
-    MOI.add_constraint(
-        constant,
-        MOI.VectorAffineFunction(MOI.VectorAffineTerm{Float64}[], [1.0, 0, 1]),
-        MOI.PositiveSemidefiniteConeTriangle(2),
-    )
-    model = captured(constant)
-    @test isempty(model.A)
-    @test model.meta.nvar == 0
-    @test NLPModels.cons(model, Float64[]) ≈ [1, 0, 0, 1]
-    empty = captured(MOI.Utilities.Model{Float64}())
-    @test isempty(empty.C)
-    @test isempty(empty.A)
-    @test empty.meta.nvar == empty.meta.ncon == 0
+end
+
+@testset "Zero-variable models" begin
+    if pkgversion(NLPModels) < v"0.21.13"
+        @test_skip NLPModels.NLPModelMeta(0)
+    else
+        constant = MOI.Utilities.Model{Float64}()
+        MOI.add_constraint(
+            constant,
+            MOI.VectorAffineFunction(
+                MOI.VectorAffineTerm{Float64}[],
+                [1.0, 0, 1],
+            ),
+            MOI.PositiveSemidefiniteConeTriangle(2),
+        )
+        model = captured(constant)
+        @test isempty(model.A)
+        @test model.meta.nvar == 0
+        @test NLPModels.cons(model, Float64[]) ≈ [1, 0, 0, 1]
+        empty = captured(MOI.Utilities.Model{Float64}())
+        @test isempty(empty.C)
+        @test isempty(empty.A)
+        @test empty.meta.nvar == empty.meta.ncon == 0
+    end
 end
 end

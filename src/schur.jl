@@ -122,7 +122,7 @@ end
 # /!\ L and R need to be symmetric
 function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
     σ = workspace.permutation
-    column = view(workspace.component.values, :, slot)
+    column = _stored_column(workspace.component.values, slot)
     # The constraints that are zero on this block are the last ones of `σ`
     n = workspace.last_nonzero[slot]
 

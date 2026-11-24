@@ -50,7 +50,8 @@ function _test_holy(; is_dual, low_rank, square_scalars, n = 10)
     # The rank-one structure of the classic formulation is detected by the
     # `detect_rank_one` option
     A = low_rank ? F : LRO._SparseRankOne{T}
-    @test only(LRO.dual_model(b.model).A).values isa Matrix{A}
+    @test only(LRO.dual_model(b.model).A).values isa
+          LRO.SparseBlockCoefficients{A}
 end
 
 function test_holy()

@@ -9,7 +9,6 @@ using Test
 using LinearAlgebra
 using SparseArrays
 using JuMP
-import FillArrays
 import LowRankOpt as LRO
 using Dualization
 import SolverCore
@@ -170,12 +169,8 @@ function test_trace()
     nlp = LRO.dual_model(unsafe_backend(model).model)
     @test nlp.C isa Vector{SparseMatrixCSC{T,Int64}}
     @test nlp.C[1] == [3 1; 1 4]
-    @test only(nlp.A).values isa Matrix{
-        Union{
-            LRO.Factorization{T,Matrix{T},Vector{T}},
-            FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int},Base.OneTo{Int}}},
-        },
-    }
+    @test only(nlp.A).values isa
+          LRO.SparseBlockCoefficients{LRO.Factorization{T,Matrix{T},Vector{T}}}
     @test only(nlp.A).block_ids == [1]
     @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)).factor == Matrix(I, 2, 2)
     @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)).scaling == [1, 1]
@@ -259,7 +254,7 @@ function test_different_factor_ranks()
     MT = LRO.Factorization{T,Matrix{T},LRO.Ones{T}}
     @test nlp.C isa Vector{MT}
     @test nlp.C[] == factors[1]
-    @test only(nlp.A).values isa Matrix{MT}
+    @test only(nlp.A).values isa LRO.SparseBlockCoefficients{MT}
     @test LRO.jac(nlp, 1, LRO.MatrixIndex(1)) == factors[2]
     @test LRO.jac(nlp, 2, LRO.MatrixIndex(1)) == factors[3]
     return
