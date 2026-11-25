@@ -19,6 +19,8 @@ import LowRankOpt as LRO
     )
     lambda = [1.0, 1.0, 1.0, -1.0]
     @test LRO.infeasibility_certificate(model, lambda) ≈ 1
+    shaped = LRO.ShapedConeVector(lambda[1:2], [lambda[3:4]], [zeros(0, 0)])
+    @test LRO.infeasibility_certificate(model, shaped) ≈ 1
     @test LRO.infeasibility_certificate(model, 2lambda) ≈ 2
     # The adjoint vanishes, but the SOC multiplier (1, -2) is outside the cone.
     @test isnothing(LRO.infeasibility_certificate(model, [1.0, 2, 1, -2]))

@@ -183,7 +183,7 @@ function errors(
     )
 end
 
-# Flatten shaped cone data only for the allocating default residuals.
+# Reuse flat storage when evaluating residuals and certificates.
 _native_vector(x::AbstractVector, ::Model) = x
 function _native_vector(x::ShapedConeVector{T}, model::Model) where {T}
     return collect(x)

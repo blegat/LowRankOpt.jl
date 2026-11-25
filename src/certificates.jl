@@ -41,10 +41,11 @@ function infeasibility_certificate(
     multipliers;
     tol = T(1e-8),
 ) where {T}
+    multipliers = _native_vector(multipliers, model)
     if !all(isfinite, multipliers)
         return nothing
     end
-    cone = VectorizedConeVector(collect(multipliers), model.dim)
+    cone = VectorizedConeVector(multipliers, model.dim)
     pairing = zero(T)
     for i in 1:num_scalars(model)
         lambda = multipliers[i]

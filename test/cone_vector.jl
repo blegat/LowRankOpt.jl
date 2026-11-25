@@ -33,9 +33,7 @@ import LowRankOpt as LRO
         other_vectorized = LRO.VectorizedConeVector(other_flat, dims)
         @test collect(shaped) == flat
         @test -shaped == -flat
-        for i in (0, length(flat) + 1)
-            @test_throws BoundsError(shaped, (i,)) shaped[i]
-        end
+        @test_throws Base.CanonicalIndexError shaped[1]
         @test LRO.num_matrices(dims) == length(matrices)
         for (x, y) in ((shaped, other_shaped), (vectorized, other_vectorized))
             @test LRO.num_matrices(x) == length(matrices)

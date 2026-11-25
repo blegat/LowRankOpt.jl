@@ -151,16 +151,22 @@ Base.view(s::ShapedConeVector, ::Type{ScalarIndex}) = s.scalars
 Base.view(s::ShapedConeVector, i::SOCIndex) = s.second_order[i.value]
 Base.view(s::ShapedConeVector, i::MatrixIndex) = s.matrices[i.value]
 
-function Base.getindex(s::ShapedConeVector, i::Integer)
-    offset = length(s.scalars)
-    if 1 <= i <= offset
-        return s.scalars[i]
-    end
-    for block in Iterators.flatten((s.second_order, s.matrices))
-        if offset < i <= offset + length(block)
-            return block[i-offset]
+# Leave integer getindex undefined. Locating one entry requires scanning the
+# preceding blocks, so generic elementwise operations could take quadratic time.
+# Traverse whole blocks when writing a flat vector.
+function _collect_blocks(f, ::Type{T}, s::ShapedConeVector) where {T}
+    result = Vector{T}(undef, length(s))
+    offset = 0
+    for block in Iterators.flatten(((s.scalars,), s.second_order, s.matrices))
+        for value in block
+            offset += 1
+            result[offset] = f(value)
         end
-        offset += length(block)
     end
-    return throw(BoundsError(s, (i,)))
+    return result
+end
+
+Base.collect(s::ShapedConeVector{T}) where {T} = _collect_blocks(identity, T, s)
+function Base.:-(s::ShapedConeVector{T}) where {T}
+    return _collect_blocks(-, Base.promote_op(-, T), s)
 end

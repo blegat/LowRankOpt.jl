@@ -53,6 +53,7 @@ end
     @test getindex.((vector, shaped), LRO.SOCIndex(1)) == ([2, 3, 4], [2, 3, 4])
     @test vector[LRO.MatrixIndex(1)] == [5 7; 6 8]
     @test collect(shaped) == flat
+    @test -shaped == -flat
     @test dot(shaped, shaped) ≈ dot(flat, flat)
     @test LRO.num_second_order_cones(shaped) == 1
     @test LRO.num_matrices(shaped) == 1
