@@ -175,7 +175,7 @@ end
     )
     model = captured(source)
     @test only(model.A).values isa
-          LRO.SparseBlockCoefficients{SparseMatrixCSC{Float64,Int64}}
+          LRO.SparseBlockCoefficients{SparseMatrixCSC{Float64,Int}}
     @test NLPModels.cons(model, [2.0]) ≈ [2, 0, 0, 2]
 end
 

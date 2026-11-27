@@ -44,7 +44,7 @@ function _test_holy(; is_dual, low_rank, square_scalars, n = 10)
     F = if low_rank
         LRO.Factorization{T,SparseVector{T,Int},LRO.One{T}}
     else
-        SparseMatrixCSC{T,Int64}
+        SparseMatrixCSC{T,Int}
     end
     @test LRO.dual_model(b.model).C isa Vector{F}
     # The rank-one structure of the classic formulation is detected by the

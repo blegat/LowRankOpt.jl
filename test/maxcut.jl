@@ -59,7 +59,7 @@ function _test_maxcut(;
         unsafe_model = _backend(model)
         lro_model = unsafe_model.model
         solver = unsafe_model.solver
-        @test lro_model.C isa Vector{SparseMatrixCSC{T,Int64}}
+        @test lro_model.C isa Vector{SparseMatrixCSC{T,Int}}
         F = if one_hot
             typeof(LRO.one_hot(T, 1, 4))
         elseif sparse
@@ -84,7 +84,7 @@ function _test_maxcut(;
             FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int64},Base.OneTo{Int64}}},
         }
         @test only(lro_model.A).values isa
-              LRO.SparseBlockCoefficients{SparseMatrixCSC{T,Int64}}
+              LRO.SparseBlockCoefficients{SparseMatrixCSC{T,Int}}
         solver = unsafe_backend(model).solver
         LRO.BurerMonteiro.set_rank!(solver.model, LRO.MatrixIndex(1), 4)
         @test solver.model.dim.ranks == [4]

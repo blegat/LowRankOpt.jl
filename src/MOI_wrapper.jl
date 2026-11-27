@@ -188,14 +188,14 @@ function MOI.optimize!(model::Optimizer)
 end
 
 mutable struct _MatrixBuilder{T}
-    I::Vector{Int64}
-    J::Vector{Int64}
+    I::Vector{Int}
+    J::Vector{Int}
     V::Vector{T}
     d::Int64
     # TODO If both sparse and dense are added, we should keep them separate from each other
     fact::Union{Nothing,Factorization{T}}
     function _MatrixBuilder{T}(d) where {T}
-        return new{T}(Int64[], Int64[], T[], d, nothing)
+        return new{T}(Int[], Int[], T[], d, nothing)
     end
 end
 

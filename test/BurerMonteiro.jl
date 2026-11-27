@@ -167,7 +167,7 @@ function test_trace()
     optimize!(model)
     @test termination_status(model) == MOI.ITERATION_LIMIT
     nlp = LRO.dual_model(unsafe_backend(model).model)
-    @test nlp.C isa Vector{SparseMatrixCSC{T,Int64}}
+    @test nlp.C isa Vector{SparseMatrixCSC{T,Int}}
     @test nlp.C[1] == [3 1; 1 4]
     @test only(nlp.A).values isa
           LRO.SparseBlockCoefficients{LRO.Factorization{T,Matrix{T},Vector{T}}}

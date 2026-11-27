@@ -32,7 +32,7 @@ function _test_zero_Ai(
     b = _backend(model)
     T = Float64
     Z = FillArrays.Zeros{T,2,Tuple{Base.OneTo{Int64},Base.OneTo{Int64}}}
-    S = SparseArrays.SparseMatrixCSC{T,Int64}
+    S = SparseArrays.SparseMatrixCSC{T,Int}
     @test b.model.C isa Vector{matrix_in_objective ? S : Z}
     if all_zero
         @test isempty(b.model.A)
