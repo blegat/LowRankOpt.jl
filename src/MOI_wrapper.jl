@@ -228,15 +228,19 @@ function _coefficient_component(
     n,
     msizes,
 ) where {M<:AbstractMatrix}
-    ids = sort!(unique(first(entry) for entry in entries))
-    slots = Dict(i => k for (k, i) in enumerate(ids))
+    # The entries are sorted by block then by variable.
+    ids = unique(first(entry) for entry in entries)
     T = eltype(M)
-    columns = [Dict{Int,M}() for i in ids]
+    rowval = [Int[] for _ in ids]
+    nzval = [M[] for _ in ids]
     for (i, j, matrix) in entries
-        columns[slots[i]][j] = matrix::M
+        slot = searchsortedfirst(ids, i)
+        push!(rowval[slot], j)
+        push!(nzval[slot], matrix::M)
     end
     values = SparseBlockCoefficients(
-        columns,
+        rowval,
+        nzval,
         _ZerosMatrix{T}[
             FillArrays.Zeros{T}(Int(msizes[i]), Int(msizes[i])) for i in ids
         ],
@@ -262,11 +266,15 @@ function _coefficient_data(
             isnothing(constant) ? FillArrays.Zeros{T}(msizes[i], msizes[i]) :
             _instantiate(constant),
         )
-        for (j, builder) in builders
+        # Visit the variables in increasing order so that the entries are
+        # sorted by block then by variable, as needed by
+        # `_coefficient_component`. This also allocates the matrices in the
+        # order in which the products visit them.
+        for j in sort!(collect(keys(builders)))
             if j == 1
                 continue
             end
-            matrix = _instantiate(builder)
+            matrix = _instantiate(builders[j])
             if _matrix_iszero(matrix)
                 continue
             end

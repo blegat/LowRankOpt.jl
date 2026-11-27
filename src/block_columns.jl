@@ -12,9 +12,8 @@ The block identifiers must be strictly increasing. Other blocks have no
 contribution. Missing blocks are skipped, without requiring `zero(M)` for
 the matrix element type `M`.
 
-Constraints are rows and stored PSD blocks are columns. Dense `values`
-keep each block's coefficients contiguous; internal sparse storage can
-also omit absent variable coefficients within a stored block.
+Constraints are rows and stored PSD blocks are columns, so each block's
+constraint matrices are contiguous.
 
 For example, with `n` equality constraints and three PSD blocks,
 `BlockColumns([1, 3], values, 3)` stores an `n × 2` matrix of coefficients.
@@ -88,8 +87,10 @@ end
 
 @inline _sum_columns(f, ::Tuple{}, i, init) = init
 @inline function _sum_columns(f, components::Tuple, i, init)
-    column = _block_column(first(components), i)
-    value = isnothing(column) ? init : init + f(column)
+    component = first(components)
+    slot = _block_slot(component, i)
+    value =
+        iszero(slot) ? init : init + f(_stored_values(component.values, slot))
     return _sum_columns(f, Base.tail(components), i, value)
 end
 
@@ -121,8 +122,7 @@ function _rank_one_factors(
     n = size(values, 1)
     U = zeros(T, n, d)
     w = zeros(T, n)
-    for j in 1:n
-        A = values[j, slot]
+    for (j, A) in _stored_column(values, slot)
         if !(A isa FillArrays.Zeros)
             U[j, :] = A.factor
             w[j] = only(A.scaling)
@@ -166,21 +166,38 @@ function _matrix_components(A::AbstractMatrix)
     return Tuple(_typed_component(M, A) for M in types)
 end
 
-# Sparse variable coefficients within each stored PSD block. Each missing
-# coefficient shares its block's zero matrix instead of storing a dense grid.
+# Sparse variable coefficients within each stored PSD block, in the layout of
+# `SparseArrays.SparseMatrixCSC`: the coefficients of the block in `slot` are
+# `nzval[slot]`, for the strictly increasing variables `rowval[slot]`. Each
+# missing coefficient shares its block's zero matrix as `SparseMatrixCSC`
+# would need `zero(M)`.
 struct SparseBlockCoefficients{M,T} <: AbstractMatrix{Union{M,_ZerosMatrix{T}}}
-    columns::Vector{Dict{Int,M}}
+    rowval::Vector{Vector{Int}}
+    nzval::Vector{Vector{M}}
     zeros::Vector{_ZerosMatrix{T}}
     nrows::Int
 end
-Base.size(A::SparseBlockCoefficients) = (A.nrows, length(A.columns))
+Base.size(A::SparseBlockCoefficients) = (A.nrows, length(A.nzval))
 function Base.getindex(A::SparseBlockCoefficients, i::Int, j::Int)
     @boundscheck checkbounds(A, i, j)
-    return get(A.columns[j], i, A.zeros[j])
+    rows = A.rowval[j]
+    k = searchsortedfirst(rows, i)
+    if k <= length(rows) && rows[k] == i
+        return A.nzval[j][k]
+    end
+    return A.zeros[j]
 end
-# Index by row or iterate over the coefficients stored in this column.
-_stored_column(A::AbstractMatrix, slot) = view(A, :, slot)
-_stored_column(A::SparseBlockCoefficients, slot) = A.columns[slot]
+
+# Variables and coefficients stored in this column. Dense storage stores
+# every variable while sparse storage omits the zero coefficients.
+_stored_rows(A::AbstractMatrix, slot) = axes(A, 1)
+_stored_rows(A::SparseBlockCoefficients, slot) = A.rowval[slot]
+_stored_values(A::AbstractMatrix, slot) = view(A, :, slot)
+_stored_values(A::SparseBlockCoefficients, slot) = A.nzval[slot]
+# Iterate the pairs `(j, Aⱼ)` of the column.
+function _stored_column(A::AbstractMatrix, slot)
+    return zip(_stored_rows(A, slot), _stored_values(A, slot))
+end
 
 function _coefficient_sum(::Tuple{}, j, i, d, ::Type{T}) where {T}
     return FillArrays.Zeros{T}(d, d)

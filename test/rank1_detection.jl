@@ -253,7 +253,7 @@ function test_option_dense_condition()
         buffer = LRO.ModelWorkspace(solver.workspace)
         @test buffer === solver.workspace
         component = only(buffer.schur_buffer[3])
-        n = only(component.last_nonzero)
+        n = length(only(component.permutation))
         @test n > 0
         @test only(component.last_dense) == (dense ? n : 0)
     end

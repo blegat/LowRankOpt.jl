@@ -180,8 +180,8 @@ function _coefficient_buffer(components, i, d, nvar, ::Type{T}) where {T}
     # Components contribute to the same sparse columns; `sparse` adds
     # duplicate entries, including overlaps between representations.
     _foreach_column(components, i) do values, slot
-        for j in axes(values, 1)
-            offset = _add_vec!(I, J, V, j, offset, values[j, slot])
+        for (j, A) in _stored_column(values, slot)
+            offset = _add_vec!(I, J, V, j, offset, A)
         end
     end
     A = SparseArrays.sparse(I, J, V, d^2, nvar)
@@ -415,8 +415,7 @@ function buffer_for_jprod(
     pattern = FillArrays.Zeros{T}(d, d)
     dense = false
     _foreach_column(model.A, mat_idx.value) do values, slot
-        for j in axes(values, 1)
-            A = values[j, slot]
+        for A in _stored_values(values, slot)
             if !(A isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros})
                 dense = true
                 break
@@ -511,8 +510,8 @@ function _coefficient_product!(
 end
 
 function _add_sparse_coefficient_product!(buffer, values, slot, y, α)
-    for j in eachindex(y)
-        _add_mul!(buffer, values[j, slot], α * y[j])
+    for (j, A) in _stored_column(values, slot)
+        _add_mul!(buffer, A, α * y[j])
     end
     return nothing
 end
