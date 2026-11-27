@@ -61,9 +61,8 @@ function Model(
             )
         end
         for (k, i) in enumerate(component.block_ids),
-            j in axes(component.values, 1)
+            coefficient in _stored_values(component.values, k)
 
-            coefficient = component.values[j, k]
             if !(coefficient isa AbstractMatrix{T})
                 throw(
                     ArgumentError(
@@ -113,8 +112,7 @@ function Model(
         constraint[MatrixIndex(i)] .= C[i]
         offset = dim.offsets[i]
         _foreach_column(components, i) do coefficients, slot
-            for j in axes(coefficients, 1)
-                coefficient = coefficients[j, slot]
+            for (j, coefficient) in _stored_column(coefficients, slot)
                 if _matrix_iszero(coefficient)
                     continue
                 end

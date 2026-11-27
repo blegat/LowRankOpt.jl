@@ -121,29 +121,29 @@ end
 # dedicated low-nnz paths below, also following [FKN97].
 # /!\ L and R need to be symmetric
 function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
-    σ = workspace.permutation
-    column = view(workspace.component.values, :, slot)
-    # The constraints that are zero on this block are the last ones of `σ`
-    n = workspace.last_nonzero[slot]
+    σ = workspace.permutation[slot]
+    column = workspace.coefficients[slot]
+    # The constraints that are zero on this block are not in `σ`
+    n = length(σ)
 
     for ii in 1:n
-        i = σ[ii, slot]
-        Ai = column[i]
+        i = σ[ii]
+        Ai = column[ii]
         if ii <= workspace.last_dense[slot]
             _sparse_sandwich!(WAW, AW, L, R, Ai)
-            I = view(σ, ii:n, slot)
+            I = view(σ, ii:n)
             _add_coefficient_adjoint!(
                 WAW,
                 view(H, I, i),
                 view(workspace.jacobian[slot], :, I),
             )
             for jj in (ii+1):n
-                j = σ[jj, slot]
+                j = σ[jj]
                 H[i, j] = H[j, i]
             end
         elseif _nnz(Ai) > 1
             @inbounds for jj in ii:n
-                j = σ[jj, slot]
+                j = σ[jj]
                 ttt = _dot(workspace.jacobian[slot], i, j, L, R)
                 H[i, j] += ttt
                 if i != j
@@ -157,8 +157,9 @@ function _add_sparse_component!(workspace, slot, L, R, AW, WAW, H)
             # As we sort the matrices in decreasing `nnz` order, the rest of
             # the matrices have only one entry
             @inbounds for jj in ii:n
-                j = σ[jj, slot]
-                Ajjj = column[j]
+                j = σ[jj]
+                Ajjj = column[jj]
+
                 iiijAj = jjjjAj = only(SparseArrays.rowvals(Ajjj))
                 vvvj = only(SparseArrays.nonzeros(Ajjj))
                 ttt = vvvi * L[iiiiAi, iiijAj] * R[jjjjAj, jjjiAi] * vvvj
@@ -241,8 +242,7 @@ function _add_scalar_schur_complement!(
 end
 
 function _add_sparse_eval_column!(result, values, slot, Ay, L, R)
-    for k in eachindex(result)
-        A = values[k, slot]
+    for (k, A) in _stored_column(values, slot)
         if !iszero(_nnz(A))
             result[k] += _dot(A, Ay, L, R)
         end
@@ -392,12 +392,16 @@ end
 # model. A rank-one component can coexist with arbitrary other components.
 _nnz(A::AbstractMatrix) = count(!iszero, A)
 
-struct _GeneralSchurComponent{C,J}
+# For each block, `permutation` gives the constraints with a nonzero
+# coefficient in the order `σ` of `_dense_permutation` and `coefficients` the
+# corresponding matrices, so `_add_sparse_component!` visits them without
+# looking them up in the component.
+struct _GeneralSchurComponent{C,J,V}
     component::C
     jacobian::J
-    permutation::Matrix{Int}
+    permutation::Vector{Vector{Int}}
+    coefficients::Vector{V}
     last_dense::Vector{Int}
-    last_nonzero::Vector{Int}
     sparse::Vector{Bool}
 end
 
@@ -526,12 +530,14 @@ function _schur_component(
     indices = Vector{Int}[]
     weights = zeros(T, n, p)
     for (slot, i) in enumerate(component.block_ids)
-        index = zeros(Int, n)
-        for j in 1:n
-            k, weights[j, slot] = _one_hot(component.values[j, slot])
-            # The index of zero entries does not matter as their weight is
-            # zero, we choose it so that it does not prevent `Base.OneTo`.
-            index[j] = iszero(k) ? (j <= model.msizes[i] ? j : 1) : k
+        # The index of zero entries does not matter as their weight is
+        # zero, we choose it so that it does not prevent `Base.OneTo`.
+        index = [j <= model.msizes[i] ? j : 1 for j in 1:n]
+        for (j, A) in _stored_column(component.values, slot)
+            k, weights[j, slot] = _one_hot(A)
+            if !iszero(k)
+                index[j] = k
+            end
         end
         push!(indices, index)
     end
@@ -571,17 +577,17 @@ function _schur_component(
     dense_condition,
 ) where {T}
     n, p = size(component.values)
-    permutation = Matrix{Int}(undef, n, p)
+    positions = Vector{Int}[]
     last_dense = zeros(Int, p)
-    last_nonzero = zeros(Int, p)
     sparse = Vector{Bool}(undef, p)
     jacobian = SparseArrays.SparseMatrixCSC{T,Int64}[]
     for (slot, i) in enumerate(component.block_ids)
-        column = view(component.values, :, slot)
+        column = _stored_values(component.values, slot)
         counts = _nnz.(column)
-        permutation[:, slot], last_dense[slot] =
+        σ, last_dense[slot] =
             _dense_permutation(dense_condition, counts, model.msizes[i])
-        last_nonzero[slot] = count(!iszero, counts)
+        # The zero coefficients are the last ones of `σ`
+        push!(positions, σ[1:count(!iszero, counts)])
         sparse[slot] = all(
             A -> A isa Union{SparseArrays.SparseMatrixCSC,FillArrays.Zeros},
             column,
@@ -591,12 +597,13 @@ function _schur_component(
             _coefficient_buffer((component,), i, model.msizes[i], n, T),
         )
     end
+    values = component.values
     return _GeneralSchurComponent(
         component,
         jacobian,
-        permutation,
+        [_stored_rows(values, slot)[positions[slot]] for slot in 1:p],
+        [_stored_values(values, slot)[positions[slot]] for slot in 1:p],
         last_dense,
-        last_nonzero,
         sparse,
     )
 end
@@ -768,12 +775,15 @@ function _add_schur_pair!(
         _add_sparse_component!(a, ia, L, R, AW, WAW, H)
         return nothing
     end
-    ca, cb = view(a.component.values, :, ia), view(b.component.values, :, ib)
-    for j in eachindex(ca)
-        iszero(_nnz(ca[j])) && continue
-        _sandwich!(WAW, AW, L, R, ca[j], work)
-        for k in (same ? j : 1):length(cb)
-            value = _coefficient_dot(cb[k], WAW)
+    for (j, Aj) in _stored_column(a.component.values, ia)
+        iszero(_nnz(Aj)) && continue
+        _sandwich!(WAW, AW, L, R, Aj, work)
+        for (k, Bk) in _stored_column(b.component.values, ib)
+            if same && k < j
+                continue
+            end
+            value = _coefficient_dot(Bk, WAW)
+
             H[k, j] += value
             if !same || k != j
                 H[j, k] += value
@@ -1021,11 +1031,11 @@ function _add_schur_pair!(
         _add_sparse_rank_one_pair!(a, ia, b.jacobian[ib], left, right, H)
         return nothing
     end
-    column = view(b.component.values, :, ib)
     for (j, row) in enumerate(a.indices[ia])
         u, v = view(right, j, :), view(left, j, :)
-        for k in eachindex(column)
-            value = a.weights[ia][j] * _bilinear_form(u, column[k], v)
+        for (k, Bk) in _stored_column(b.component.values, ib)
+            value = a.weights[ia][j] * _bilinear_form(u, Bk, v)
+
             H[row, k] += value
             H[k, row] += value
         end

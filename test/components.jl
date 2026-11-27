@@ -332,7 +332,10 @@ end
         j in 1:n
     ]
     @test NLPModels.jtprod!(model, y, _flat_cone(x, model), similar(Jtx)) ≈ Jtx
+    dual = LRO.dual_model(model)
     for i in LRO.matrix_indices(model)
+        @test LRO.add_jprod!(dual, x[i], zeros(n), i) ≈
+              [dot(full[i.value, j], x[i]) for j in 1:n]
         @test Jy[i] ≈ -sum(y[j] * full[i.value, j] for j in 1:n)
         for j in 1:n
             @test _coefficient(model, j, i) ≈ full[i.value, j]

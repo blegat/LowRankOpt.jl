@@ -253,7 +253,7 @@ function test_option_dense_condition()
         buffer = LRO.ModelWorkspace(solver.workspace)
         @test buffer === solver.workspace
         component = only(buffer.schur_buffer[3])
-        n = only(component.last_nonzero)
+        n = length(only(component.permutation))
         @test n > 0
         @test only(component.last_dense) == (dense ? n : 0)
     end
@@ -262,7 +262,8 @@ end
 
 function test_option_disabled_keeps_sparse()
     model = _build(false)
-    @test eltype(only(model.A).values) <: SparseMatrixCSC
+    @test only(model.A).values isa
+          LRO.SparseBlockCoefficients{<:SparseMatrixCSC}
     return
 end
 
@@ -279,14 +280,16 @@ end
 
 function test_option_default_detects_rank_one()
     model = _build(nothing)
-    @test eltype(only(model.A).values) <: LRO.Factorization
+    @test only(model.A).values isa
+          LRO.SparseBlockCoefficients{<:LRO.Factorization}
     return
 end
 
 function test_option_converts_to_rank_one()
     sparse_model = _build(false)
     rank_one_model = _build(true)
-    @test eltype(only(rank_one_model.A).values) <: LRO.Factorization
+    @test only(rank_one_model.A).values isa
+          LRO.SparseBlockCoefficients{<:LRO.Factorization}
     # `C` (the objective block) is not rank one, so it stays as is.
     @test eltype(rank_one_model.C) <: SparseMatrixCSC
     # The conversion is exact: same matrices, different representation.
@@ -304,7 +307,8 @@ end
 function test_option_default_detects_one_hot()
     sparse_model = _build(false)
     model = _build(false; detect_one_hot = nothing)
-    @test eltype(only(model.A).values) <: LRO._OneHotFactorization
+    @test only(model.A).values isa
+          LRO.SparseBlockCoefficients{<:LRO._OneHotFactorization}
     @test eltype(model.C) <: SparseMatrixCSC
     @test all(
         j ->
@@ -323,7 +327,8 @@ end
 # The one-hot structure is more specific than rank one.
 function test_one_hot_before_rank_one()
     model = _build(true; detect_one_hot = true)
-    @test eltype(only(model.A).values) <: LRO._OneHotFactorization
+    @test only(model.A).values isa
+          LRO.SparseBlockCoefficients{<:LRO._OneHotFactorization}
     return
 end
 

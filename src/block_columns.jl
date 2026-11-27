@@ -13,8 +13,7 @@ contribution. Missing blocks are skipped, without requiring `zero(M)` for
 the matrix element type `M`.
 
 Constraints are rows and stored PSD blocks are columns, so each block's
-constraint matrices are contiguous. This container stores whole columns;
-it does not represent sparsity within a column.
+constraint matrices are contiguous.
 
 For example, with `n` equality constraints and three PSD blocks,
 `BlockColumns([1, 3], values, 3)` stores an `n × 2` matrix of coefficients.
@@ -22,15 +21,15 @@ It contributes to blocks 1 and 3 and contributes nothing to block 2.
 A model can sum this with another component by passing `(component1,
 component2)` as its constraint data.
 """
-struct BlockColumns{M<:AbstractMatrix}
+struct BlockColumns{M<:AbstractMatrix,V<:AbstractMatrix{M}}
     block_ids::Vector{Int}
-    values::Matrix{M}
+    values::V
     nblocks::Int
     function BlockColumns(
         block_ids,
-        values::Matrix{M},
+        values::V,
         nblocks::Integer,
-    ) where {M<:AbstractMatrix}
+    ) where {M<:AbstractMatrix,V<:AbstractMatrix{M}}
         ids = Int.(block_ids)
         length(ids) == size(values, 2) || throw(
             DimensionMismatch(
@@ -45,7 +44,7 @@ struct BlockColumns{M<:AbstractMatrix}
                 "block identifiers must be strictly increasing and within 1:nblocks",
             ),
         )
-        return new{M}(ids, values, Int(nblocks))
+        return new{M,V}(ids, values, Int(nblocks))
     end
 end
 
@@ -88,8 +87,10 @@ end
 
 @inline _sum_columns(f, ::Tuple{}, i, init) = init
 @inline function _sum_columns(f, components::Tuple, i, init)
-    column = _block_column(first(components), i)
-    value = isnothing(column) ? init : init + f(column)
+    component = first(components)
+    slot = _block_slot(component, i)
+    value =
+        iszero(slot) ? init : init + f(_stored_values(component.values, slot))
     return _sum_columns(f, Base.tail(components), i, value)
 end
 
@@ -121,8 +122,7 @@ function _rank_one_factors(
     n = size(values, 1)
     U = zeros(T, n, d)
     w = zeros(T, n)
-    for j in 1:n
-        A = values[j, slot]
+    for (j, A) in _stored_column(values, slot)
         if !(A isa FillArrays.Zeros)
             U[j, :] = A.factor
             w[j] = only(A.scaling)
@@ -164,6 +164,39 @@ function _matrix_components(A::AbstractMatrix)
     types =
         unique(typeof(value) for value in A if !(value isa FillArrays.Zeros))
     return Tuple(_typed_component(M, A) for M in types)
+end
+
+# Sparse variable coefficients within each stored PSD block, in the layout of
+# `SparseArrays.SparseMatrixCSC`: the coefficients of the block in `slot` are
+# `nzval[slot]`, for the strictly increasing variables `rowval[slot]`. Each
+# missing coefficient shares its block's zero matrix as `SparseMatrixCSC`
+# would need `zero(M)`.
+struct SparseBlockCoefficients{M,T} <: AbstractMatrix{Union{M,_ZerosMatrix{T}}}
+    rowval::Vector{Vector{Int}}
+    nzval::Vector{Vector{M}}
+    zeros::Vector{_ZerosMatrix{T}}
+    nrows::Int
+end
+Base.size(A::SparseBlockCoefficients) = (A.nrows, length(A.nzval))
+function Base.getindex(A::SparseBlockCoefficients, i::Int, j::Int)
+    @boundscheck checkbounds(A, i, j)
+    rows = A.rowval[j]
+    k = searchsortedfirst(rows, i)
+    if k <= length(rows) && rows[k] == i
+        return A.nzval[j][k]
+    end
+    return A.zeros[j]
+end
+
+# Variables and coefficients stored in this column. Dense storage stores
+# every variable while sparse storage omits the zero coefficients.
+_stored_rows(A::AbstractMatrix, slot) = axes(A, 1)
+_stored_rows(A::SparseBlockCoefficients, slot) = A.rowval[slot]
+_stored_values(A::AbstractMatrix, slot) = view(A, :, slot)
+_stored_values(A::SparseBlockCoefficients, slot) = A.nzval[slot]
+# Iterate the pairs `(j, Aⱼ)` of the column.
+function _stored_column(A::AbstractMatrix, slot)
+    return zip(_stored_rows(A, slot), _stored_values(A, slot))
 end
 
 function _coefficient_sum(::Tuple{}, j, i, d, ::Type{T}) where {T}

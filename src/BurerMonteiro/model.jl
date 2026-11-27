@@ -169,7 +169,7 @@ function buffer_for_jtprod(
     # Buffer selection runs only at setup; inspect every active component.
     row = AbstractMatrix{T}[]
     LRO._foreach_column(model.A, i.value) do values, slot
-        return append!(row, view(values, :, slot))
+        return append!(row, LRO._stored_values(values, slot))
     end
     C = model.C[i.value]
     if any(A -> A isa _LowRank, row) || C isa _LowRank
@@ -234,8 +234,7 @@ function add_jtprod!(
 end
 
 function _add_column_jtprod!(values, slot, workspace, X, y, JtV, α)
-    for j in eachindex(y)
-        A = values[j, slot]
+    for (j, A) in LRO._stored_column(values, slot)
         buffer = _buffer(workspace, A, X.factor)
         LRO.buffered_mul!(JtV.factor, A, X.factor, α * y[j], true, buffer)
     end
