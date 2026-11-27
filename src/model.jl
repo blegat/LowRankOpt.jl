@@ -7,9 +7,9 @@ Base.broadcastable(model::AbstractModel) = Ref(model)
 
 Affine conic model with ordinary scalar decision variables. The model owns
 its coefficient data and NLPModels metadata. Constraint outputs are ordered
-as nonnegative rows, equality rows, and PSD blocks identified by `dim`.
-The PSD entries have free componentwise metadata bounds; positive
-semidefiniteness is a block constraint.
+as nonnegative rows, equality rows, SOC blocks, and PSD blocks identified by
+`dim`. SOC and PSD entries have free componentwise metadata bounds because
+cone membership applies to the whole block.
 
 The objective is `-b' * x + objective_constant`; scalar constraints are
 `d_lin - C_lin' * x ≥ 0` and `d_eq - C_eq' * x = 0`. Pass the equality
@@ -173,6 +173,7 @@ end
 
 primal_model(model::Model) = model
 num_scalars(model::Model) = model.dim.num_scalars
+num_second_order_cones(model::Model) = num_second_order_cones(model.dim)
 num_matrices(model::Model) = length(model.C)
 function matrix_indices(model::Model)
     return MOI.Utilities.LazyMap{MatrixIndex}(

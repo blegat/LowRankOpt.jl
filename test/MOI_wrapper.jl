@@ -13,16 +13,18 @@ import SolverCore
 # A native solver uses the default result accessors, unlike Burer-Monteiro.
 struct NativeSolver{S} <: SolverCore.AbstractOptimizationSolver
     stats::S
+    dim::LRO.ConeDimensions
 end
 
 LRO.support_cone(::Type{NativeSolver}, ::Type{MOI.Zeros}) = true
+LRO.support_cone(::Type{NativeSolver}, ::Type{MOI.SecondOrderCone}) = true
 
 function MOI.get(solver::NativeSolver, ::LRO.DualSolution)
-    return LRO.ShapedConeVector(-solver.stats.multipliers, Matrix{Float64}[])
+    return LRO.VectorizedConeVector(-solver.stats.multipliers, solver.dim)
 end
 
 function NativeSolver(model::LRO.Model)
-    return NativeSolver(SolverCore.GenericExecutionStats(model))
+    return NativeSolver(SolverCore.GenericExecutionStats(model), model.dim)
 end
 
 function SolverCore.solve!(solver::NativeSolver, ::LRO.Model)
@@ -96,6 +98,32 @@ end
     end
 end
 
+@testset "A solver can opt into native SOC blocks" begin
+    model = Model(
+        optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver),
+    )
+    @variable(model, x)
+    @variable(model, y)
+    c = @constraint(model, [x + y, 3, 4] in SecondOrderCone())
+    optimize!(model)
+    opt = unsafe_backend(model)
+    @test opt.model.dim.second_order_dimensions == [3]
+    @test isempty(opt.model.msizes)
+    @test LRO.NLPModels.cons(opt.model, [2.0, 3.0]) == [5, 3, 4]
+    SolverCore.set_constraint_multipliers!(opt.solver.stats, [-1.0, 0.6, 0.8])
+    @test dual(c) ≈ [1, -0.6, -0.8]
+    @test_throws MOI.SetAttributeNotAllowed MOI.set(
+        opt,
+        MOI.RawOptimizerAttribute("solver"),
+        LRO.BurerMonteiro.Solver,
+    )
+    @test_throws ArgumentError LRO.BurerMonteiro.Solver(
+        opt.model;
+        sub_solver = nothing,
+        ranks = Int[],
+    )
+end
+
 @testset "Unbridged copy requires equality support" begin
     src = MOI.Utilities.Model{Float64}()
     x = MOI.add_variable(src)
@@ -159,6 +187,40 @@ end
         @test dual_objective_value(model) ==
               (sense == MOI.MIN_SENSE ? 1.0 : 3.0)
     end
+end
+
+@testset "Native solver infeasibility certificates" begin
+    factory = optimizer_with_attributes(LRO.Optimizer, "solver" => NativeSolver)
+    for sense in (MOI.MIN_SENSE, MOI.MAX_SENSE)
+        model = Model(factory)
+        @variable(model, x)
+        @variable(model, y)
+        @objective(model, Min, (sense == MOI.MIN_SENSE ? -1 : 1) * (x + y) + 7)
+        set_objective_sense(model, sense)
+        optimize!(model)
+        stats = unsafe_backend(model).solver.stats
+        SolverCore.set_status!(stats, :unbounded)
+        SolverCore.set_solver_specific!(stats, :primal_certificate, true)
+        @test termination_status(model) == MOI.DUAL_INFEASIBLE
+        @test primal_status(model) == MOI.INFEASIBILITY_CERTIFICATE
+        @test [value(x), value(y)] == [2, 3]
+        @test objective_value(model) == (sense == MOI.MIN_SENSE ? -5 : 5)
+    end
+
+    model = Model(factory)
+    @variable(model, x[1:2])
+    c = @constraint(model, [sum(x) - 1, -sum(x)] in Nonnegatives())
+    @objective(model, Min, 7)
+    optimize!(model)
+    stats = unsafe_backend(model).solver.stats
+    SolverCore.set_status!(stats, :infeasible)
+    SolverCore.set_constraint_multipliers!(stats, [-1.0, -1.0])
+    SolverCore.set_solver_specific!(stats, :dual_certificate, true)
+    SolverCore.set_solver_specific!(stats, :dual_objective, 1.0)
+    @test termination_status(model) == MOI.INFEASIBLE
+    @test dual_status(model) == MOI.INFEASIBILITY_CERTIFICATE
+    @test dual(c) == [1, 1]
+    @test dual_objective_value(model) == 1
 end
 
 end

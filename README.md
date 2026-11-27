@@ -243,7 +243,7 @@ julia> MOI.Utilities.distance_to_set(dual(con_ref), dual_set)
 
 `LowRankOpt.Model` exposes ordinary scalar decision variables through
 NLPModels. Its constraint vector contains nonnegative and equality rows first,
-then PSD blocks identified by `model.dim`. The PSD entries have free
+then SOC blocks and PSD blocks identified by `model.dim`. Cone entries have free
 componentwise metadata bounds; positive semidefiniteness is a block
 restriction handled by conic solvers.
 
@@ -288,3 +288,21 @@ Here `NLPModels.obj(model, x) = -dot(b, x)`. Scalar constraints are
 scalar decision variables. `DualSolution` queries refer to constraint
 multipliers in a `VectorizedConeVector` or `ShapedConeVector`, rather than
 being used as an indirect query for decision variables.
+
+
+Solvers opt into standard Lorentz cone blocks with
+`LowRankOpt.support_cone(::Type{MySolver}, ::Type{MOI.SecondOrderCone}) = true`.
+MOI bridges rotated cones and maps their multipliers back to the original
+coordinates. Cone vectors support `SOCIndex` alongside `ScalarIndex` and
+`MatrixIndex`.
+
+With Burer–Monteiro, MOI bridges SOC constraints before loading the solver.
+For example, a three-dimensional SOC becomes a 2×2 PSD block. Include a
+rank for that block in `ranks`. Use `JuMP.print_active_bridges(model)` to see
+the reformulation.
+
+Explicit dual conversion also provides a PSD arrow representation for
+callers that request it with `LowRankOpt.dual_model(model)`.
+Conic Farkas and recession certificates are checked independently of solver
+termination heuristics by `infeasibility_certificate` and
+`recession_certificate`.

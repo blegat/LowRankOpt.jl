@@ -12,6 +12,13 @@ function Solver(
     dense_condition = nothing,
     kws...,
 )
+    if src isa LRO.Model && !iszero(LRO.num_second_order_cones(src))
+        throw(
+            ArgumentError(
+                "Burer–Monteiro requires second-order cones to be bridged.",
+            ),
+        )
+    end
     model = Model{square_scalars}(LRO.dual_model(src), ranks)
     solver = sub_solver(model; kws...)
     stats = SolverCore.GenericExecutionStats(model)

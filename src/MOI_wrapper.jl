@@ -28,6 +28,7 @@ const OptimizerCache{T} = MOI.Utilities.GenericModel{
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     solver::Union{Nothing,SolverCore.AbstractOptimizationSolver}
     model::Union{Nothing,Model{T}}
+    soc_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
     lmi_id::Dict{MOI.ConstraintIndex{VAF{T}},Int64}
     lin_cones::Union{Nothing,LinearCones{T}}
     constraint_sets::Vector{Type}
@@ -40,6 +41,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
         return new{T}(
             nothing,
             nothing,
+            Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
             Dict{MOI.ConstraintIndex{VAF{T}},Int64}(),
             nothing,
             Type[],
@@ -65,6 +67,7 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.lin_cones = nothing
     empty!(optimizer.constraint_sets)
     empty!(optimizer.lmi_id)
+    empty!(optimizer.soc_id)
     optimizer.objective_constant = NaN
     return
 end
@@ -137,7 +140,8 @@ function MOI.supports(
     return true
 end
 
-const SUPPORTED_CONES = Union{NNG,ZRO,PSD,LOW}
+const SOC = MOI.SecondOrderCone
+const SUPPORTED_CONES = Union{NNG,ZRO,PSD,LOW,SOC}
 
 """
     support_cone(solver, S)
@@ -286,7 +290,7 @@ function _add_constraints(
     _,
     _,
     ::Type{VAF{T}},
-    ::Type{<:Union{NNG,ZRO}},
+    ::Type{<:Union{NNG,ZRO,SOC}},
 ) where {T}
     return
 end
@@ -443,6 +447,7 @@ function MOI.copy_to(
         objective_constant = dest.max_sense ? -dest.objective_constant :
                              dest.objective_constant,
     )
+    _copy_soc_constraints!(dest, src)
     # FIXME this does not work if an option is changed between `MOI.copy_to` and `MOI.optimize!`
     dest.lin_cones = deepcopy(Cd_lin.sets)
     append!(dest.constraint_sets, S for (_, S) in constraint_types)
@@ -547,6 +552,12 @@ end
 function MOI.get(optimizer::Optimizer, attr::MOI.PrimalStatus)
     if attr.result_index > MOI.get(optimizer, MOI.ResultCount())
         return MOI.NO_SOLUTION
+    elseif get(
+        optimizer.solver.stats.solver_specific,
+        :primal_certificate,
+        false,
+    )
+        return MOI.INFEASIBILITY_CERTIFICATE
     elseif MOI.get(optimizer, MOI.TerminationStatus()) in
            [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
@@ -565,6 +576,9 @@ function MOI.get(optimizer::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
         optimizer.model,
         MOI.get(optimizer.solver, PrimalSolution()),
     )
+    if get(optimizer.solver.stats.solver_specific, :primal_certificate, false)
+        val -= optimizer.model.objective_constant
+    end
     return optimizer.max_sense ? -val : val
 end
 
@@ -582,9 +596,10 @@ function MOI.get(
     attr::MOI.DualObjectiveValue,
 ) where {T}
     MOI.check_result_index_bounds(optimizer, attr)
-    val =
-        MOI.get(optimizer.solver, DualObjective()) +
-        optimizer.model.objective_constant
+    val = MOI.get(optimizer.solver, DualObjective())
+    if !get(optimizer.solver.stats.solver_specific, :dual_certificate, false)
+        val += optimizer.model.objective_constant
+    end
     return optimizer.max_sense ? -val : val
 end
 
@@ -594,6 +609,8 @@ function MOI.get(optimizer::Optimizer, attr::MOI.DualStatus)
     elseif MOI.get(optimizer, MOI.TerminationStatus()) in
            [MOI.OPTIMAL, MOI.LOCALLY_SOLVED]
         return MOI.FEASIBLE_POINT
+    elseif get(optimizer.solver.stats.solver_specific, :dual_certificate, false)
+        return MOI.INFEASIBILITY_CERTIFICATE
     elseif MOI.get(optimizer, MOI.TerminationStatus()) == MOI.DUAL_INFEASIBLE
         return MOI.INFEASIBLE_POINT
     else
@@ -644,4 +661,42 @@ function MOI.get(
     rows = MOI.Utilities.rows(optimizer.lin_cones, ci)
     sol = MOI.get(optimizer, DualSolution())
     return sol[ScalarIndex][rows]
+end
+
+function _copy_soc_constraints!(dest::Optimizer{T}, src) where {T}
+    rows, cols, values = Int[], Int[], T[]
+    constants, dimensions = T[], Int[]
+    for ci in MOI.get(src, MOI.ListOfConstraintIndices{VAF{T},SOC}())
+        func = MOI.get(src, MOI.CanonicalConstraintFunction(), ci)
+        offset = length(constants)
+        push!(dimensions, length(func.constants))
+        dest.soc_id[ci] = length(dimensions)
+        append!(constants, func.constants)
+        for term in func.terms
+            push!(rows, offset + term.output_index)
+            push!(cols, term.scalar_term.variable.value)
+            push!(values, term.scalar_term.coefficient)
+        end
+    end
+    if !isempty(dimensions)
+        J = SparseArrays.sparse(
+            rows,
+            cols,
+            values,
+            length(constants),
+            dest.model.meta.nvar,
+        )
+        append_second_order_constraints!(dest.model, J, constants, dimensions)
+    end
+    return
+end
+
+function MOI.get(
+    optimizer::Optimizer{T},
+    attr::MOI.ConstraintDual,
+    ci::MOI.ConstraintIndex{VAF{T},SOC},
+) where {T}
+    MOI.check_result_index_bounds(optimizer, attr)
+    vector = MOI.get(optimizer, DualSolution())[SOCIndex(optimizer.soc_id[ci])]
+    return collect(vector)
 end

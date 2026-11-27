@@ -90,13 +90,14 @@ function dual_model(model::Model)
     if !isempty(model.d_eq)
         throw(ArgumentError("dual_model does not support scalar equalities."))
     end
+    costs, coefficients, sizes = lifted_soc_data(model)
     return DualModel(
         model,
-        model.C,
-        model.A,
+        costs,
+        coefficients,
         model.d_lin,
         model.C_lin,
-        model.msizes,
+        sizes,
     )
 end
 
